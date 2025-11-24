@@ -1,0 +1,403 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/*
+  MODELOS DE SEGURIDAD / SISTEMA
+*/
+
+model User {
+  user_id       String   @id
+  user_nombre   String
+  user_email    String   @unique
+  password      String
+  createdAt     DateTime
+  role          String   @default("user")
+  is_deleted    Boolean  @default(false)
+  created_at    DateTime? @default(now())
+  gym_id        String?
+  source_device String?
+  version       Int      @default(1)
+  updated_at    DateTime @default(now())
+  deleted_at    DateTime?
+
+  @@map("User")
+}
+
+model Gym {
+  gym_id     String        @id
+  codigo     String        @unique
+  nombre     String
+  direccion  String?
+  ciudad     String?
+  provincia  String?
+  pais       String?
+  timezone   String?       @default("America/Los_Angeles")
+  activo     Boolean       @default(true)
+  created_at DateTime      @default(now())
+  updated_at DateTime      @default(now())
+  deleted_at DateTime?
+
+  devices    Device[]
+  clientes   Cliente[]
+  pagos      PagoCliente[]
+
+  @@map("gym")
+}
+
+model Device {
+  device_id    String   @id
+  gym_id       String
+  gym          Gym      @relation(fields: [gym_id], references: [gym_id])
+  nombre       String
+  tipo         String   @default("BACKEND_OFFLINE")
+  descripcion  String?
+  ultima_ip    String?
+  last_seen_at DateTime?
+  // activo       Boolean  @default(true) -- Removed in favor of is_active
+  secret_key   String   @default("default_secret")
+  is_active    Boolean  @default(true)
+  last_login_at DateTime?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now())
+  deleted_at   DateTime?
+
+  @@map("device")
+}
+
+/*
+  TABLAS GLOBALES (NO POR GIMNASIO)
+*/
+
+model Moneda {
+  moneda_id     String  @id
+  moneda_nombre String
+  codigo        String  @unique
+  simbolo       String?
+  imagen        Bytes?
+  is_deleted    Boolean @default(false)
+  created_at    DateTime? @default(now())
+  version       Int     @default(1)
+  updated_at    DateTime @default(now())
+  deleted_at    DateTime?
+
+  planes_pago   PlanesPago[]
+  cuentas       Cuenta[]
+  pagos         PagoCliente[]
+  detalles_pago DetallePago[]
+
+  @@map("monedas")
+}
+
+model Nacionalidad {
+  nacionalidad_id     String  @id
+  nacionalidad_nombre String
+  codigo_iso          String  @unique
+  bandera             Bytes?
+  is_deleted          Boolean @default(false)
+  created_at          DateTime? @default(now())
+  version             Int     @default(1)
+  updated_at          DateTime @default(now())
+  deleted_at          DateTime?
+
+  clientes            Cliente[]
+
+  @@map("nacionalidades")
+}
+
+model TipoPago {
+  tipo_pago_id      String  @id
+  nombre_tipo_pago  String
+  is_deleted        Boolean @default(false)
+  created_at        DateTime? @default(now())
+  version           Int     @default(1)
+  updated_at        DateTime @default(now())
+  deleted_at        DateTime?
+
+  detalles_pago     DetallePago[]
+
+  @@map("tipo_pago")
+}
+
+model TipoCambio {
+  tipo_cambio_id   String       @id
+  moneda_id_base   String
+  moneda_id_target String
+  exchange_rate    Float
+  fecha_inicio     DateTime
+  fecha_expiracion DateTime?
+  activo           Boolean      @default(true)
+  is_deleted       Boolean      @default(false)
+  created_at       DateTime?    @default(now())
+  version          Int          @default(1)
+  updated_at       DateTime     @default(now())
+  deleted_at       DateTime?
+
+  detalles         DetallePago[]
+
+  @@map("tipo_cambio")
+}
+
+model Referencia {
+  referencia_id     String  @id
+  nombre_referencia String
+  is_deleted        Boolean @default(false)
+  created_at        DateTime? @default(now())
+  version           Int     @default(1)
+  updated_at        DateTime @default(now())
+  deleted_at        DateTime?
+
+  clientes          Cliente[]
+
+  @@map("referencia")
+}
+
+/*
+  TABLAS POR GIMNASIO
+*/
+
+model Horario {
+  horario_id     String   @id
+  nombre_horario String
+  hora_inicio    Int
+  hora_fin       Int
+  is_deleted     Boolean  @default(false)
+  created_at     DateTime? @default(now())
+  gym_id         String?
+  source_device  String?
+  version        Int      @default(1)
+  updated_at     DateTime @default(now())
+  deleted_at     DateTime?
+
+  clientes       Cliente[]
+
+  @@map("horario")
+}
+
+model PlanesPago {
+  id_planes_pago     String    @id
+  nombre_plan_pago   String?
+  importe_plan_pago  Float
+  duracion_plan_pago Int
+  activo             Boolean   @default(true)
+  moneda_id          String
+  is_deleted         Boolean   @default(false)
+  created_at         DateTime? @default(now())
+  gym_id             String?
+  source_device      String?
+  version            Int       @default(1)
+  updated_at         DateTime  @default(now())
+  deleted_at         DateTime?
+
+  moneda             Moneda    @relation(fields: [moneda_id], references: [moneda_id])
+  clientes           Cliente[]
+  pagos              PagoCliente[]
+
+  @@map("planes_pago")
+}
+
+model Cuenta {
+  cuenta_id     String   @id
+  nombre_cuenta String
+  moneda_id     String
+  is_deleted    Boolean  @default(false)
+  created_at    DateTime? @default(now())
+  gym_id        String?
+  source_device String?
+  version       Int      @default(1)
+  updated_at    DateTime @default(now())
+  deleted_at    DateTime?
+
+  moneda        Moneda   @relation(fields: [moneda_id], references: [moneda_id])
+  detalles_pago DetallePago[]
+
+  @@map("cuenta")
+}
+
+model Entrenador {
+  id_entrenador         String   @id
+  ci_entrenador         String   @unique
+  nombres_entrenador    String
+  apellidos_entrenador  String
+  sexo_entrenador       String
+  foto_entrenador       Bytes?
+  direccion_entrenador  String?
+  telefono_entrenador   Int?
+  correo_entrenador     String?
+  activo_entrenador     Boolean
+  fecha_incio_entrenador DateTime
+  is_deleted            Boolean  @default(false)
+  created_at            DateTime? @default(now())
+  gym_id                String?
+  source_device         String?
+  version               Int      @default(1)
+  updated_at            DateTime @default(now())
+  deleted_at            DateTime?
+
+  clientes              Cliente[]
+  pagos                 PagoCliente[]
+
+  @@map("entrenadores")
+}
+
+/*
+  ENTIDADES PRINCIPALES
+*/
+
+model ClientePeso {
+  cliente_peso_id String   @id
+  ci              String
+  fecha           DateTime
+  peso            Float
+  is_deleted      Boolean  @default(false)
+  created_at      DateTime? @default(now())
+  gym_id          String?
+  source_device   String?
+  version         Int      @default(1)
+  updated_at      DateTime @default(now())
+  deleted_at      DateTime?
+
+  cliente         Cliente? @relation(fields: [ci], references: [ci])
+
+  @@map("cliente_peso")
+}
+
+model Cliente {
+  ci               String   @id
+  nombres          String
+  apellidos        String
+  sexo             String
+  foto_cliente     Bytes?
+  cliente_peso_id  String
+  estatura_cliente Float
+  direccion        String?
+  telefono         Int?
+  nacionalidad_id  String
+  correo           String?
+  objetivo         String?
+  id_planes_pago   String
+  id_entrenador    String?
+  fecha_inicio     DateTime
+  fecha_fin        DateTime
+  activo           Boolean
+  id_horarios      String
+  referencia_id    String?
+  is_deleted       Boolean  @default(false)
+  created_at       DateTime? @default(now())
+  gym_id           String?
+  source_device    String?
+  version          Int      @default(1)
+  updated_at       DateTime @default(now())
+  deleted_at       DateTime?
+
+  nacionalidad     Nacionalidad @relation(fields: [nacionalidad_id], references: [nacionalidad_id])
+  plan_pago        PlanesPago   @relation(fields: [id_planes_pago], references: [id_planes_pago])
+  entrenador       Entrenador?  @relation(fields: [id_entrenador], references: [id_entrenador])
+  horario          Horario      @relation(fields: [id_horarios], references: [horario_id])
+  referencia       Referencia?  @relation(fields: [referencia_id], references: [referencia_id])
+  pesos            ClientePeso[]
+  asistencias      Asistencia[]
+  pagos            PagoCliente[]
+  gym              Gym?         @relation(fields: [gym_id], references: [gym_id])
+
+  @@map("cliente")
+}
+
+model Asistencia {
+  asistencia_id String   @id
+  ci           String
+  is_deleted   Boolean  @default(false)
+  created_at   DateTime? @default(now())
+  gym_id       String?
+  source_device String?
+  version      Int      @default(1)
+  updated_at   DateTime @default(now())
+  deleted_at   DateTime?
+
+  cliente      Cliente  @relation(fields: [ci], references: [ci])
+
+  @@map("asistencia")
+}
+
+model PagoCliente {
+  pago_cliente_id String   @id
+  ci              String
+  fecha           DateTime
+  monto_total     Float
+  id_entrenador   String?
+  id_planes_pago  String
+  moneda_id       String
+  is_deleted      Boolean  @default(false)
+  created_at      DateTime? @default(now())
+  gym_id          String?
+  source_device   String?
+  version         Int      @default(1)
+  updated_at      DateTime @default(now())
+  deleted_at      DateTime?
+
+  cliente         Cliente    @relation(fields: [ci], references: [ci])
+  entrenador      Entrenador? @relation(fields: [id_entrenador], references: [id_entrenador])
+  plan_pago       PlanesPago @relation(fields: [id_planes_pago], references: [id_planes_pago])
+  moneda          Moneda     @relation(fields: [moneda_id], references: [moneda_id])
+  detalles        DetallePago[]
+  gym             Gym?       @relation(fields: [gym_id], references: [gym_id])
+
+  @@map("pago_cliente")
+}
+
+model DetallePago {
+  detalle_pago_id String   @id
+  pago_cliente_id String
+  tipo_pago_id    String
+  moneda_id       String
+  cuenta_id       String?
+  cantidad        Float
+  tipo_cambio_id  String
+  is_deleted      Boolean  @default(false)
+  created_at      DateTime? @default(now())
+  gym_id          String?
+  source_device   String?
+  version         Int      @default(1)
+  updated_at      DateTime @default(now())
+  deleted_at      DateTime?
+
+  pago_cliente    PagoCliente @relation(fields: [pago_cliente_id], references: [pago_cliente_id])
+  tipo_pago       TipoPago    @relation(fields: [tipo_pago_id], references: [tipo_pago_id])
+  moneda          Moneda      @relation(fields: [moneda_id], references: [moneda_id])
+  cuenta          Cuenta?     @relation(fields: [cuenta_id], references: [cuenta_id])
+  tipo_cambio     TipoCambio  @relation(fields: [tipo_cambio_id], references: [tipo_cambio_id])
+
+  @@map("detalle_pago")
+}
+
+/*
+  TABLAS DE SINCRONIZACIÓN REMOTA
+*/
+
+model SyncLog {
+  id           Int      @id @default(autoincrement())
+  event_id     String   @unique
+  entidad      String
+  operacion    String
+  entidad_id   String
+  gym_id       String?
+  device_id    String?
+  payload_json String
+  created_at   DateTime @default(now())
+
+  @@map("sync_log")
+}
+
+model SyncClientState {
+  device_id           String   @id
+  last_server_sync_at DateTime?
+  last_upload_at      DateTime?
+  last_seen_at        DateTime?
+
+  @@map("sync_client_state")
+}

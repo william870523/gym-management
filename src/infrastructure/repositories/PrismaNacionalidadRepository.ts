@@ -1,0 +1,92 @@
+import type { Nacionalidad } from "../../domain/entities/Nacionalidad";
+import type { NacionalidadRepository } from "../../domain/repositories/NacionalidadRepository";
+import { prisma } from "../db/prismaClient";
+
+export class PrismaNacionalidadRepository implements NacionalidadRepository {
+    async upsertNacionalidad(data: Nacionalidad): Promise<void> {
+        await prisma.nacionalidad.upsert({
+            where: { nacionalidad_id: data.nacionalidad_id },
+            create: {
+                nacionalidad_id: data.nacionalidad_id,
+                nacionalidad_nombre: data.nacionalidad_nombre,
+                codigo_iso: data.codigo_iso,
+                bandera: data.bandera ? Buffer.from(data.bandera) : null,
+                version: data.version,
+                created_at: data.created_at ?? new Date(),
+                updated_at: new Date(),
+                deleted_at: null,
+                is_deleted: false
+            },
+            update: {
+                nacionalidad_nombre: data.nacionalidad_nombre,
+                codigo_iso: data.codigo_iso,
+                bandera: data.bandera ? Buffer.from(data.bandera) : null,
+                version: data.version,
+                updated_at: new Date(),
+                deleted_at: null,
+                is_deleted: false
+            }
+        });
+    }
+
+    async findAll(): Promise<Nacionalidad[]> {
+        const result = await prisma.nacionalidad.findMany({
+            where: { is_deleted: false }
+        });
+        return result.map(n => ({
+            ...n,
+            bandera: n.bandera ? new Uint8Array(n.bandera) : null
+        }));
+    }
+
+    async findById(id: string): Promise<Nacionalidad | null> {
+        const result = await prisma.nacionalidad.findUnique({
+            where: { nacionalidad_id: id, is_deleted: false }
+        });
+        if (!result) return null;
+        return {
+            ...result,
+            bandera: result.bandera ? new Uint8Array(result.bandera) : null
+        };
+    }
+
+    async create(data: Nacionalidad): Promise<void> {
+        await prisma.nacionalidad.create({
+            data: {
+                nacionalidad_id: data.nacionalidad_id,
+                nacionalidad_nombre: data.nacionalidad_nombre,
+                codigo_iso: data.codigo_iso,
+                bandera: data.bandera ? Buffer.from(data.bandera) : null,
+                version: data.version,
+                created_at: data.created_at ?? new Date(),
+                updated_at: new Date(),
+                deleted_at: null,
+                is_deleted: false
+            }
+        });
+    }
+
+    async update(id: string, data: Partial<Nacionalidad>): Promise<void> {
+        await prisma.nacionalidad.update({
+            where: { nacionalidad_id: id },
+            data: {
+                nacionalidad_nombre: data.nacionalidad_nombre,
+                codigo_iso: data.codigo_iso,
+                bandera: data.bandera ? Buffer.from(data.bandera) : undefined,
+                version: { increment: 1 },
+                updated_at: new Date()
+            }
+        });
+    }
+
+    async softDelete(id: string): Promise<void> {
+        await prisma.nacionalidad.update({
+            where: { nacionalidad_id: id },
+            data: {
+                is_deleted: true,
+                deleted_at: new Date(),
+                updated_at: new Date()
+            }
+        });
+    }
+}

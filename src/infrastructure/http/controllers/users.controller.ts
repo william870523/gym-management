@@ -47,13 +47,23 @@ export const createUser = async (c: Context) => {
             password: hashedPassword,
             user_id: crypto.randomUUID(),
             createdAt: new Date()
-        },
-        select: {
-            user_id: true, user_nombre: true, user_email: true, role: true,
-            createdAt: true, gym_id: true
         }
     });
-    return c.json(newItem, 201);
+
+    await prisma.syncLog.create({
+        data: {
+            event_id: crypto.randomUUID(),
+            entidad: "user",
+            operacion: "INSERT",
+            entidad_id: newItem.user_id,
+            gym_id: newItem.gym_id || "unknown",
+            device_id: null,
+            payload_json: JSON.stringify(newItem),
+        },
+    });
+
+    const { password, ...sanitized } = newItem;
+    return c.json(sanitized, 201);
 };
 
 export const updateUser = async (c: Context) => {
@@ -70,13 +80,23 @@ export const updateUser = async (c: Context) => {
     try {
         const updated = await prisma.user.update({
             where: { user_id: id },
-            data: dataToUpdate,
-            select: {
-                user_id: true, user_nombre: true, user_email: true, role: true,
-                createdAt: true, gym_id: true
-            }
+            data: dataToUpdate
         });
-        return c.json(updated);
+
+        await prisma.syncLog.create({
+            data: {
+                event_id: crypto.randomUUID(),
+                entidad: "user",
+                operacion: "UPDATE",
+                entidad_id: updated.user_id,
+                gym_id: updated.gym_id || "unknown",
+                device_id: null,
+                payload_json: JSON.stringify(updated),
+            },
+        });
+
+        const { password, ...sanitized } = updated;
+        return c.json(sanitized);
     } catch (e) {
         return c.json({ error: "Update failed or not found" }, 404);
     }
@@ -85,10 +105,23 @@ export const updateUser = async (c: Context) => {
 export const deleteUser = async (c: Context) => {
     const id = c.req.param("id");
     try {
-        await prisma.user.update({
+        const deleted = await prisma.user.update({
             where: { user_id: id },
             data: { is_deleted: true, deleted_at: new Date() }
         });
+
+        await prisma.syncLog.create({
+            data: {
+                event_id: crypto.randomUUID(),
+                entidad: "user",
+                operacion: "DELETE",
+                entidad_id: deleted.user_id,
+                gym_id: deleted.gym_id || "unknown",
+                device_id: null,
+                payload_json: JSON.stringify(deleted),
+            },
+        });
+
         return c.json({ ok: true });
     } catch (e) {
         return c.json({ error: "Delete failed or not found" }, 404);

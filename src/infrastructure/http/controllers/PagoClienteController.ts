@@ -1,5 +1,7 @@
 import type { Context } from "hono";
 import { PrismaPagoClienteRepository } from "../../repositories/PrismaPagoClienteRepository";
+import { prisma } from "../../db/prismaClient";
+import * as crypto from "crypto";
 import { CreatePagoClienteUseCase } from "../../../application/use-cases/pago_cliente/CreatePagoClienteUseCase";
 import { UpdatePagoClienteUseCase } from "../../../application/use-cases/pago_cliente/UpdatePagoClienteUseCase";
 import { DeletePagoClienteUseCase } from "../../../application/use-cases/pago_cliente/DeletePagoClienteUseCase";
@@ -58,6 +60,19 @@ export class PagoClienteController {
             const body = await c.req.json();
             const validated = CreatePagoClienteSchema.parse(body);
             const result = await this.createUseCase.execute(validated);
+
+            await prisma.syncLog.create({
+                data: {
+                    event_id: crypto.randomUUID(),
+                    entidad: "pago_cliente",
+                    operacion: "INSERT",
+                    entidad_id: result.pago_cliente_id,
+                    gym_id: result.gym_id,
+                    device_id: null,
+                    payload_json: JSON.stringify(result),
+                },
+            });
+
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {

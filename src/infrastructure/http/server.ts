@@ -13,7 +13,9 @@ import { Hono } from "hono";
 import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 import { securityHeaders } from "../../config/security";
+import { corsMiddleware } from "../../config/cors";
 import { authAdmin, authDevice } from "./middleware/auth.middleware";
+import { rateLimit, getClientIp } from "./middleware/rate-limit.middleware";
 import { authRoutes } from "./routes/auth.routes";
 import { syncRoutes } from "./routes/sync.routes";
 import { catalogsRoutes } from "./routes/catalogs.routes";
@@ -39,8 +41,37 @@ import { detallePagoRoutes } from "./routes/detalle_pago.routes";
 
 const app = new Hono();
 
+// Rate Limiters Configuration
+const authLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 5,
+  keyGenerator: (c) => getClientIp(c),
+  name: "auth"
+});
+
+const syncLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+  keyGenerator: (c) => {
+    const auth = c.get('auth');
+    return auth?.sub || auth?.id || `device:${getClientIp(c)}`;
+  },
+  name: "sync"
+});
+
+const adminLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  keyGenerator: (c) => {
+    const auth = c.get('auth');
+    return auth?.sub || auth?.id || `user:${getClientIp(c)}`;
+  },
+  name: "admin"
+});
+
 // Cabeceras de seguridad
 app.use("*", securityHeaders);
+app.use("*", corsMiddleware());
 
 // Logging simple
 app.use("*", async (c, next) => {
@@ -54,111 +85,135 @@ app.use("*", async (c, next) => {
 app.get("/health", (c) => c.json({ status: "ok-remote" }));
 
 // Rutas principales
-app.route("/auth", authRoutes());
+const authProtected = new Hono();
+authProtected.use("*", authLimiter);
+authProtected.route("/", authRoutes());
+app.route("/auth", authProtected);
 
 // Protected Routes - aplicar middleware dentro de grupos
 const syncProtected = new Hono();
 syncProtected.use("*", authDevice());
+syncProtected.use("*", syncLimiter);
 syncProtected.route("/", syncRoutes());
 app.route("/sync", syncProtected);
 
 const adminProtected = new Hono();
 adminProtected.use("*", authAdmin());
+adminProtected.use("*", adminLimiter);
 adminProtected.route("/", catalogsRoutes());
 app.route("/catalogs", adminProtected);
 
 const gymsProtected = new Hono();
 gymsProtected.use("*", authAdmin());
+gymsProtected.use("*", adminLimiter);
 gymsProtected.route("/", gymsRoutes());
 app.route("/gyms", gymsProtected);
 
 const clientsProtected = new Hono();
 clientsProtected.use("*", authAdmin());
+clientsProtected.use("*", adminLimiter);
 clientsProtected.route("/", clientsRoutes());
 app.route("/clients", clientsProtected);
 
 const trainersProtected = new Hono();
 trainersProtected.use("*", authAdmin());
+trainersProtected.use("*", adminLimiter);
 trainersProtected.route("/", trainersRoutes());
 app.route("/trainers", trainersProtected);
 
 const paymentsProtected = new Hono();
 paymentsProtected.use("*", authAdmin());
+paymentsProtected.use("*", adminLimiter);
 paymentsProtected.route("/", paymentsRoutes());
 app.route("/payments", paymentsProtected);
 
 const usersProtected = new Hono();
 usersProtected.use("*", authAdmin());
+usersProtected.use("*", adminLimiter);
 usersProtected.route("/", usersRoutes());
 app.route("/users", usersProtected);
 
 const nacionalidadesProtected = new Hono();
 nacionalidadesProtected.use("*", authAdmin());
+nacionalidadesProtected.use("*", adminLimiter);
 nacionalidadesProtected.route("/", nacionalidadRoutes);
 app.route("/nacionalidades", nacionalidadesProtected);
 
 const monedasProtected = new Hono();
 monedasProtected.use("*", authAdmin());
+monedasProtected.use("*", adminLimiter);
 monedasProtected.route("/", monedaRoutes);
 app.route("/monedas", monedasProtected);
 
 const tiposPagoProtected = new Hono();
 tiposPagoProtected.use("*", authAdmin());
+tiposPagoProtected.use("*", adminLimiter);
 tiposPagoProtected.route("/", tipoPagoRoutes);
 app.route("/tipos-pago", tiposPagoProtected);
 
 const tiposCambioProtected = new Hono();
 tiposCambioProtected.use("*", authAdmin());
+tiposCambioProtected.use("*", adminLimiter);
 tiposCambioProtected.route("/", tipoCambioRoutes);
 app.route("/tipos-cambio", tiposCambioProtected);
 
 const referenciasProtected = new Hono();
 referenciasProtected.use("*", authAdmin());
+referenciasProtected.use("*", adminLimiter);
 referenciasProtected.route("/", referenciaRoutes);
 app.route("/referencias", referenciasProtected);
 
 const horariosProtected = new Hono();
 horariosProtected.use("*", authAdmin());
+horariosProtected.use("*", adminLimiter);
 horariosProtected.route("/", horarioRoutes);
 app.route("/horarios", horariosProtected);
 
 const planesPagoProtected = new Hono();
 planesPagoProtected.use("*", authAdmin());
+planesPagoProtected.use("*", adminLimiter);
 planesPagoProtected.route("/", planesPagoRoutes);
 app.route("/planes-pago", planesPagoProtected);
 
 const cuentasProtected = new Hono();
 cuentasProtected.use("*", authAdmin());
+cuentasProtected.use("*", adminLimiter);
 cuentasProtected.route("/", cuentaRoutes);
 app.route("/cuentas", cuentasProtected);
 
 const entrenadoresProtected = new Hono();
 entrenadoresProtected.use("*", authAdmin());
+entrenadoresProtected.use("*", adminLimiter);
 entrenadoresProtected.route("/", entrenadorRoutes);
 app.route("/entrenadores", entrenadoresProtected);
 
 const clientesProtectedRoutes = new Hono();
 clientesProtectedRoutes.use("*", authAdmin());
+clientesProtectedRoutes.use("*", adminLimiter);
 clientesProtectedRoutes.route("/", clienteRoutes);
 app.route("/clientes", clientesProtectedRoutes);
 
 const clientesPesoProtected = new Hono();
 clientesPesoProtected.use("*", authAdmin());
+clientesPesoProtected.use("*", adminLimiter);
 clientesPesoProtected.route("/", clientePesoRoutes);
-app.route("/clientes-peso", clientesPesoProtected);
+app.route("/cliente-pesos", clientesPesoProtected);
 
 const asistenciasProtected = new Hono();
 asistenciasProtected.use("*", authAdmin());
+asistenciasProtected.use("*", adminLimiter);
 asistenciasProtected.route("/", asistenciaRoutes);
 app.route("/asistencias", asistenciasProtected);
 
 const pagosClienteProtected = new Hono();
 pagosClienteProtected.use("*", authAdmin());
+pagosClienteProtected.use("*", adminLimiter);
 pagosClienteProtected.route("/", pagoClienteRoutes);
 app.route("/pagos-cliente", pagosClienteProtected);
 
 const detallesPagoProtected = new Hono();
 detallesPagoProtected.use("*", authAdmin());
+detallesPagoProtected.use("*", adminLimiter);
 detallesPagoProtected.route("/", detallePagoRoutes);
 app.route("/detalles-pago", detallesPagoProtected);
 

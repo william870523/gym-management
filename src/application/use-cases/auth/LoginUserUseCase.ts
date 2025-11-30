@@ -7,7 +7,7 @@ import { env } from "../../../config/env";
 export class LoginUserUseCase {
     constructor(private userRepository: UserRepository) { }
 
-    async execute(dto: LoginUserDTO): Promise<{ token: string; user_id: string; role: string }> {
+    async execute(dto: LoginUserDTO): Promise<{ user_id: string; role: string; email: string }> {
         const user = await this.userRepository.findByEmail(dto.email);
         if (!user) {
             throw new Error("Invalid credentials");
@@ -18,12 +18,6 @@ export class LoginUserUseCase {
             throw new Error("Invalid credentials");
         }
 
-        const token = jwt.sign(
-            { user_id: user.user_id, role: user.role },
-            env.jwtSecret || "secret",
-            { expiresIn: "12h" }
-        );
-
-        return { token, user_id: user.user_id, role: user.role };
+        return { user_id: user.user_id, role: user.role, email: user.user_email };
     }
 }

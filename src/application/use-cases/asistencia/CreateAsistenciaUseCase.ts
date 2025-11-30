@@ -8,7 +8,7 @@ export class CreateAsistenciaUseCase {
 
     async execute(dto: CreateAsistenciaDTO): Promise<Asistencia> {
         const newAsistencia: Asistencia = {
-            asistencia_id: randomUUID(),
+            asistencia_id: dto.asistencia_id ?? randomUUID(),
             ci: dto.ci,
             gym_id: dto.gym_id ?? null,
             source_device: null,

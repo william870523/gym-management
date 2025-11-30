@@ -5,6 +5,10 @@ import { LoginUserUseCase } from "../../../application/use-cases/auth/LoginUserU
 import { LoginDeviceUseCase } from "../../../application/use-cases/auth/LoginDeviceUseCase";
 import { RegisterUserUseCase } from "../../../application/use-cases/auth/RegisterUserUseCase";
 import { LoginUserSchema, LoginDeviceSchema, RegisterUserSchema } from "../../../application/dtos/AuthDTO";
+import { JwtService } from "../../auth/jwt.service";
+import { auditSecurityEvent } from "../../logging/audit-logger";
+import { getClientIp } from "../middleware/rate-limit.middleware";
+import { IpBlocker } from "../middleware/ip-block.middleware";
 
 export class AuthController {
     private loginUserUseCase: LoginUserUseCase;
@@ -50,15 +54,57 @@ export class AuthController {
      * POST /auth/login
      */
     async loginUser(c: Context) {
+        const ip = getClientIp(c);
         try {
+            // 1. Verificar bloqueo IP
+            IpBlocker.checkBlock(c);
+
             const body = await c.req.json();
             const validated = LoginUserSchema.parse(body);
-            const result = await this.loginUserUseCase.execute(validated);
-            return c.json({ ok: true, ...result });
+            const user = await this.loginUserUseCase.execute(validated);
+
+            const token = JwtService.signAdminToken({
+                userId: user.user_id,
+                role: user.role,
+                email: user.email
+            });
+
+            auditSecurityEvent({
+                level: "INFO",
+                category: "AUTH",
+                action: "LOGIN_SUCCESS",
+                ip,
+                userId: user.user_id,
+                success: true
+            });
+
+            // 2. Login exitoso -> Resetear intentos
+            IpBlocker.resetAttempts(c);
+
+            return c.json({ ok: true, token, ...user });
         } catch (error: any) {
+            // 3. Registrar intento fallido (si no fue bloqueo previo)
+            if (!error.message.includes("Too many failed attempts")) {
+                IpBlocker.recordFailedAttempt(c);
+            }
+
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
+
+            auditSecurityEvent({
+                level: "WARN",
+                category: "AUTH",
+                action: "LOGIN_FAILED",
+                ip,
+                success: false,
+                metadata: { error: error.message }
+            });
+
+            if (error.message.includes("Too many failed attempts")) {
+                return c.json({ error: error.message }, 403);
+            }
+
             if (error.message === "Invalid credentials") {
                 return c.json({ error: "Invalid credentials" }, 401);
             }
@@ -71,15 +117,58 @@ export class AuthController {
      * POST /auth/device-login
      */
     async loginDevice(c: Context) {
+        const ip = getClientIp(c);
         try {
+            // 1. Verificar bloqueo IP
+            IpBlocker.checkBlock(c);
+
             const body = await c.req.json();
             const validated = LoginDeviceSchema.parse(body);
-            const result = await this.loginDeviceUseCase.execute(validated);
-            return c.json({ ok: true, ...result });
+            const device = await this.loginDeviceUseCase.execute(validated);
+
+            const token = JwtService.signDeviceToken({
+                deviceId: device.device_id,
+                gymId: device.gym_id,
+                role: device.role
+            });
+
+            auditSecurityEvent({
+                level: "INFO",
+                category: "AUTH",
+                action: "DEVICE_LOGIN_SUCCESS",
+                ip,
+                deviceId: device.device_id,
+                gymId: device.gym_id,
+                success: true
+            });
+
+            // 2. Login exitoso -> Resetear intentos
+            IpBlocker.resetAttempts(c);
+
+            return c.json({ ok: true, token, ...device });
         } catch (error: any) {
+            // 3. Registrar intento fallido
+            if (!error.message.includes("Too many failed attempts")) {
+                IpBlocker.recordFailedAttempt(c);
+            }
+
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
+
+            auditSecurityEvent({
+                level: "WARN",
+                category: "AUTH",
+                action: "DEVICE_LOGIN_FAILED",
+                ip,
+                success: false,
+                metadata: { error: error.message }
+            });
+
+            if (error.message.includes("Too many failed attempts")) {
+                return c.json({ error: error.message }, 403);
+            }
+
             if (error.message === "Invalid credentials") {
                 return c.json({ error: "Invalid credentials" }, 401);
             }

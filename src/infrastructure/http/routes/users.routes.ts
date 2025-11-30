@@ -5,11 +5,11 @@ export function usersRoutes() {
     const app = new Hono();
 
     // User
-    app.get("/users", users.getUsers);
-    app.get("/users/:id", users.getUserById);
-    app.post("/users", users.createUser);
-    app.put("/users/:id", users.updateUser);
-    app.delete("/users/:id", users.deleteUser);
+    app.get("/", users.getUsers);
+    app.get("/:id", users.getUserById);
+    app.post("/", users.createUser);
+    app.put("/:id", users.updateUser);
+    app.delete("/:id", users.deleteUser);
 
     return app;
 }

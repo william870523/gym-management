@@ -20,7 +20,7 @@ export class ApplyPagoClienteEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            // TODO: Implementar softDelete si es necesario
+            await this.pagoClienteRepository.softDelete(input.entidadId);
             return;
         }
 

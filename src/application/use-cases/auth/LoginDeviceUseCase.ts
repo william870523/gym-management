@@ -6,8 +6,8 @@ import { env } from "../../../config/env";
 export class LoginDeviceUseCase {
     constructor(private deviceRepository: DeviceRepository) { }
 
-    async execute(dto: LoginDeviceDTO): Promise<{ token: string; device_id: string; gym_id: string }> {
-        const device = await this.deviceRepository.findById(dto.device_id);
+    async execute(dto: LoginDeviceDTO): Promise<{ device_id: string; gym_id: string; role: string }> {
+        const device = await this.deviceRepository.findById(dto.device_id) as any;
         if (!device) {
             throw new Error("Invalid credentials");
         }
@@ -22,12 +22,6 @@ export class LoginDeviceUseCase {
 
         await this.deviceRepository.updateLastLogin(device.device_id);
 
-        const token = jwt.sign(
-            { device_id: device.device_id, gym_id: device.gym_id, role: "device" },
-            env.jwtSecret || "secret",
-            { expiresIn: "24h" }
-        );
-
-        return { token, device_id: device.device_id, gym_id: device.gym_id };
+        return { device_id: device.device_id, gym_id: device.gym_id, role: "device" };
     }
 }

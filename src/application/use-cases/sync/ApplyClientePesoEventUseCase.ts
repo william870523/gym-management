@@ -19,10 +19,8 @@ export class ApplyClientePesoEventUseCase {
     async execute(input: ApplyClientePesoEventInput): Promise<void> {
         const { operacion } = input;
 
-        // Por ahora solo soportamos INSERT/UPDATE para cliente_peso en este flujo simplificado
-        // Si quisieramos soportar DELETE, necesitariamos un metodo softDelete en el repositorio
         if (operacion === "DELETE") {
-            // TODO: Implementar softDelete si es necesario
+            await this.clientePesoRepository.softDelete(input.entidadId);
             return;
         }
 

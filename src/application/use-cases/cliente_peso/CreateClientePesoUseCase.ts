@@ -8,7 +8,7 @@ export class CreateClientePesoUseCase {
 
     async execute(dto: CreateClientePesoDTO): Promise<ClientePeso> {
         const newClientePeso: ClientePeso = {
-            cliente_peso_id: randomUUID(),
+            cliente_peso_id: dto.cliente_peso_id ?? randomUUID(),
             ci: dto.ci,
             fecha: new Date(dto.fecha),
             peso: dto.peso,

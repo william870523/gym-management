@@ -20,7 +20,7 @@ export class ApplyAsistenciaEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            // TODO: Implementar softDelete si es necesario
+            await this.asistenciaRepository.softDelete(input.entidadId);
             return;
         }
 

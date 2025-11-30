@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const CreatePagoClienteSchema = z.object({
+    pago_cliente_id: z.string().uuid().optional(),
     ci: z.string().min(1),
     fecha: z.string().datetime(),
     monto_total: z.number().nonnegative(),

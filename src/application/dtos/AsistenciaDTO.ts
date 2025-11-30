@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const CreateAsistenciaSchema = z.object({
+    asistencia_id: z.string().uuid().optional(),
     ci: z.string().min(1),
     gym_id: z.string().optional().nullable(),
 });

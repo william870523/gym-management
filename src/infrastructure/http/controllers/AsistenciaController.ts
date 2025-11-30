@@ -1,5 +1,7 @@
 import type { Context } from "hono";
 import { PrismaAsistenciaRepository } from "../../repositories/PrismaAsistenciaRepository";
+import { prisma } from "../../db/prismaClient";
+import * as crypto from "crypto";
 import { CreateAsistenciaUseCase } from "../../../application/use-cases/asistencia/CreateAsistenciaUseCase";
 import { UpdateAsistenciaUseCase } from "../../../application/use-cases/asistencia/UpdateAsistenciaUseCase";
 import { DeleteAsistenciaUseCase } from "../../../application/use-cases/asistencia/DeleteAsistenciaUseCase";
@@ -50,6 +52,19 @@ export class AsistenciaController {
             const body = await c.req.json();
             const validated = CreateAsistenciaSchema.parse(body);
             const result = await this.createUseCase.execute(validated);
+
+            await prisma.syncLog.create({
+                data: {
+                    event_id: crypto.randomUUID(),
+                    entidad: "asistencia",
+                    operacion: "INSERT",
+                    entidad_id: result.asistencia_id,
+                    gym_id: result.gym_id,
+                    device_id: null,
+                    payload_json: JSON.stringify(result),
+                },
+            });
+
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {

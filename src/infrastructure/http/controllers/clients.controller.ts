@@ -8,14 +8,27 @@ import {
 
 // --- Cliente ---
 export const getClientes = async (c: Context) => {
-    const items = await prisma.cliente.findMany({ where: { is_deleted: false } });
+    const gymId = c.get("gym_id"); // From auth middleware
+    const items = await prisma.cliente.findMany({
+        where: {
+            is_deleted: false,
+            gym_id: gymId
+        }
+    });
     return c.json(items);
 };
 
 export const getClienteByCi = async (c: Context) => {
     const ci = c.req.param("ci");
-    const item = await prisma.cliente.findUnique({ where: { ci } });
-    if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
+    const gymId = c.get("gym_id"); // From auth middleware
+    const item = await prisma.cliente.findFirst({
+        where: {
+            ci,
+            gym_id: gymId,
+            is_deleted: false
+        }
+    });
+    if (!item) return c.json({ error: "Not found" }, 404);
     return c.json(item);
 };
 

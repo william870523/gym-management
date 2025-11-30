@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const CreateClientePesoSchema = z.object({
+    cliente_peso_id: z.string().uuid().optional(),
     ci: z.string().min(1),
     fecha: z.string().datetime(),
     peso: z.number().positive(),

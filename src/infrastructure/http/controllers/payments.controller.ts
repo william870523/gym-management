@@ -7,14 +7,27 @@ import {
 
 // --- PagoCliente ---
 export const getPagosCliente = async (c: Context) => {
-    const items = await prisma.pagoCliente.findMany({ where: { is_deleted: false } });
+    const gymId = c.get("gym_id"); // From auth middleware
+    const items = await prisma.pagoCliente.findMany({
+        where: {
+            is_deleted: false,
+            gym_id: gymId
+        }
+    });
     return c.json(items);
 };
 
 export const getPagoClienteById = async (c: Context) => {
     const id = c.req.param("id");
-    const item = await prisma.pagoCliente.findUnique({ where: { pago_cliente_id: id } });
-    if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
+    const gymId = c.get("gym_id"); // From auth middleware
+    const item = await prisma.pagoCliente.findFirst({
+        where: {
+            pago_cliente_id: id,
+            gym_id: gymId,
+            is_deleted: false
+        }
+    });
+    if (!item) return c.json({ error: "Not found" }, 404);
     return c.json(item);
 };
 

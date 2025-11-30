@@ -8,7 +8,7 @@ export class CreatePagoClienteUseCase {
 
     async execute(dto: CreatePagoClienteDTO): Promise<PagoCliente> {
         const newPagoCliente: PagoCliente = {
-            pago_cliente_id: randomUUID(),
+            pago_cliente_id: dto.pago_cliente_id ?? randomUUID(),
             ci: dto.ci,
             fecha: new Date(dto.fecha),
             monto_total: dto.monto_total,

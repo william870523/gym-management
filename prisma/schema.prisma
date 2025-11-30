@@ -387,7 +387,7 @@ model SyncLog {
   entidad_id   String
   gym_id       String?
   device_id    String?
-  payload_json String
+  payload_json String  @db.Text
   created_at   DateTime @default(now())
 
   @@map("sync_log")
@@ -400,4 +400,20 @@ model SyncClientState {
   last_seen_at        DateTime?
 
   @@map("sync_client_state")
+}
+
+model SecurityAuditLog {
+  id        BigInt   @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  level     String   // INFO, WARN, ERROR
+  category  String   // AUTH, RATE_LIMIT, ADMIN_ACTION, JWT
+  action    String   // LOGIN_SUCCESS, LOGIN_FAILED, etc.
+  ip        String?
+  userId    String?
+  deviceId  String?
+  gymId     String?
+  success   Boolean
+  metadata  String?  @db.Text // JSON stringified
+
+  @@map("security_audit_log")
 }

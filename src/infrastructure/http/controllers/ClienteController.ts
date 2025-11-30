@@ -6,6 +6,7 @@ import { DeleteClienteUseCase } from "../../../application/use-cases/cliente/Del
 import { GetClienteUseCase } from "../../../application/use-cases/cliente/GetClienteUseCase";
 import { ListClientesUseCase } from "../../../application/use-cases/cliente/ListClientesUseCase";
 import { CreateClienteSchema, UpdateClienteSchema } from "../../../application/dtos/ClienteDTO";
+import { prisma } from "../../db/prismaClient";
 
 export class ClienteController {
     private createUseCase: CreateClienteUseCase;
@@ -55,8 +56,25 @@ export class ClienteController {
     async create(c: Context) {
         try {
             const body = await c.req.json();
-            const validated = CreateClienteSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const parsed = CreateClienteSchema.safeParse(body);
+            if (!parsed.success) {
+                return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
+            }
+
+            const result = await this.createUseCase.execute(parsed.data);
+
+            await prisma.syncLog.create({
+                data: {
+                    event_id: crypto.randomUUID(),
+                    entidad: "cliente",
+                    operacion: "INSERT",
+                    entidad_id: result.ci,
+                    gym_id: result.gym_id,
+                    device_id: null,
+                    payload_json: JSON.stringify(result),
+                },
+            });
+
             return c.json({
                 ...result,
                 foto_cliente: result.foto_cliente ? Buffer.from(result.foto_cliente).toString('base64') : null

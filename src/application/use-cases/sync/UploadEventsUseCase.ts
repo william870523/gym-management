@@ -16,6 +16,7 @@ import type { ApplyHorarioEventUseCase } from "./ApplyHorarioEventUseCase";
 import type { ApplyPlanesPagoEventUseCase } from "./ApplyPlanesPagoEventUseCase";
 import type { ApplyCuentaEventUseCase } from "./ApplyCuentaEventUseCase";
 import type { ApplyEntrenadorEventUseCase } from "./ApplyEntrenadorEventUseCase";
+import type { ApplyUserEventUseCase } from "./ApplyUserEventUseCase";
 
 export class UploadEventsUseCase {
     constructor(
@@ -33,7 +34,8 @@ export class UploadEventsUseCase {
         private readonly applyHorarioEventUseCase: ApplyHorarioEventUseCase,
         private readonly applyPlanesPagoEventUseCase: ApplyPlanesPagoEventUseCase,
         private readonly applyCuentaEventUseCase: ApplyCuentaEventUseCase,
-        private readonly applyEntrenadorEventUseCase: ApplyEntrenadorEventUseCase
+        private readonly applyEntrenadorEventUseCase: ApplyEntrenadorEventUseCase,
+        private readonly applyUserEventUseCase: ApplyUserEventUseCase
     ) { }
 
     async execute(dto: UploadEventsDTO): Promise<{ processed: number }> {
@@ -50,6 +52,15 @@ export class UploadEventsUseCase {
             // Enrutamiento por entidad
             if (ev.entidad === "cliente") {
                 await this.applyClienteEventUseCase.execute({
+                    eventId: ev.event_id,
+                    entidadId: ev.entidad_id,
+                    operacion: ev.operacion,
+                    gymId: gym_id,
+                    deviceId: device_id,
+                    payload: ev.payload as Record<string, unknown>
+                });
+            } else if (ev.entidad === "user") {
+                await this.applyUserEventUseCase.execute({
                     eventId: ev.event_id,
                     entidadId: ev.entidad_id,
                     operacion: ev.operacion,

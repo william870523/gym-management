@@ -12,7 +12,7 @@ export const getUsers = async (c: Context) => {
         where: { is_deleted: false },
         select: {
             user_id: true, user_nombre: true, user_email: true, role: true,
-            createdAt: true, gym_id: true, is_deleted: true
+            active: true, createdAt: true, gym_id: true, is_deleted: true
         }
     });
     return c.json(items);
@@ -24,7 +24,7 @@ export const getUserById = async (c: Context) => {
         where: { user_id: id },
         select: {
             user_id: true, user_nombre: true, user_email: true, role: true,
-            createdAt: true, gym_id: true, is_deleted: true
+            active: true, createdAt: true, gym_id: true, is_deleted: true
         }
     });
     if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
@@ -32,6 +32,9 @@ export const getUserById = async (c: Context) => {
 };
 
 export const createUser = async (c: Context) => {
+    const auth = c.get('auth');
+    if (auth?.role !== 'admin') return c.json({ error: "Forbidden - Admin role required" }, 403);
+
     const body = await c.req.json().catch(() => null);
     const parsed = CreateUserSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
@@ -45,6 +48,7 @@ export const createUser = async (c: Context) => {
         data: {
             ...parsed.data,
             password: hashedPassword,
+            active: parsed.data.active ?? true,
             user_id: crypto.randomUUID(),
             createdAt: new Date()
         }
@@ -56,7 +60,7 @@ export const createUser = async (c: Context) => {
             entidad: "user",
             operacion: "INSERT",
             entidad_id: newItem.user_id,
-            gym_id: newItem.gym_id || "unknown",
+            gym_id: newItem.gym_id || null,
             device_id: null,
             payload_json: JSON.stringify(newItem),
         },
@@ -67,14 +71,26 @@ export const createUser = async (c: Context) => {
 };
 
 export const updateUser = async (c: Context) => {
+    const auth = c.get('auth');
+    if (auth?.role !== 'admin') return c.json({ error: "Forbidden - Admin role required" }, 403);
+
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
     const parsed = UpdateUserSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
 
     const dataToUpdate = { ...parsed.data };
-    if (dataToUpdate.password) {
+
+    // If password is null (sent from frontend) or undefined, remove it from update
+    if (!dataToUpdate.password) {
+        delete dataToUpdate.password;
+    } else {
         dataToUpdate.password = await bcrypt.hash(dataToUpdate.password, 10);
+    }
+
+    // Add 'active' to dataToUpdate if it's present in the parsed data
+    if (parsed.data.active !== undefined) {
+        dataToUpdate.active = parsed.data.active;
     }
 
     try {
@@ -89,7 +105,7 @@ export const updateUser = async (c: Context) => {
                 entidad: "user",
                 operacion: "UPDATE",
                 entidad_id: updated.user_id,
-                gym_id: updated.gym_id || "unknown",
+                gym_id: updated.gym_id || null,
                 device_id: null,
                 payload_json: JSON.stringify(updated),
             },
@@ -103,6 +119,9 @@ export const updateUser = async (c: Context) => {
 };
 
 export const deleteUser = async (c: Context) => {
+    const auth = c.get('auth');
+    if (auth?.role !== 'admin') return c.json({ error: "Forbidden - Admin role required" }, 403);
+
     const id = c.req.param("id");
     try {
         const deleted = await prisma.user.update({
@@ -116,7 +135,7 @@ export const deleteUser = async (c: Context) => {
                 entidad: "user",
                 operacion: "DELETE",
                 entidad_id: deleted.user_id,
-                gym_id: deleted.gym_id || "unknown",
+                gym_id: deleted.gym_id || null,
                 device_id: null,
                 payload_json: JSON.stringify(deleted),
             },

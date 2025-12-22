@@ -9,8 +9,12 @@ export class LoginUserUseCase {
 
     async execute(dto: LoginUserDTO): Promise<{ user_id: string; role: string; email: string }> {
         const user = await this.userRepository.findByEmail(dto.email);
-        if (!user) {
+        if (!user || user.is_deleted) {
             throw new Error("Invalid credentials");
+        }
+
+        if (!user.active) {
+            throw new Error("User account is inactive");
         }
 
         const isValid = await bcrypt.compare(dto.password, user.password);

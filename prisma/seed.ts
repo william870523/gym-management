@@ -12,7 +12,7 @@ async function seedRemote() {
         update: {},
         create: {
             gym_id: "local-gym-001",
-            codigo: "GYM001",
+            codigo: "GYM_LOCAL_001",
             nombre: "Gym Test",
             direccion: "Calle Principal 123",
             ciudad: "Santo Domingo",
@@ -145,6 +145,30 @@ async function seedRemote() {
         },
     });
     console.log("✅ Entrenador created");
+
+    // 11. Device (for local gym sync)
+    await prisma.device.upsert({
+        where: { device_id: "device-001" },
+        update: {
+            is_active: true,
+            deleted_at: null,
+            secret_key: "mock-device-token",
+        },
+        create: {
+            device_id: "device-001",
+            gym_id: "local-gym-001",
+            nombre: "Local Primary Device",
+            tipo: "BACKEND_OFFLINE",
+            secret_key: "mock-device-token",
+            is_active: true,
+        },
+    });
+    console.log("✅ Device created/updated");
+
+    const count = await prisma.device.count();
+    const all = await prisma.device.findMany();
+    console.log(`📊 Total Devices in DB (${process.env.DATABASE_URL?.substring(0, 15)}...): ${count}`);
+    console.log("Devices:", all.map(d => `${d.device_id} (${d.is_active})`));
 
     console.log("✅ REMOTE database seeded successfully!");
     await prisma.$disconnect();

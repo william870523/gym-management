@@ -18,6 +18,7 @@ import { PrismaHorarioRepository } from "../repositories/PrismaHorarioRepository
 import { PrismaPlanesPagoRepository } from "../repositories/PrismaPlanesPagoRepository";
 import { PrismaCuentaRepository } from "../repositories/PrismaCuentaRepository";
 import { PrismaEntrenadorRepository } from "../repositories/PrismaEntrenadorRepository";
+import { PrismaUserRepository } from "../repositories/PrismaUserRepository";
 import { PrismaSyncLogRepository } from "../repositories/PrismaSyncLogRepository";
 
 import { ApplyClienteEventUseCase } from "../../application/use-cases/sync/ApplyClienteEventUseCase";
@@ -34,6 +35,7 @@ import { ApplyHorarioEventUseCase } from "../../application/use-cases/sync/Apply
 import { ApplyPlanesPagoEventUseCase } from "../../application/use-cases/sync/ApplyPlanesPagoEventUseCase";
 import { ApplyCuentaEventUseCase } from "../../application/use-cases/sync/ApplyCuentaEventUseCase";
 import { ApplyEntrenadorEventUseCase } from "../../application/use-cases/sync/ApplyEntrenadorEventUseCase";
+import { ApplyUserEventUseCase } from "../../application/use-cases/sync/ApplyUserEventUseCase";
 import { UploadEventsUseCase } from "../../application/use-cases/sync/UploadEventsUseCase";
 
 export class SyncService {
@@ -55,6 +57,7 @@ export class SyncService {
     const planesPagoRepository = new PrismaPlanesPagoRepository();
     const cuentaRepository = new PrismaCuentaRepository();
     const entrenadorRepository = new PrismaEntrenadorRepository();
+    const userRepository = new PrismaUserRepository();
     const syncLogRepository = new PrismaSyncLogRepository();
 
     const applyClienteEventUseCase = new ApplyClienteEventUseCase(clienteRepository);
@@ -71,6 +74,7 @@ export class SyncService {
     const applyPlanesPagoEventUseCase = new ApplyPlanesPagoEventUseCase(planesPagoRepository);
     const applyCuentaEventUseCase = new ApplyCuentaEventUseCase(cuentaRepository);
     const applyEntrenadorEventUseCase = new ApplyEntrenadorEventUseCase(entrenadorRepository);
+    const applyUserEventUseCase = new ApplyUserEventUseCase(userRepository);
 
     this.uploadEventsUseCase = new UploadEventsUseCase(
       syncLogRepository,
@@ -87,7 +91,8 @@ export class SyncService {
       applyHorarioEventUseCase,
       applyPlanesPagoEventUseCase,
       applyCuentaEventUseCase,
-      applyEntrenadorEventUseCase
+      applyEntrenadorEventUseCase,
+      applyUserEventUseCase
     );
   }
 

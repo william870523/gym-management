@@ -1,8 +1,12 @@
 import { Hono } from "hono";
 import * as users from "../controllers/users.controller";
+import { authAdmin } from "../middleware/auth.middleware";
 
 export function usersRoutes() {
     const app = new Hono();
+
+    // Protected Routes
+    app.use("*", authAdmin());
 
     // User
     app.get("/", users.getUsers);

@@ -10,6 +10,13 @@ import { auditSecurityEvent } from "../../logging/audit-logger";
 import { getClientIp } from "../middleware/rate-limit.middleware";
 import { IpBlocker } from "../middleware/ip-block.middleware";
 
+const extractRetryAfterSeconds = (message: string): number | null => {
+    const match = message.match(/(\d+)\s+seconds?/i);
+    if (!match) return null;
+    const parsed = Number(match[1]);
+    return Number.isNaN(parsed) ? null : parsed;
+};
+
 export class AuthController {
     private loginUserUseCase: LoginUserUseCase;
     private loginDeviceUseCase: LoginDeviceUseCase;
@@ -39,13 +46,13 @@ export class AuthController {
             }, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {
-                return c.json({ error: "Datos inválidos", details: error.errors }, 400);
+                return c.json({ error: "Datos inválidos", error_code: "INVALID_PAYLOAD", details: error.errors }, 400);
             }
             if (error.message === "Email already registered") {
-                return c.json({ error: "El email ya está registrado" }, 409);
+                return c.json({ error: "El email ya está registrado", error_code: "EMAIL_ALREADY_REGISTERED" }, 409);
             }
             console.error("Error en registro:", error);
-            return c.json({ error: "Error interno del servidor" }, 500);
+            return c.json({ error: "Error interno del servidor", error_code: "INTERNAL_ERROR" }, 500);
         }
     }
 
@@ -89,7 +96,7 @@ export class AuthController {
             }
 
             if (error.name === 'ZodError') {
-                return c.json({ error: error.errors }, 400);
+                return c.json({ error: error.errors, error_code: "INVALID_PAYLOAD" }, 400);
             }
 
             auditSecurityEvent({
@@ -102,13 +109,16 @@ export class AuthController {
             });
 
             if (error.message.includes("Too many failed attempts")) {
-                return c.json({ error: error.message }, 403);
+                return c.json({ error: error.message, error_code: "TOO_MANY_ATTEMPTS", retry_after_seconds: extractRetryAfterSeconds(error.message) }, 403);
             }
 
             if (error.message === "Invalid credentials") {
-                return c.json({ error: "Invalid credentials" }, 401);
+                return c.json({ error: "Invalid credentials", error_code: "INVALID_CREDENTIALS" }, 401);
             }
-            return c.json({ error: "Internal Server Error" }, 500);
+            if (error.message === "User account is inactive") {
+                return c.json({ error: "User account is inactive", error_code: "USER_INACTIVE" }, 403);
+            }
+            return c.json({ error: "Internal Server Error", error_code: "INTERNAL_ERROR" }, 500);
         }
     }
 
@@ -153,7 +163,7 @@ export class AuthController {
             }
 
             if (error.name === 'ZodError') {
-                return c.json({ error: error.errors }, 400);
+                return c.json({ error: error.errors, error_code: "INVALID_PAYLOAD" }, 400);
             }
 
             auditSecurityEvent({
@@ -166,16 +176,16 @@ export class AuthController {
             });
 
             if (error.message.includes("Too many failed attempts")) {
-                return c.json({ error: error.message }, 403);
+                return c.json({ error: error.message, error_code: "TOO_MANY_ATTEMPTS", retry_after_seconds: extractRetryAfterSeconds(error.message) }, 403);
             }
 
             if (error.message === "Invalid credentials") {
-                return c.json({ error: "Invalid credentials" }, 401);
+                return c.json({ error: "Invalid credentials", error_code: "INVALID_CREDENTIALS" }, 401);
             }
             if (error.message === "Device is inactive") {
-                return c.json({ error: "Device is inactive" }, 403);
+                return c.json({ error: "Device is inactive", error_code: "DEVICE_INACTIVE" }, 403);
             }
-            return c.json({ error: "Internal Server Error" }, 500);
+            return c.json({ error: "Internal Server Error", error_code: "INTERNAL_ERROR" }, 500);
         }
     }
 }

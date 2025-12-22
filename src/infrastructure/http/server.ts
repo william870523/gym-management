@@ -14,7 +14,7 @@ import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 import { securityHeaders } from "../../config/security";
 import { corsMiddleware } from "../../config/cors";
-import { authAdmin, authDevice } from "./middleware/auth.middleware";
+import { authAdmin, authDevice, authAny } from "./middleware/auth.middleware";
 import { rateLimit, getClientIp } from "./middleware/rate-limit.middleware";
 import { authRoutes } from "./routes/auth.routes";
 import { syncRoutes } from "./routes/sync.routes";

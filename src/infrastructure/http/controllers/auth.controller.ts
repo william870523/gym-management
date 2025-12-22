@@ -6,6 +6,7 @@ import { prisma } from "../../db/prismaClient";
 import { RegisterSchema, LoginSchema } from "../../../application/validation/auth.schemas";
 import { env } from "../../../config/env";
 import { logger } from "../../../config/logger";
+import { JwtService } from "../../auth/jwt.service";
 
 export async function registerController(c: Context) {
   const body = await c.req.json().catch(() => null);
@@ -60,12 +61,26 @@ export async function loginController(c: Context) {
 
   const { email, password } = parsed.data;
 
-  const user = await prisma.user.findUnique({
-    where: { user_email: email }
+  // Determine if input is email or username
+  const isEmail = email.includes("@");
+
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { user_email: email },
+        { user_nombre: email }
+      ]
+    }
   });
 
+  // Strict check for null user, deleted, or INACTIVE
   if (!user || user.is_deleted) {
     return c.json({ error: "Invalid credentials" }, 401);
+  }
+
+  // Explicit active check with logging for debug if needed
+  if (!user.active) {
+    return c.json({ error: "User account is inactive" }, 403);
   }
 
   const match = await bcrypt.compare(password, user.password);
@@ -73,16 +88,10 @@ export async function loginController(c: Context) {
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
-  const token = jwt.sign(
-    {
-      sub: user.user_id,
-      role: user.role
-    },
-    env.jwtSecret,
-    {
-      expiresIn: env.jwtExpiresIn as string | number as any
-    }
-  );
+  const token = JwtService.signAdminToken({
+    userId: user.user_id,
+    role: user.role
+  });
 
   return c.json({
     token,

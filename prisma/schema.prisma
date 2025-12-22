@@ -18,6 +18,7 @@ model User {
   password      String
   createdAt     DateTime
   role          String   @default("user")
+  active        Boolean  @default(true)
   is_deleted    Boolean  @default(false)
   created_at    DateTime? @default(now())
   gym_id        String?

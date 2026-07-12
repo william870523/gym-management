@@ -14,7 +14,7 @@ export const ClienteSchema = z.object({
     nacionalidad_id: z.string().min(1, "Nacionalidad es requerida"),
     correo: z.string().email().optional().nullable(),
     objetivo: z.string().optional().nullable(),
-    id_planes_pago: z.string().min(1, "Plan de pago es requerido"),
+    id_planes_pago: z.string().min(1, "Plan de pago es requerido").optional().nullable(),
     id_entrenador: z.string().optional().nullable(),
     fecha_inicio: z.string().or(z.date()).transform((val) => new Date(val)),
     fecha_fin: z.string().or(z.date()).transform((val) => new Date(val)),

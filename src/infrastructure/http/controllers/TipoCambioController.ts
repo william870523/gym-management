@@ -6,6 +6,7 @@ import { DeleteTipoCambioUseCase } from "../../../application/use-cases/tipo_cam
 import { GetTipoCambioUseCase } from "../../../application/use-cases/tipo_cambio/GetTipoCambioUseCase";
 import { ListTipoCambiosUseCase } from "../../../application/use-cases/tipo_cambio/ListTipoCambiosUseCase";
 import { CreateTipoCambioSchema, UpdateTipoCambioSchema } from "../../../application/dtos/TipoCambioDTO";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 
 export class TipoCambioController {
     private createUseCase: CreateTipoCambioUseCase;
@@ -16,17 +17,32 @@ export class TipoCambioController {
 
     constructor() {
         const repository = new PrismaTipoCambioRepository();
-        this.createUseCase = new CreateTipoCambioUseCase(repository);
-        this.updateUseCase = new UpdateTipoCambioUseCase(repository);
-        this.deleteUseCase = new DeleteTipoCambioUseCase(repository);
+        const syncLogRepository = new PrismaSyncLogRepository();
+
+        this.createUseCase = new CreateTipoCambioUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateTipoCambioUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteTipoCambioUseCase(repository, syncLogRepository);
         this.getUseCase = new GetTipoCambioUseCase(repository);
         this.listUseCase = new ListTipoCambiosUseCase(repository);
     }
 
+
     async list(c: Context) {
         try {
             const result = await this.listUseCase.execute();
-            return c.json(result);
+            // Convert nested currency images to Base64
+            const mappedResult = (result as any[]).map(tc => ({
+                ...tc,
+                moneda_base: tc.moneda_base ? {
+                    ...tc.moneda_base,
+                    imagen: tc.moneda_base.imagen ? Buffer.from(tc.moneda_base.imagen).toString('base64') : null
+                } : null,
+                moneda_target: tc.moneda_target ? {
+                    ...tc.moneda_target,
+                    imagen: tc.moneda_target.imagen ? Buffer.from(tc.moneda_target.imagen).toString('base64') : null
+                } : null,
+            }));
+            return c.json(mappedResult);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
         }
@@ -39,7 +55,19 @@ export class TipoCambioController {
             if (!result) {
                 return c.json({ error: "TipoCambio not found" }, 404);
             }
-            return c.json(result);
+            const tc = result as any;
+            const mappedResult = {
+                ...tc,
+                moneda_base: tc.moneda_base ? {
+                    ...tc.moneda_base,
+                    imagen: tc.moneda_base.imagen ? Buffer.from(tc.moneda_base.imagen).toString('base64') : null
+                } : null,
+                moneda_target: tc.moneda_target ? {
+                    ...tc.moneda_target,
+                    imagen: tc.moneda_target.imagen ? Buffer.from(tc.moneda_target.imagen).toString('base64') : null
+                } : null,
+            };
+            return c.json(mappedResult);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
         }
@@ -54,6 +82,9 @@ export class TipoCambioController {
         } catch (error: any) {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
+            }
+            if (error.message?.includes("Same-currency")) {
+                return c.json({ error: error.message }, 400);
             }
             return c.json({ error: "Internal Server Error" }, 500);
         }
@@ -72,6 +103,9 @@ export class TipoCambioController {
             }
             if (error.message === "TipoCambio not found") {
                 return c.json({ error: "TipoCambio not found" }, 404);
+            }
+            if (error.message?.includes("Same-currency")) {
+                return c.json({ error: error.message }, 400);
             }
             return c.json({ error: "Internal Server Error" }, 500);
         }

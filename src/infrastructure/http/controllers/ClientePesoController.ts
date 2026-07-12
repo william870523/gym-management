@@ -27,9 +27,13 @@ export class ClientePesoController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const ci = c.req.query("ci");
+            if (!ci) {
+                return c.json({ error: "Query parameter 'ci' is required" }, 400);
+            }
+            const result = await this.listUseCase.execute(ci);
             return c.json(result);
-        } catch (error) {
+        } catch (error: any) {
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }

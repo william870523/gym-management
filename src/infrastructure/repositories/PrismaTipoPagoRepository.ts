@@ -9,6 +9,8 @@ export class PrismaTipoPagoRepository implements TipoPagoRepository {
             create: {
                 tipo_pago_id: data.tipo_pago_id,
                 nombre_tipo_pago: data.nombre_tipo_pago,
+                codigo: data.codigo,
+                activo: data.activo,
                 version: data.version,
                 created_at: data.created_at ?? new Date(),
                 updated_at: new Date(),
@@ -17,6 +19,8 @@ export class PrismaTipoPagoRepository implements TipoPagoRepository {
             },
             update: {
                 nombre_tipo_pago: data.nombre_tipo_pago,
+                codigo: data.codigo,
+                activo: data.activo,
                 version: data.version,
                 updated_at: new Date(),
                 deleted_at: null,
@@ -42,6 +46,8 @@ export class PrismaTipoPagoRepository implements TipoPagoRepository {
             data: {
                 tipo_pago_id: data.tipo_pago_id,
                 nombre_tipo_pago: data.nombre_tipo_pago,
+                codigo: data.codigo,
+                activo: data.activo,
                 version: data.version,
                 created_at: data.created_at ?? new Date(),
                 updated_at: new Date(),
@@ -56,6 +62,8 @@ export class PrismaTipoPagoRepository implements TipoPagoRepository {
             where: { tipo_pago_id: id },
             data: {
                 nombre_tipo_pago: data.nombre_tipo_pago,
+                codigo: data.codigo,
+                activo: data.activo,
                 version: { increment: 1 },
                 updated_at: new Date()
             }

@@ -38,7 +38,7 @@ export class ApplyDetallePagoEventUseCase {
             moneda_id: String(payload.moneda_id),
             cuenta_id: (payload.cuenta_id as string | null) ?? null,
             cantidad: Number(payload.cantidad),
-            tipo_cambio_id: String(payload.tipo_cambio_id),
+            tipo_cambio_id: payload.tipo_cambio_id ? String(payload.tipo_cambio_id) : null,
             gym_id: input.gymId,
             source_device: (payload.source_device as string | null) ?? input.deviceId,
             version: (payload.version as number) ?? 1,

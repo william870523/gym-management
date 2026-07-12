@@ -6,6 +6,7 @@ import { DeleteCuentaUseCase } from "../../../application/use-cases/cuenta/Delet
 import { GetCuentaUseCase } from "../../../application/use-cases/cuenta/GetCuentaUseCase";
 import { ListCuentasUseCase } from "../../../application/use-cases/cuenta/ListCuentasUseCase";
 import { CreateCuentaSchema, UpdateCuentaSchema } from "../../../application/dtos/CuentaDTO";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 
 export class CuentaController {
     private createUseCase: CreateCuentaUseCase;
@@ -16,12 +17,15 @@ export class CuentaController {
 
     constructor() {
         const repository = new PrismaCuentaRepository();
-        this.createUseCase = new CreateCuentaUseCase(repository);
-        this.updateUseCase = new UpdateCuentaUseCase(repository);
-        this.deleteUseCase = new DeleteCuentaUseCase(repository);
+        const syncLogRepository = new PrismaSyncLogRepository();
+
+        this.createUseCase = new CreateCuentaUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateCuentaUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteCuentaUseCase(repository, syncLogRepository);
         this.getUseCase = new GetCuentaUseCase(repository);
         this.listUseCase = new ListCuentasUseCase(repository);
     }
+
 
     async list(c: Context) {
         try {

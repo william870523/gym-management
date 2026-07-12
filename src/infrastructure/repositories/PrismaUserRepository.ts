@@ -4,6 +4,12 @@ import { UserRepository } from "../../domain/repositories/UserRepository";
 const prisma = new PrismaClient();
 
 export class PrismaUserRepository implements UserRepository {
+    async findAll(): Promise<User[]> {
+        return prisma.user.findMany({
+            where: { is_deleted: false }
+        });
+    }
+
     async findByEmail(email: string): Promise<User | null> {
         return prisma.user.findUnique({
             where: { user_email: email }
@@ -17,24 +23,15 @@ export class PrismaUserRepository implements UserRepository {
     }
 
     async create(data: Partial<User>): Promise<User> {
-        return prisma.$transaction(async (tx) => {
-            const user = await tx.user.create({
-                data: data as any
-            });
+        return prisma.user.create({
+            data: data as any
+        });
+    }
 
-            // Create SyncLog entry for synchronization
-            await tx.syncLog.create({
-                data: {
-                    event_id: crypto.randomUUID(),
-                    entidad: 'user',
-                    operacion: 'INSERT',
-                    entidad_id: user.user_id,
-                    gym_id: user.gym_id,
-                    payload_json: JSON.stringify(user)
-                }
-            });
-
-            return user;
+    async update(id: string, data: Partial<User>): Promise<User> {
+        return prisma.user.update({
+            where: { user_id: id },
+            data: data as any
         });
     }
 
@@ -52,4 +49,5 @@ export class PrismaUserRepository implements UserRepository {
             data: { is_deleted: true, deleted_at: new Date() }
         });
     }
+
 }

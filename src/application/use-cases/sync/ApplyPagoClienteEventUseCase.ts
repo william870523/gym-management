@@ -1,6 +1,7 @@
 import type { PagoCliente } from "../../../domain/entities/PagoCliente";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { PagoClienteRepository } from "../../../domain/repositories/PagoClienteRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export interface ApplyPagoClienteEventInput {
     eventId: string;
@@ -42,8 +43,10 @@ export class ApplyPagoClienteEventUseCase {
             gym_id: input.gymId,
             source_device: (payload.source_device as string | null) ?? input.deviceId,
             version: (payload.version as number) ?? 1,
-            created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
-            updated_at: new Date(),
+            created_at: payload.created_at
+                ? new Date(String(payload.created_at))
+                : trustedClock.nowUtc(),
+            updated_at: trustedClock.nowUtc(),
             is_deleted: false,
             deleted_at: null
         };

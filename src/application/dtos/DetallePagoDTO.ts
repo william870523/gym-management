@@ -6,7 +6,7 @@ export const CreateDetallePagoSchema = z.object({
     moneda_id: z.string().uuid(),
     cuenta_id: z.string().uuid().optional().nullable(),
     cantidad: z.number().nonnegative(),
-    tipo_cambio_id: z.string().uuid(),
+    tipo_cambio_id: z.string().uuid().optional().nullable(),
     gym_id: z.string().optional().nullable(),
 });
 
@@ -18,7 +18,7 @@ export const UpdateDetallePagoSchema = z.object({
     moneda_id: z.string().uuid().optional(),
     cuenta_id: z.string().uuid().optional().nullable(),
     cantidad: z.number().nonnegative().optional(),
-    tipo_cambio_id: z.string().uuid().optional(),
+    tipo_cambio_id: z.string().uuid().optional().nullable(),
     gym_id: z.string().optional().nullable(),
 });
 

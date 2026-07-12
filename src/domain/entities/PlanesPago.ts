@@ -5,6 +5,9 @@ export interface PlanesPago {
     duracion_plan_pago: number;
     activo: boolean;
     moneda_id: string;
+    incluye_entrenador?: boolean;
+    comision_entrenador_tipo?: string;
+    comision_entrenador_valor?: number | null;
     gym_id: string | null;
     source_device?: string | null;
     version: number;

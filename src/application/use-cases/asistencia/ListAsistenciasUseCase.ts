@@ -4,7 +4,8 @@ import type { AsistenciaRepository } from "../../../domain/repositories/Asistenc
 export class ListAsistenciasUseCase {
     constructor(private readonly asistenciaRepository: AsistenciaRepository) { }
 
-    async execute(): Promise<Asistencia[]> {
-        return this.asistenciaRepository.findAll();
+    async execute(page: number = 1, limit: number = 10): Promise<Asistencia[]> {
+        const skip = (page - 1) * limit;
+        return this.asistenciaRepository.findAll(skip, limit);
     }
 }

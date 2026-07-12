@@ -1,9 +1,14 @@
+import { randomUUID } from "crypto";
 import type { UpdateClienteDTO } from "../../dtos/ClienteDTO";
 import type { Cliente } from "../../../domain/entities/Cliente";
 import type { ClienteRepository } from "../../../domain/repositories/ClienteRepository";
+import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 
 export class UpdateClienteUseCase {
-    constructor(private readonly clienteRepository: ClienteRepository) { }
+    constructor(
+        private readonly clienteRepository: ClienteRepository,
+        private readonly syncLogRepository: SyncLogRepository
+    ) { }
 
     async execute(id: string, dto: UpdateClienteDTO): Promise<void> {
         const existing = await this.clienteRepository.findById(id);
@@ -16,9 +21,27 @@ export class UpdateClienteUseCase {
             foto_cliente: dto.foto_cliente ? Buffer.from(dto.foto_cliente, 'base64') : undefined,
             fecha_inicio: dto.fecha_inicio ? new Date(dto.fecha_inicio) : undefined,
             fecha_fin: dto.fecha_fin ? new Date(dto.fecha_fin) : undefined,
-            updated_at: new Date()
+            updated_at: new Date(),
+            version: (existing.version ?? 0) + 1
         };
 
         await this.clienteRepository.update(id, updateData);
+
+        const updated = await this.clienteRepository.findById(id);
+        if (updated) {
+            await this.syncLogRepository.register({
+                eventId: randomUUID(),
+                entidad: "cliente",
+                operacion: "UPDATE",
+                entidadId: id,
+                gymId: updated.gym_id ?? null,
+                deviceId: "WEB_ADMIN",
+                payload: {
+                    ...updated,
+                    foto_cliente: updated.foto_cliente ? Buffer.from(updated.foto_cliente).toString('base64') : null
+                } as any
+            });
+        }
     }
 }
+

@@ -6,6 +6,7 @@ import { DeleteHorarioUseCase } from "../../../application/use-cases/horario/Del
 import { GetHorarioUseCase } from "../../../application/use-cases/horario/GetHorarioUseCase";
 import { ListHorariosUseCase } from "../../../application/use-cases/horario/ListHorariosUseCase";
 import { CreateHorarioSchema, UpdateHorarioSchema } from "../../../application/dtos/HorarioDTO";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 
 export class HorarioController {
     private createUseCase: CreateHorarioUseCase;
@@ -16,12 +17,15 @@ export class HorarioController {
 
     constructor() {
         const repository = new PrismaHorarioRepository();
-        this.createUseCase = new CreateHorarioUseCase(repository);
-        this.updateUseCase = new UpdateHorarioUseCase(repository);
-        this.deleteUseCase = new DeleteHorarioUseCase(repository);
+        const syncLogRepository = new PrismaSyncLogRepository();
+
+        this.createUseCase = new CreateHorarioUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateHorarioUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteHorarioUseCase(repository, syncLogRepository);
         this.getUseCase = new GetHorarioUseCase(repository);
         this.listUseCase = new ListHorariosUseCase(repository);
     }
+
 
     async list(c: Context) {
         try {

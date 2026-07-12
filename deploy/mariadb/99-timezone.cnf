@@ -1,0 +1,3 @@
+[mysqld]
+# DATETIME no conserva zona. Toda conexión debe escribir componentes UTC.
+default_time_zone = '+00:00'

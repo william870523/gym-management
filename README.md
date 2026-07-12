@@ -2,6 +2,10 @@
 
 API remota para sistema de gestión de gimnasios, construida con Bun, Hono, Prisma y MariaDB.
 
+Para producción, Docker, zonas horarias, varias sedes y sincronización, leer
+[`../docs/TIME_SYNC_OPERATIONS.md`](../docs/TIME_SYNC_OPERATIONS.md) antes de
+instalar o migrar.
+
 ## 📋 Características
 
 - ✅ **Autenticación JWT** para usuarios y dispositivos

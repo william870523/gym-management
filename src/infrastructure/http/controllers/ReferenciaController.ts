@@ -6,6 +6,7 @@ import { DeleteReferenciaUseCase } from "../../../application/use-cases/referenc
 import { GetReferenciaUseCase } from "../../../application/use-cases/referencia/GetReferenciaUseCase";
 import { ListReferenciasUseCase } from "../../../application/use-cases/referencia/ListReferenciasUseCase";
 import { CreateReferenciaSchema, UpdateReferenciaSchema } from "../../../application/dtos/ReferenciaDTO";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 
 export class ReferenciaController {
     private createUseCase: CreateReferenciaUseCase;
@@ -16,12 +17,15 @@ export class ReferenciaController {
 
     constructor() {
         const repository = new PrismaReferenciaRepository();
-        this.createUseCase = new CreateReferenciaUseCase(repository);
-        this.updateUseCase = new UpdateReferenciaUseCase(repository);
-        this.deleteUseCase = new DeleteReferenciaUseCase(repository);
+        const syncLogRepository = new PrismaSyncLogRepository();
+
+        this.createUseCase = new CreateReferenciaUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateReferenciaUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteReferenciaUseCase(repository, syncLogRepository);
         this.getUseCase = new GetReferenciaUseCase(repository);
         this.listUseCase = new ListReferenciasUseCase(repository);
     }
+
 
     async list(c: Context) {
         try {

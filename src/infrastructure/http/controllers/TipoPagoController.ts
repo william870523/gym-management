@@ -6,6 +6,7 @@ import { DeleteTipoPagoUseCase } from "../../../application/use-cases/tipo_pago/
 import { GetTipoPagoUseCase } from "../../../application/use-cases/tipo_pago/GetTipoPagoUseCase";
 import { ListTipoPagosUseCase } from "../../../application/use-cases/tipo_pago/ListTipoPagosUseCase";
 import { CreateTipoPagoSchema, UpdateTipoPagoSchema } from "../../../application/dtos/TipoPagoDTO";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 
 export class TipoPagoController {
     private createUseCase: CreateTipoPagoUseCase;
@@ -16,12 +17,15 @@ export class TipoPagoController {
 
     constructor() {
         const repository = new PrismaTipoPagoRepository();
-        this.createUseCase = new CreateTipoPagoUseCase(repository);
-        this.updateUseCase = new UpdateTipoPagoUseCase(repository);
-        this.deleteUseCase = new DeleteTipoPagoUseCase(repository);
+        const syncLogRepository = new PrismaSyncLogRepository();
+
+        this.createUseCase = new CreateTipoPagoUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateTipoPagoUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteTipoPagoUseCase(repository, syncLogRepository);
         this.getUseCase = new GetTipoPagoUseCase(repository);
         this.listUseCase = new ListTipoPagosUseCase(repository);
     }
+
 
     async list(c: Context) {
         try {

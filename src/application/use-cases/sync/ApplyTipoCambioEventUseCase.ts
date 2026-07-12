@@ -20,6 +20,7 @@ export class ApplyTipoCambioEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.tipoCambioRepository.softDelete(input.entidadId);
             return;
         }
 

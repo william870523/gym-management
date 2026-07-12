@@ -20,6 +20,7 @@ export class ApplyCuentaEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.cuentaRepository.softDelete(input.entidadId);
             return;
         }
 
@@ -34,6 +35,7 @@ export class ApplyCuentaEventUseCase {
             cuenta_id: input.entidadId,
             nombre_cuenta: String(payload.nombre_cuenta),
             moneda_id: String(payload.moneda_id),
+            tipo_pago_id: payload.tipo_pago_id ? String(payload.tipo_pago_id) : null,
             gym_id: input.gymId,
             source_device: (payload.source_device as string | null) ?? input.deviceId,
             version: (payload.version as number) ?? 1,

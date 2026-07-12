@@ -7,4 +7,5 @@ export interface NacionalidadRepository {
     create(data: Nacionalidad): Promise<void>;
     update(id: string, data: Partial<Nacionalidad>): Promise<void>;
     softDelete(id: string): Promise<void>;
+    findByCode(code: string): Promise<Nacionalidad | null>;
 }

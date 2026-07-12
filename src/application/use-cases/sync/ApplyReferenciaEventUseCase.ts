@@ -20,6 +20,7 @@ export class ApplyReferenciaEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.referenciaRepository.softDelete(input.entidadId);
             return;
         }
 

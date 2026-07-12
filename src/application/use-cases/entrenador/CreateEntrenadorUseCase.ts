@@ -2,9 +2,13 @@ import { randomUUID } from "crypto";
 import type { CreateEntrenadorDTO } from "../../dtos/EntrenadorDTO";
 import type { Entrenador } from "../../../domain/entities/Entrenador";
 import type { EntrenadorRepository } from "../../../domain/repositories/EntrenadorRepository";
+import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 
 export class CreateEntrenadorUseCase {
-    constructor(private readonly entrenadorRepository: EntrenadorRepository) { }
+    constructor(
+        private readonly entrenadorRepository: EntrenadorRepository,
+        private readonly syncLogRepository: SyncLogRepository
+    ) { }
 
     async execute(dto: CreateEntrenadorDTO): Promise<Entrenador> {
         const newEntrenador: Entrenador = {
@@ -29,6 +33,22 @@ export class CreateEntrenadorUseCase {
         };
 
         await this.entrenadorRepository.create(newEntrenador);
+
+        // Record for sync
+        await this.syncLogRepository.register({
+            eventId: randomUUID(),
+            entidad: "entrenador",
+            operacion: "INSERT",
+            entidadId: newEntrenador.id_entrenador,
+            gymId: newEntrenador.gym_id ?? null,
+            deviceId: "WEB_ADMIN",
+            payload: {
+                ...newEntrenador,
+                foto_entrenador: newEntrenador.foto_entrenador ? Buffer.from(newEntrenador.foto_entrenador).toString('base64') : null
+            } as any
+        });
+
         return newEntrenador;
     }
 }
+

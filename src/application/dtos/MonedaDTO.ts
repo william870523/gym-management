@@ -1,10 +1,11 @@
 import { z } from "zod";
 
 export const CreateMonedaSchema = z.object({
+    moneda_id: z.string().optional(),
     moneda_nombre: z.string().min(1, "El nombre es requerido"),
     codigo: z.string().min(1, "El código es requerido"),
     simbolo: z.string().optional().nullable(),
-    imagen: z.string().optional().nullable(), // Base64 string
+    imagen: z.any().optional().nullable(), // Base64 string or Buffer
 });
 
 export type CreateMonedaDTO = z.infer<typeof CreateMonedaSchema>;

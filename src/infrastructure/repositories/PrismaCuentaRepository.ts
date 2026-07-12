@@ -10,6 +10,7 @@ export class PrismaCuentaRepository implements CuentaRepository {
                 cuenta_id: data.cuenta_id,
                 nombre_cuenta: data.nombre_cuenta,
                 moneda_id: data.moneda_id,
+                tipo_pago_id: data.tipo_pago_id || null,
                 gym_id: data.gym_id ?? null,
                 source_device: data.source_device ?? null,
                 version: data.version,
@@ -21,6 +22,7 @@ export class PrismaCuentaRepository implements CuentaRepository {
             update: {
                 nombre_cuenta: data.nombre_cuenta,
                 moneda_id: data.moneda_id,
+                tipo_pago_id: data.tipo_pago_id || null,
                 gym_id: data.gym_id ?? null,
                 source_device: data.source_device ?? null,
                 version: data.version,
@@ -32,9 +34,24 @@ export class PrismaCuentaRepository implements CuentaRepository {
     }
 
     async findAll(): Promise<Cuenta[]> {
-        return prisma.cuenta.findMany({
-            where: { is_deleted: false }
+        const result = await prisma.cuenta.findMany({
+            where: { is_deleted: false },
+            include: { moneda: true }
         });
+
+        // Convert moneda buffer to base64 for JSON serialization compatibility with existing utils if needed, 
+        // or just return as is and let the controller handle it.
+        // The previous local controller returns it directly. 
+        // However, `findAll` return type is `Promise<Cuenta[]>`.
+        // Prisma returns binary fields as Buffer/Uint8Array. 
+        // If we want to be safe, we map it.
+        return result.map(c => ({
+            ...c,
+            moneda: c.moneda ? {
+                ...c.moneda,
+                imagen: c.moneda.imagen ? Buffer.from(c.moneda.imagen).toString('base64') : null
+            } : null
+        }));
     }
 
     async findById(id: string): Promise<Cuenta | null> {
@@ -49,6 +66,7 @@ export class PrismaCuentaRepository implements CuentaRepository {
                 cuenta_id: data.cuenta_id,
                 nombre_cuenta: data.nombre_cuenta,
                 moneda_id: data.moneda_id,
+                tipo_pago_id: data.tipo_pago_id || null,
                 gym_id: data.gym_id ?? null,
                 source_device: data.source_device ?? null,
                 version: data.version,
@@ -66,6 +84,7 @@ export class PrismaCuentaRepository implements CuentaRepository {
             data: {
                 nombre_cuenta: data.nombre_cuenta,
                 moneda_id: data.moneda_id,
+                tipo_pago_id: data.tipo_pago_id || null,
                 gym_id: data.gym_id ?? null,
                 version: { increment: 1 },
                 updated_at: new Date()

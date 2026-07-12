@@ -7,7 +7,7 @@ export const EntrenadorSchema = z.object({
     nombres_entrenador: z.string().min(1, "Nombres son requeridos"),
     apellidos_entrenador: z.string().min(1, "Apellidos son requeridos"),
     sexo_entrenador: z.string().min(1, "Sexo es requerido"),
-    // foto_entrenador: z.any().optional(),
+    foto_entrenador: z.string().optional().nullable(),
     direccion_entrenador: z.string().optional().nullable(),
     telefono_entrenador: z.number().int().optional().nullable(),
     correo_entrenador: z.string().email().optional().nullable(),

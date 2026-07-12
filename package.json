@@ -3,6 +3,13 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun --preload ./src/config/tz-preload.ts --watch index.ts",
+    "start": "bun --preload ./src/config/tz-preload.ts index.ts",
+    "check:tz": "bun --preload ./src/config/tz-preload.ts -e \"console.log('TZ=' + (process.env.TZ || '(unset)'), new Date().toString())\"",
+    "check:time": "bun --preload ./src/config/tz-preload.ts scripts/verify-time-contract.ts",
+    "migrate:asistencia-pausa": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-pausa.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/jsonwebtoken": "^9.0.10",

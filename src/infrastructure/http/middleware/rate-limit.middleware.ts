@@ -48,60 +48,10 @@ export const getClientIp = (c: Context): string => {
 /**
  * Middleware genérico de Rate Limiting
  */
+// Middleware genérico de Rate Limiting (DISABLED)
 export const rateLimit = (options: RateLimitOptions): MiddlewareHandler => {
     return async (c, next) => {
-        const key = options.keyGenerator(c);
-        const now = Date.now();
-
-        // Limpiar buckets expirados (lazy cleanup al acceder)
-        let record = buckets.get(key);
-
-        // Si no existe o expiró, reiniciar
-        if (!record || now > record.resetTime) {
-            record = {
-                count: 0,
-                resetTime: now + options.windowMs
-            };
-            buckets.set(key, record);
-        }
-
-        // Verificar límite
-        if (record.count >= options.max) {
-            if (options.name) {
-                console.log(`[RateLimit] Limit reached for ${options.name} - Key: ${key}`);
-            }
-
-            // Audit Log
-            auditSecurityEvent({
-                level: "WARN",
-                category: "RATE_LIMIT",
-                action: "RATE_LIMIT_HIT",
-                ip: getClientIp(c),
-                success: false,
-                metadata: {
-                    limit: options.max,
-                    key,
-                    name: options.name
-                }
-            });
-
-            const retryAfter = Math.ceil((record.resetTime - now) / 1000);
-
-            c.header("X-RateLimit-Limit", options.max.toString());
-            c.header("X-RateLimit-Remaining", "0");
-            c.header("X-RateLimit-Reset", Math.ceil(record.resetTime / 1000).toString());
-            c.header("Retry-After", retryAfter.toString());
-
-            return c.text("Too Many Requests", 429);
-        }
-
-        // Incrementar y continuar
-        record.count++;
-
-        c.header("X-RateLimit-Limit", options.max.toString());
-        c.header("X-RateLimit-Remaining", (options.max - record.count).toString());
-        c.header("X-RateLimit-Reset", Math.ceil(record.resetTime / 1000).toString());
-
+        // Bypass all checks
         await next();
     };
 };

@@ -165,6 +165,31 @@ async function seedRemote() {
     });
     console.log("✅ Device created/updated");
 
+    // 12. User (Admin)
+    // Hash for "admin123" extracted from setup-postman-data.sql
+    const adminPasswordHash = "$2a$10$rOqK9vN8K8qF7x.YR7C4w.V9UJxqKZE6HZHzKFJxKFJxKFJxKFJxK";
+
+    await prisma.user.upsert({
+        where: { user_id: "admin-user-001" },
+        update: {
+            // Restore password if it was somehow changed or reset
+            password: adminPasswordHash,
+            role: "admin",
+            active: true,
+            gym_id: "local-gym-001"
+        },
+        create: {
+            user_id: "admin-user-001",
+            user_nombre: "Administrador",
+            user_email: "admin@test.com",
+            password: adminPasswordHash,
+            role: "admin",
+            active: true,
+            gym_id: "local-gym-001"
+        },
+    });
+    console.log("✅ User (Admin) created/updated");
+
     const count = await prisma.device.count();
     const all = await prisma.device.findMany();
     console.log(`📊 Total Devices in DB (${process.env.DATABASE_URL?.substring(0, 15)}...): ${count}`);

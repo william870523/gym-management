@@ -44,9 +44,9 @@ export class PrismaMonedaRepository implements MonedaRepository {
 
     async findById(id: string): Promise<Moneda | null> {
         const result = await prisma.moneda.findUnique({
-            where: { moneda_id: id, is_deleted: false }
+            where: { moneda_id: id }
         });
-        if (!result) return null;
+        if (!result || result.is_deleted) return null;
         return {
             ...result,
             imagen: result.imagen ? new Uint8Array(result.imagen) : null

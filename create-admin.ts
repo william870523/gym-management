@@ -28,7 +28,7 @@ async function createRemoteAdmin() {
                     user_email: userEmail,
                     password: hashedPassword,
                     role: "admin",
-                    createdAt: new Date(),
+                    created_at: new Date(),
                 },
             });
             console.log("✅ Admin user created successfully!");

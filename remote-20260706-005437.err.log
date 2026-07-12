@@ -1,0 +1,1 @@
+$ bun --preload ./src/config/tz-preload.ts index.ts

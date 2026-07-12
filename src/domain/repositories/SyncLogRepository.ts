@@ -5,7 +5,7 @@ export interface SyncLogRecord {
   entidad: string;
   operacion: "INSERT" | "UPDATE" | "DELETE";
   entidadId: string;
-  gymId: string;
+  gymId: string | null;
   deviceId: string;
   payload: Record<string, unknown>;
 }
@@ -13,4 +13,9 @@ export interface SyncLogRecord {
 export interface SyncLogRepository {
   exists(eventId: string): Promise<boolean>;
   register(record: SyncLogRecord): Promise<void>;
+  findChanges(
+    cursor: { afterId?: number; since?: Date },
+    untilId: number,
+    gymId: string,
+  ): Promise<any[]>;
 }

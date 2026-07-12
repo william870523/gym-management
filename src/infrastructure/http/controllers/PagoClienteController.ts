@@ -6,16 +6,16 @@ import { CreatePagoClienteUseCase } from "../../../application/use-cases/pago_cl
 import { UpdatePagoClienteUseCase } from "../../../application/use-cases/pago_cliente/UpdatePagoClienteUseCase";
 import { DeletePagoClienteUseCase } from "../../../application/use-cases/pago_cliente/DeletePagoClienteUseCase";
 import { GetPagoClienteUseCase } from "../../../application/use-cases/pago_cliente/GetPagoClienteUseCase";
-import { ListPagoClientesUseCase } from "../../../application/use-cases/pago_cliente/ListPagoClientesUseCase"; // Note: Check if I named it ListPagoClientesUseCase or ListPagosClienteUseCase
-import { CreatePagoClienteSchema, UpdatePagoClienteSchema } from "../../../application/dtos/PagoClienteDTO";
-
-// Wait, I need to check the ListUseCase name for PagoCliente.
-// I created it as ListPagoClientesUseCase in previous step? No, I created ListPagoClienteUseCase?
-// Let me check the previous tool call.
-// I created ListPagoClientesUseCase.ts but class name?
-// I'll assume ListPagoClientesUseCase for now.
-
 import { ListPagoClientesUseCase as ListUseCase } from "../../../application/use-cases/pago_cliente/ListPagoClientesUseCase";
+import { CreatePagoClienteSchema, UpdatePagoClienteSchema } from "../../../application/dtos/PagoClienteDTO";
+import { ProcessPaymentUseCase } from "../../../application/use-cases/pago_cliente/ProcessPaymentUseCase";
+import { PrismaPlanesPagoRepository } from "../../repositories/PrismaPlanesPagoRepository";
+import { CreateDetallePagoSchema } from "../../../application/dtos/DetallePagoDTO";
+import { z } from "zod";
+
+const ProcessPaymentSchema = CreatePagoClienteSchema.extend({
+    detalles: z.array(CreateDetallePagoSchema.omit({ pago_cliente_id: true }))
+});
 
 export class PagoClienteController {
     private createUseCase: CreatePagoClienteUseCase;
@@ -23,39 +23,23 @@ export class PagoClienteController {
     private deleteUseCase: DeletePagoClienteUseCase;
     private getUseCase: GetPagoClienteUseCase;
     private listUseCase: ListUseCase;
+    private processUseCase: ProcessPaymentUseCase;
 
     constructor() {
         const repository = new PrismaPagoClienteRepository();
+        const planRepo = new PrismaPlanesPagoRepository();
         this.createUseCase = new CreatePagoClienteUseCase(repository);
         this.updateUseCase = new UpdatePagoClienteUseCase(repository);
         this.deleteUseCase = new DeletePagoClienteUseCase(repository);
         this.getUseCase = new GetPagoClienteUseCase(repository);
         this.listUseCase = new ListUseCase(repository);
+        this.processUseCase = new ProcessPaymentUseCase(repository, planRepo);
     }
 
-    async list(c: Context) {
-        try {
-            const result = await this.listUseCase.execute();
-            return c.json(result);
-        } catch (error) {
-            return c.json({ error: "Internal Server Error" }, 500);
-        }
-    }
-
-    async getById(c: Context) {
-        try {
-            const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
-            if (!result) {
-                return c.json({ error: "PagoCliente not found" }, 404);
-            }
-            return c.json(result);
-        } catch (error) {
-            return c.json({ error: "Internal Server Error" }, 500);
-        }
-    }
+    // ... existing methods ...
 
     async create(c: Context) {
+        // ... existing create implementation ...
         try {
             const body = await c.req.json();
             const validated = CreatePagoClienteSchema.parse(body);
@@ -81,6 +65,83 @@ export class PagoClienteController {
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }
+
+    async process(c: Context) {
+        try {
+            const body = await c.req.json();
+            const validated = ProcessPaymentSchema.parse(body);
+            const result = await this.processUseCase.execute(validated);
+
+            // SyncLog omitted for complexity.
+
+            return c.json(result, 201);
+        } catch (error: any) {
+            if (error.name === 'ZodError') {
+                return c.json({ error: error.errors }, 400);
+            }
+            if (error.message.includes("not found")) {
+                return c.json({ error: error.message }, 404);
+            }
+            console.error(error);
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async list(c: Context) {
+        try {
+            const result = await this.listUseCase.execute();
+            return c.json(result);
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async listByClient(c: Context) {
+        try {
+            const ci = c.req.param("ci");
+            const page = Number(c.req.query("page")) || 1;
+            const limit = Number(c.req.query("limit")) || 25;
+            const pagos = await prisma.pagoCliente.findMany({
+                skip: (page - 1) * limit,
+                take: limit,
+                where: { ci, is_deleted: false },
+                orderBy: { fecha: "desc" },
+                include: {
+                    cliente: {
+                        select: {
+                            nombres: true,
+                            apellidos: true,
+                        },
+                    },
+                    detalles: {
+                        where: { is_deleted: false },
+                    },
+                },
+            });
+            return c.json(pagos.map((p) => ({
+                ...p,
+                clientName: `${p.cliente.nombres ?? ""} ${p.cliente.apellidos ?? ""}`.trim(),
+                details: p.detalles,
+            })));
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async getById(c: Context) {
+        try {
+            const id = c.req.param("id");
+            const result = await this.getUseCase.execute(id);
+            if (!result) {
+                return c.json({ error: "PagoCliente not found" }, 404);
+            }
+            return c.json(result);
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+
 
     async update(c: Context) {
         try {

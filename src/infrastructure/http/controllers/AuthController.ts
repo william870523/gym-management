@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { PrismaUserRepository } from "../../repositories/PrismaUserRepository";
 import { PrismaDeviceRepository } from "../../repositories/PrismaDeviceRepository";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 import { LoginUserUseCase } from "../../../application/use-cases/auth/LoginUserUseCase";
 import { LoginDeviceUseCase } from "../../../application/use-cases/auth/LoginDeviceUseCase";
 import { RegisterUserUseCase } from "../../../application/use-cases/auth/RegisterUserUseCase";
@@ -25,10 +26,13 @@ export class AuthController {
     constructor() {
         const userRepository = new PrismaUserRepository();
         const deviceRepository = new PrismaDeviceRepository();
+        const syncLogRepository = new PrismaSyncLogRepository();
+
         this.loginUserUseCase = new LoginUserUseCase(userRepository);
         this.loginDeviceUseCase = new LoginDeviceUseCase(deviceRepository);
-        this.registerUserUseCase = new RegisterUserUseCase(userRepository);
+        this.registerUserUseCase = new RegisterUserUseCase(userRepository, syncLogRepository);
     }
+
 
     /**
      * Registrar nuevo usuario

@@ -36,15 +36,23 @@ export class PrismaTipoCambioRepository implements TipoCambioRepository {
     }
 
     async findAll(): Promise<TipoCambio[]> {
-        return prisma.tipoCambio.findMany({
-            where: { is_deleted: false }
-        });
+        return (prisma.tipoCambio.findMany({
+            where: { is_deleted: false },
+            include: {
+                moneda_base: true,
+                moneda_target: true
+            }
+        }) as any);
     }
 
     async findById(id: string): Promise<TipoCambio | null> {
-        return prisma.tipoCambio.findUnique({
-            where: { tipo_cambio_id: id, is_deleted: false }
-        });
+        return (prisma.tipoCambio.findUnique({
+            where: { tipo_cambio_id: id, is_deleted: false },
+            include: {
+                moneda_base: true,
+                moneda_target: true
+            }
+        }) as any);
     }
 
     async create(data: TipoCambio): Promise<void> {

@@ -20,6 +20,7 @@ export class ApplyPlanesPagoEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.planesPagoRepository.softDelete(input.entidadId);
             return;
         }
 
@@ -37,6 +38,11 @@ export class ApplyPlanesPagoEventUseCase {
             duracion_plan_pago: Number(payload.duracion_plan_pago),
             activo: Boolean(payload.activo),
             moneda_id: String(payload.moneda_id),
+            incluye_entrenador: Boolean(payload.incluye_entrenador ?? false),
+            comision_entrenador_tipo: String(payload.comision_entrenador_tipo ?? "NONE"),
+            comision_entrenador_valor: payload.comision_entrenador_valor === null || payload.comision_entrenador_valor === undefined
+                ? null
+                : Number(payload.comision_entrenador_valor),
             gym_id: input.gymId,
             source_device: (payload.source_device as string | null) ?? input.deviceId,
             version: (payload.version as number) ?? 1,

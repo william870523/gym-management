@@ -5,7 +5,7 @@ export interface DetallePago {
     moneda_id: string;
     cuenta_id?: string | null;
     cantidad: number;
-    tipo_cambio_id: string;
+    tipo_cambio_id?: string | null;
     gym_id: string | null;
     source_device?: string | null;
     version: number;

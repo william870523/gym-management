@@ -1,148 +1,104 @@
 import type { Context } from "hono";
-import bcrypt from "bcryptjs";
-import { prisma } from "../../db/prismaClient";
+import { PrismaUserRepository } from "../../repositories/PrismaUserRepository";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
+import { CreateUserUseCase } from "../../../application/use-cases/user/CreateUserUseCase";
+import { UpdateUserUseCase } from "../../../application/use-cases/user/UpdateUserUseCase";
+import { DeleteUserUseCase } from "../../../application/use-cases/user/DeleteUserUseCase";
+import { ListUsersUseCase } from "../../../application/use-cases/user/ListUsersUseCase";
+import { GetUserUseCase } from "../../../application/use-cases/user/GetUserUseCase";
 import {
     CreateUserSchema, UpdateUserSchema
 } from "../../../application/validation/users.schemas";
 
-// --- User ---
-export const getUsers = async (c: Context) => {
-    // Exclude password from result
-    const items = await prisma.user.findMany({
-        where: { is_deleted: false },
-        select: {
-            user_id: true, user_nombre: true, user_email: true, role: true,
-            active: true, createdAt: true, gym_id: true, is_deleted: true
+export class UserController {
+    private listUseCase: ListUsersUseCase;
+    private getUseCase: GetUserUseCase;
+    private createUseCase: CreateUserUseCase;
+    private updateUseCase: UpdateUserUseCase;
+    private deleteUseCase: DeleteUserUseCase;
+
+    constructor() {
+        const repository = new PrismaUserRepository();
+        const syncLogRepository = new PrismaSyncLogRepository();
+
+        this.listUseCase = new ListUsersUseCase(repository);
+        this.getUseCase = new GetUserUseCase(repository);
+        this.createUseCase = new CreateUserUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateUserUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteUserUseCase(repository, syncLogRepository);
+    }
+
+    async getUsers(c: Context) {
+        try {
+            const items = await this.listUseCase.execute();
+            // Exclude password from result
+            const sanitized = items.map(({ password, ...rest }) => rest);
+            return c.json(sanitized);
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
         }
-    });
-    return c.json(items);
-};
+    }
 
-export const getUserById = async (c: Context) => {
-    const id = c.req.param("id");
-    const item = await prisma.user.findUnique({
-        where: { user_id: id },
-        select: {
-            user_id: true, user_nombre: true, user_email: true, role: true,
-            active: true, createdAt: true, gym_id: true, is_deleted: true
+    async getUserById(c: Context) {
+        try {
+            const id = c.req.param("id");
+            const item = await this.getUseCase.execute(id);
+            if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
+            const { password, ...sanitized } = item;
+            return c.json(sanitized);
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
         }
-    });
-    if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
-    return c.json(item);
-};
+    }
 
-export const createUser = async (c: Context) => {
-    const auth = c.get('auth');
-    if (auth?.role !== 'admin') return c.json({ error: "Forbidden - Admin role required" }, 403);
-
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreateUserSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const exists = await prisma.user.findUnique({ where: { user_email: parsed.data.user_email } });
-    if (exists) return c.json({ error: "Email already in use" }, 409);
-
-    const hashedPassword = await bcrypt.hash(parsed.data.password || "123456", 10);
-
-    const newItem = await prisma.user.create({
-        data: {
-            ...parsed.data,
-            password: hashedPassword,
-            active: parsed.data.active ?? true,
-            user_id: crypto.randomUUID(),
-            createdAt: new Date()
+    async createUser(c: Context) {
+        try {
+            const body = await c.req.json().catch(() => null);
+            const parsed = CreateUserSchema.parse(body);
+            const result = await this.createUseCase.execute(parsed);
+            const { password, ...sanitized } = result;
+            return c.json(sanitized, 201);
+        } catch (error: any) {
+            if (error.name === 'ZodError') {
+                return c.json({ error: "Invalid data", details: error.format() }, 400);
+            }
+            if (error.message === "Email already in use") {
+                return c.json({ error: error.message }, 409);
+            }
+            return c.json({ error: "Internal Server Error" }, 500);
         }
-    });
-
-    await prisma.syncLog.create({
-        data: {
-            event_id: crypto.randomUUID(),
-            entidad: "user",
-            operacion: "INSERT",
-            entidad_id: newItem.user_id,
-            gym_id: newItem.gym_id || null,
-            device_id: null,
-            payload_json: JSON.stringify(newItem),
-        },
-    });
-
-    const { password, ...sanitized } = newItem;
-    return c.json(sanitized, 201);
-};
-
-export const updateUser = async (c: Context) => {
-    const auth = c.get('auth');
-    if (auth?.role !== 'admin') return c.json({ error: "Forbidden - Admin role required" }, 403);
-
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => null);
-    const parsed = UpdateUserSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const dataToUpdate = { ...parsed.data };
-
-    // If password is null (sent from frontend) or undefined, remove it from update
-    if (!dataToUpdate.password) {
-        delete dataToUpdate.password;
-    } else {
-        dataToUpdate.password = await bcrypt.hash(dataToUpdate.password, 10);
     }
 
-    // Add 'active' to dataToUpdate if it's present in the parsed data
-    if (parsed.data.active !== undefined) {
-        dataToUpdate.active = parsed.data.active;
+    async updateUser(c: Context) {
+        try {
+            const id = c.req.param("id");
+            const body = await c.req.json().catch(() => null);
+            const parsed = UpdateUserSchema.parse(body);
+            const result = await this.updateUseCase.execute(id, parsed);
+            const { password, ...sanitized } = result;
+            return c.json(sanitized);
+        } catch (error: any) {
+            if (error.name === 'ZodError') {
+                return c.json({ error: "Invalid data", details: error.format() }, 400);
+            }
+            if (error.message === "User not found") {
+                return c.json({ error: error.message }, 404);
+            }
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
     }
 
-    try {
-        const updated = await prisma.user.update({
-            where: { user_id: id },
-            data: dataToUpdate
-        });
-
-        await prisma.syncLog.create({
-            data: {
-                event_id: crypto.randomUUID(),
-                entidad: "user",
-                operacion: "UPDATE",
-                entidad_id: updated.user_id,
-                gym_id: updated.gym_id || null,
-                device_id: null,
-                payload_json: JSON.stringify(updated),
-            },
-        });
-
-        const { password, ...sanitized } = updated;
-        return c.json(sanitized);
-    } catch (e) {
-        return c.json({ error: "Update failed or not found" }, 404);
+    async deleteUser(c: Context) {
+        try {
+            const id = c.req.param("id");
+            await this.deleteUseCase.execute(id);
+            return c.json({ ok: true });
+        } catch (error: any) {
+            if (error.message === "User not found") {
+                return c.json({ error: error.message }, 404);
+            }
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
     }
-};
+}
 
-export const deleteUser = async (c: Context) => {
-    const auth = c.get('auth');
-    if (auth?.role !== 'admin') return c.json({ error: "Forbidden - Admin role required" }, 403);
-
-    const id = c.req.param("id");
-    try {
-        const deleted = await prisma.user.update({
-            where: { user_id: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
-
-        await prisma.syncLog.create({
-            data: {
-                event_id: crypto.randomUUID(),
-                entidad: "user",
-                operacion: "DELETE",
-                entidad_id: deleted.user_id,
-                gym_id: deleted.gym_id || null,
-                device_id: null,
-                payload_json: JSON.stringify(deleted),
-            },
-        });
-
-        return c.json({ ok: true });
-    } catch (e) {
-        return c.json({ error: "Delete failed or not found" }, 404);
-    }
-};

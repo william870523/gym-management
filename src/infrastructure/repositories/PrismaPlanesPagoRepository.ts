@@ -13,6 +13,9 @@ export class PrismaPlanesPagoRepository implements PlanesPagoRepository {
                 duracion_plan_pago: data.duracion_plan_pago,
                 activo: data.activo,
                 moneda_id: data.moneda_id,
+                incluye_entrenador: data.incluye_entrenador ?? false,
+                comision_entrenador_tipo: data.comision_entrenador_tipo ?? "NONE",
+                comision_entrenador_valor: data.comision_entrenador_valor ?? null,
                 gym_id: data.gym_id ?? null,
                 source_device: data.source_device ?? null,
                 version: data.version,
@@ -27,6 +30,9 @@ export class PrismaPlanesPagoRepository implements PlanesPagoRepository {
                 duracion_plan_pago: data.duracion_plan_pago,
                 activo: data.activo,
                 moneda_id: data.moneda_id,
+                incluye_entrenador: data.incluye_entrenador ?? false,
+                comision_entrenador_tipo: data.comision_entrenador_tipo ?? "NONE",
+                comision_entrenador_valor: data.comision_entrenador_valor ?? null,
                 gym_id: data.gym_id ?? null,
                 source_device: data.source_device ?? null,
                 version: data.version,
@@ -58,6 +64,9 @@ export class PrismaPlanesPagoRepository implements PlanesPagoRepository {
                 duracion_plan_pago: data.duracion_plan_pago,
                 activo: data.activo,
                 moneda_id: data.moneda_id,
+                incluye_entrenador: data.incluye_entrenador ?? false,
+                comision_entrenador_tipo: data.comision_entrenador_tipo ?? "NONE",
+                comision_entrenador_valor: data.comision_entrenador_valor ?? null,
                 gym_id: data.gym_id ?? null,
                 source_device: data.source_device ?? null,
                 version: data.version,
@@ -78,6 +87,9 @@ export class PrismaPlanesPagoRepository implements PlanesPagoRepository {
                 duracion_plan_pago: data.duracion_plan_pago,
                 activo: data.activo,
                 moneda_id: data.moneda_id,
+                incluye_entrenador: data.incluye_entrenador,
+                comision_entrenador_tipo: data.comision_entrenador_tipo,
+                comision_entrenador_valor: data.comision_entrenador_valor,
                 gym_id: data.gym_id ?? null,
                 version: { increment: 1 },
                 updated_at: new Date()
@@ -86,7 +98,7 @@ export class PrismaPlanesPagoRepository implements PlanesPagoRepository {
     }
 
     async softDelete(id: string): Promise<void> {
-        await prisma.planesPago.update({
+        await prisma.planesPago.updateMany({
             where: { id_planes_pago: id },
             data: {
                 is_deleted: true,

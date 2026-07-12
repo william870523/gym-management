@@ -20,6 +20,7 @@ export class ApplyHorarioEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.horarioRepository.softDelete(input.entidadId);
             return;
         }
 

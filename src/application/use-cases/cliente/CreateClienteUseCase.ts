@@ -1,9 +1,16 @@
+import { randomUUID } from "crypto";
 import type { CreateClienteDTO } from "../../dtos/ClienteDTO";
 import type { Cliente } from "../../../domain/entities/Cliente";
 import type { ClienteRepository } from "../../../domain/repositories/ClienteRepository";
+import type { ClientePesoRepository } from "../../../domain/repositories/ClientePesoRepository";
+import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 
 export class CreateClienteUseCase {
-    constructor(private readonly clienteRepository: ClienteRepository) { }
+    constructor(
+        private readonly clienteRepository: ClienteRepository,
+        private readonly syncLogRepository: SyncLogRepository,
+        private readonly clientePesoRepository: ClientePesoRepository
+    ) { }
 
     async execute(dto: CreateClienteDTO): Promise<Cliente> {
         const newCliente: Cliente = {
@@ -36,6 +43,78 @@ export class CreateClienteUseCase {
         };
 
         await this.clienteRepository.create(newCliente);
+
+        // Record for sync (Cliente Link)
+        await this.syncLogRepository.register({
+            eventId: randomUUID(),
+            entidad: "cliente",
+            operacion: "INSERT",
+            entidadId: newCliente.ci,
+            gymId: newCliente.gym_id ?? null,
+            deviceId: "WEB_ADMIN",
+            payload: {
+                ...newCliente,
+                foto_cliente: newCliente.foto_cliente ? Buffer.from(newCliente.foto_cliente).toString('base64') : null
+            } as any
+        });
+
+        // Handle Weight Logic
+        if (dto.peso !== undefined && dto.peso !== null) {
+            const pesoId = randomUUID();
+            const pesoRecord = {
+                cliente_peso_id: pesoId,
+                ci: newCliente.ci,
+                peso: Number(dto.peso),
+                fecha: newCliente.fecha_inicio,
+                gym_id: newCliente.gym_id ?? null,
+                source_device: "WEB_ADMIN",
+                version: 1,
+                created_at: new Date(),
+                updated_at: new Date(),
+                deleted_at: null,
+                is_deleted: false,
+                sync_status: 'pending' // Optional depending on entity definition
+            };
+
+            // 1. Create Weight
+            await this.clientePesoRepository.create(pesoRecord);
+
+            // 2. Sync Weight
+            await this.syncLogRepository.register({
+                eventId: randomUUID(),
+                entidad: "cliente_peso",
+                operacion: "INSERT",
+                entidadId: pesoId,
+                gymId: newCliente.gym_id ?? null,
+                deviceId: "WEB_ADMIN",
+                payload: {
+                    ...pesoRecord,
+                    fecha: pesoRecord.fecha.toISOString(),
+                    created_at: pesoRecord.created_at.toISOString(),
+                    updated_at: pesoRecord.updated_at.toISOString(),
+                } as any
+            });
+
+            // 3. Update Client with Weight ID
+            newCliente.cliente_peso_id = pesoId;
+            await this.clienteRepository.update(newCliente.ci, { cliente_peso_id: pesoId });
+
+            // 4. Sync Client Update
+            await this.syncLogRepository.register({
+                eventId: randomUUID(),
+                entidad: "cliente",
+                operacion: "UPDATE",
+                entidadId: newCliente.ci,
+                gymId: newCliente.gym_id ?? null,
+                deviceId: "WEB_ADMIN",
+                payload: {
+                    ...newCliente,
+                    foto_cliente: newCliente.foto_cliente ? Buffer.from(newCliente.foto_cliente).toString('base64') : null
+                } as any
+            });
+        }
+
         return newCliente;
     }
 }
+

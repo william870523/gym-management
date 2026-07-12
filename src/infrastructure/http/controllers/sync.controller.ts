@@ -7,15 +7,49 @@ import { logger } from "../../../config/logger";
 
 const syncService = new SyncService();
 
+function deviceScope(c: Context) {
+  const auth = c.get("auth") as {
+    sub?: string;
+    deviceId?: string;
+    gymId?: string;
+  };
+  return {
+    deviceId: auth.deviceId ?? auth.sub ?? "",
+    gymId: auth.gymId ?? "",
+  };
+}
+
 // Maneja la carga de eventos de sincronizacion desde los clientes locales.
 export async function uploadEventsController(c: Context) {
   const body = await c.req.json().catch(() => null);
+
+  if (body && body.events && Array.isArray(body.events)) {
+    const counts: Record<string, number> = {};
+    for (const ev of body.events) {
+      counts[ev.entidad] = (counts[ev.entidad] || 0) + 1;
+    }
+    console.log(`[Diagnostic Log] Remote received ${body.events.length} events:`, counts);
+  } else {
+    console.log(`[Diagnostic Log] Remote received invalid or empty events body`);
+  }
+
   const parsed = UploadEventsSchema.safeParse(body);
 
   if (!parsed.success) {
     return c.json(
       { error: "Invalid payload", details: parsed.error.format() },
       400
+    );
+  }
+
+  const scope = deviceScope(c);
+  if (
+    parsed.data.device_id !== scope.deviceId ||
+    parsed.data.gym_id !== scope.gymId
+  ) {
+    return c.json(
+      { error: "Forbidden - device synchronization scope mismatch" },
+      403,
     );
   }
 
@@ -46,7 +80,8 @@ export async function uploadEventsController(c: Context) {
 // Devuelve los cambios pendientes para un gimnasio desde sync_log.
 export async function getChangesController(c: Context) {
   const query = {
-    since: c.req.query("since") ?? "",
+    since: c.req.query("since"),
+    after_id: c.req.query("after_id"),
     gym_id: c.req.query("gym_id") ?? ""
   };
 
@@ -58,9 +93,17 @@ export async function getChangesController(c: Context) {
     );
   }
 
+  const scope = deviceScope(c);
+  if (parsed.data.gym_id !== scope.gymId) {
+    return c.json(
+      { error: "Forbidden - device synchronization scope mismatch" },
+      403,
+    );
+  }
+
   try {
-    const events = await syncService.getChanges(parsed.data);
-    return c.json({ ok: true, events });
+    const result = await syncService.getChanges(parsed.data);
+    return c.json({ ok: true, ...result });
   } catch (err) {
     logger.error("Error in getChangesController", err);
     return c.json({ error: "Internal error in changes" }, 500);

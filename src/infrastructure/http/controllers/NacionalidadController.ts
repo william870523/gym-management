@@ -1,6 +1,8 @@
 import type { Context } from "hono";
 import { logger } from "../../../config/logger";
 import { PrismaNacionalidadRepository } from "../../repositories/PrismaNacionalidadRepository";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
+
 import { CreateNacionalidadUseCase } from "../../../application/use-cases/nacionalidad/CreateNacionalidadUseCase";
 import { UpdateNacionalidadUseCase } from "../../../application/use-cases/nacionalidad/UpdateNacionalidadUseCase";
 import { DeleteNacionalidadUseCase } from "../../../application/use-cases/nacionalidad/DeleteNacionalidadUseCase";
@@ -17,12 +19,14 @@ export class NacionalidadController {
 
     constructor() {
         const repository = new PrismaNacionalidadRepository();
-        this.createUseCase = new CreateNacionalidadUseCase(repository);
-        this.updateUseCase = new UpdateNacionalidadUseCase(repository);
-        this.deleteUseCase = new DeleteNacionalidadUseCase(repository);
+        const syncLogRepository = new PrismaSyncLogRepository();
+        this.createUseCase = new CreateNacionalidadUseCase(repository, syncLogRepository);
+        this.updateUseCase = new UpdateNacionalidadUseCase(repository, syncLogRepository);
+        this.deleteUseCase = new DeleteNacionalidadUseCase(repository, syncLogRepository);
         this.getUseCase = new GetNacionalidadUseCase(repository);
         this.listUseCase = new ListNacionalidadesUseCase(repository);
     }
+
 
     async list(c: Context) {
         try {
@@ -56,9 +60,24 @@ export class NacionalidadController {
 
     async create(c: Context) {
         try {
-            const body = await c.req.json();
+            let body: any = {};
+            const contentType = c.req.header("content-type") || "";
+
+            if (contentType.includes("multipart/form-data")) {
+                const formData = await c.req.parseBody();
+                body = { ...formData };
+                // Handle the file if present
+                if (formData['bandera_file'] && formData['bandera_file'] instanceof File) {
+                    const file = formData['bandera_file'] as File;
+                    body.bandera = Buffer.from(await file.arrayBuffer());
+                }
+            } else {
+                body = await c.req.json();
+            }
+
             const validated = CreateNacionalidadSchema.parse(body);
             const result = await this.createUseCase.execute(validated);
+
             return c.json({
                 ...result,
                 bandera: result.bandera ? Buffer.from(result.bandera).toString('base64') : null
@@ -67,6 +86,7 @@ export class NacionalidadController {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
+            logger.error("Error creating nacionalidad:", error);
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }
@@ -74,9 +94,24 @@ export class NacionalidadController {
     async update(c: Context) {
         try {
             const id = c.req.param("id");
-            const body = await c.req.json();
+            let body: any = {};
+            const contentType = c.req.header("content-type") || "";
+
+            if (contentType.includes("multipart/form-data")) {
+                const formData = await c.req.parseBody();
+                body = { ...formData };
+                // Handle the file if present
+                if (formData['bandera_file'] && formData['bandera_file'] instanceof File) {
+                    const file = formData['bandera_file'] as File;
+                    body.bandera = Buffer.from(await file.arrayBuffer());
+                }
+            } else {
+                body = await c.req.json();
+            }
+
             const validated = UpdateNacionalidadSchema.parse(body);
             await this.updateUseCase.execute(id, validated);
+
             return c.json({ message: "Nacionalidad updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -85,6 +120,7 @@ export class NacionalidadController {
             if (error.message === "Nacionalidad not found") {
                 return c.json({ error: "Nacionalidad not found" }, 404);
             }
+            logger.error("Error updating nacionalidad:", error);
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }

@@ -17,6 +17,7 @@ import type { ApplyPlanesPagoEventUseCase } from "./ApplyPlanesPagoEventUseCase"
 import type { ApplyCuentaEventUseCase } from "./ApplyCuentaEventUseCase";
 import type { ApplyEntrenadorEventUseCase } from "./ApplyEntrenadorEventUseCase";
 import type { ApplyUserEventUseCase } from "./ApplyUserEventUseCase";
+import type { ApplyGymEventUseCase } from "./ApplyGymEventUseCase";
 
 export class UploadEventsUseCase {
     constructor(
@@ -35,7 +36,8 @@ export class UploadEventsUseCase {
         private readonly applyPlanesPagoEventUseCase: ApplyPlanesPagoEventUseCase,
         private readonly applyCuentaEventUseCase: ApplyCuentaEventUseCase,
         private readonly applyEntrenadorEventUseCase: ApplyEntrenadorEventUseCase,
-        private readonly applyUserEventUseCase: ApplyUserEventUseCase
+        private readonly applyUserEventUseCase: ApplyUserEventUseCase,
+        private readonly applyGymEventUseCase: ApplyGymEventUseCase
     ) { }
 
     async execute(dto: UploadEventsDTO): Promise<{ processed: number }> {
@@ -61,6 +63,15 @@ export class UploadEventsUseCase {
                 });
             } else if (ev.entidad === "user") {
                 await this.applyUserEventUseCase.execute({
+                    eventId: ev.event_id,
+                    entidadId: ev.entidad_id,
+                    operacion: ev.operacion,
+                    gymId: gym_id,
+                    deviceId: device_id,
+                    payload: ev.payload as Record<string, unknown>
+                });
+            } else if (ev.entidad === "gym") {
+                await this.applyGymEventUseCase.execute({
                     eventId: ev.event_id,
                     entidadId: ev.entidad_id,
                     operacion: ev.operacion,
@@ -185,6 +196,13 @@ export class UploadEventsUseCase {
                     deviceId: device_id,
                     payload: ev.payload as Record<string, unknown>
                 });
+            } else if ([
+                "configuracion_sistema",
+                "entrenador_comision_regla",
+                "entrenador_comision_devengo",
+                "entrenador_comision_cuota"
+            ].includes(ev.entidad)) {
+                await this.applyPrismaMappedEvent(ev, gym_id, device_id);
             } else {
                 logger.warn("Entidad de sync no implementada en UploadEventsUseCase", {
                     entidad: ev.entidad,
@@ -194,13 +212,16 @@ export class UploadEventsUseCase {
                 continue;
             }
 
+            const globalEntities = ["moneda", "monedas", "nacionalidad", "nacionalidades", "tipo_pago", "tipo_cambio", "referencia"];
+            const effectiveGymId = globalEntities.includes(ev.entidad) ? null : gym_id;
+
             // Registrar en sync_log
             await this.syncLogRepository.register({
                 eventId: ev.event_id,
                 entidad: ev.entidad,
                 operacion: ev.operacion,
                 entidadId: ev.entidad_id,
-                gymId: gym_id,
+                gymId: effectiveGymId,
                 deviceId: device_id,
                 payload: ev.payload
             });
@@ -227,5 +248,52 @@ export class UploadEventsUseCase {
         }
 
         return { processed };
+    }
+
+    private async applyPrismaMappedEvent(ev: UploadEventsDTO["events"][number], gymId: string, deviceId: string) {
+        const mapping: Record<string, { delegate: any; pk: string }> = {
+            configuracion_sistema: { delegate: (prisma as any).configuracionSistema, pk: "configuracion_id" },
+            entrenador_comision_regla: { delegate: (prisma as any).entrenadorComisionRegla, pk: "regla_id" },
+            entrenador_comision_devengo: { delegate: (prisma as any).entrenadorComisionDevengo, pk: "devengo_id" },
+            entrenador_comision_cuota: { delegate: (prisma as any).entrenadorComisionCuota, pk: "cuota_id" },
+        };
+        const target = mapping[ev.entidad];
+        if (!target) return;
+
+        const payload = this.normalizeDates({ ...(ev.payload as Record<string, unknown>) });
+        const record: Record<string, unknown> = {
+            ...payload,
+            [target.pk]: ev.entidad_id ?? payload[target.pk],
+            gym_id: payload.gym_id ?? gymId,
+            source_device: payload.source_device ?? deviceId,
+        };
+
+        if (ev.operacion === "DELETE") {
+            await target.delegate.updateMany({
+                where: { [target.pk]: record[target.pk] },
+                data: { is_deleted: true, deleted_at: new Date(), updated_at: new Date() },
+            });
+            return;
+        }
+
+        await target.delegate.upsert({
+            where: { [target.pk]: record[target.pk] },
+            create: record,
+            update: record,
+        });
+    }
+
+    private normalizeDates(payload: Record<string, unknown>) {
+        for (const key of Object.keys(payload)) {
+            const value = payload[key];
+            if (
+                typeof value === "string" &&
+                (key.endsWith("_at") || key.startsWith("fecha_") || key.startsWith("periodo_")) &&
+                !Number.isNaN(Date.parse(value))
+            ) {
+                payload[key] = new Date(value);
+            }
+        }
+        return payload;
     }
 }

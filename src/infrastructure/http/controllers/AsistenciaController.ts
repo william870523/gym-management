@@ -8,6 +8,7 @@ import { DeleteAsistenciaUseCase } from "../../../application/use-cases/asistenc
 import { GetAsistenciaUseCase } from "../../../application/use-cases/asistencia/GetAsistenciaUseCase";
 import { ListAsistenciasUseCase } from "../../../application/use-cases/asistencia/ListAsistenciasUseCase";
 import { CreateAsistenciaSchema, UpdateAsistenciaSchema } from "../../../application/dtos/AsistenciaDTO";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export class AsistenciaController {
     private createUseCase: CreateAsistenciaUseCase;
@@ -27,7 +28,32 @@ export class AsistenciaController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const page = Number(c.req.query("page")) || 1;
+            const limit = Math.min(Number(c.req.query("limit")) || 10, 200);
+            const result = await this.listUseCase.execute(page, limit);
+            return c.json(result);
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async listActive(c: Context) {
+        try {
+            const page = Number(c.req.query("page")) || 1;
+            const limit = Math.min(Number(c.req.query("limit")) || 100, 200);
+            const skip = (page - 1) * limit;
+            const result = await new PrismaAsistenciaRepository().findActive(skip, limit);
+            return c.json(result);
+        } catch (error) {
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async listToday(c: Context) {
+        try {
+            const auth = c.get("auth");
+            const gymId = c.req.query("gym_id") ?? auth?.gymId ?? null;
+            const result = await new PrismaAsistenciaRepository().findToday(gymId);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -70,6 +96,35 @@ export class AsistenciaController {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async finalize(c: Context) {
+        try {
+            const id = c.req.param("id");
+            const repository = new PrismaAsistenciaRepository();
+            const existing = await repository.findById(id);
+            if (!existing) {
+                return c.json({ error: "Asistencia not found" }, 404);
+            }
+
+            const result = await repository.finalize(id, trustedClock.nowUtc());
+
+            await prisma.syncLog.create({
+                data: {
+                    event_id: crypto.randomUUID(),
+                    entidad: "asistencia",
+                    operacion: "UPDATE",
+                    entidad_id: result.asistencia_id,
+                    gym_id: result.gym_id,
+                    device_id: null,
+                    payload_json: JSON.stringify(result),
+                },
+            });
+
+            return c.json(result);
+        } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }

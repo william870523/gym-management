@@ -20,6 +20,7 @@ export class ApplyTipoPagoEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.tipoPagoRepository.softDelete(input.entidadId);
             return;
         }
 
@@ -33,11 +34,14 @@ export class ApplyTipoPagoEventUseCase {
         return {
             tipo_pago_id: input.entidadId,
             nombre_tipo_pago: String(payload.nombre_tipo_pago),
+            codigo: payload.codigo ? String(payload.codigo) : null,
+            activo: payload.activo !== undefined ? Boolean(payload.activo) : true,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),
             is_deleted: false,
             deleted_at: null
         };
+
     }
 }

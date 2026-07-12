@@ -1,6 +1,7 @@
 import type { Moneda } from "../../../domain/entities/Moneda";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { MonedaRepository } from "../../../domain/repositories/MonedaRepository";
+import { normalizeBinary } from "../../../shared/utils/normalizeBinary";
 
 export interface ApplyMonedaEventInput {
     eventId: string;
@@ -20,6 +21,7 @@ export class ApplyMonedaEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.monedaRepository.softDelete(input.entidadId);
             return;
         }
 
@@ -35,7 +37,7 @@ export class ApplyMonedaEventUseCase {
             moneda_nombre: String(payload.moneda_nombre),
             codigo: String(payload.codigo),
             simbolo: (payload.simbolo as string | null) ?? null,
-            imagen: payload.imagen ? Buffer.from(String(payload.imagen), 'base64') : null,
+            imagen: normalizeBinary(payload.imagen),
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),

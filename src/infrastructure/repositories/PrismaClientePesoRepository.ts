@@ -33,10 +33,31 @@ export class PrismaClientePesoRepository implements ClientePesoRepository {
         });
     }
 
-    async findAll(): Promise<ClientePeso[]> {
-        return prisma.clientePeso.findMany({
-            where: { is_deleted: false }
+    async findAll(ci?: string): Promise<ClientePeso[]> {
+        const where: any = { is_deleted: false };
+        if (ci) {
+            where.ci = ci;
+        }
+
+        const pesos = await prisma.clientePeso.findMany({
+            where,
+            orderBy: { fecha: 'desc' }
         });
+
+        // Map Prisma result to Domain Entity
+        return pesos.map(p => ({
+            cliente_peso_id: p.cliente_peso_id,
+            ci: p.ci,
+            fecha: p.fecha,
+            peso: p.peso,
+            gym_id: p.gym_id,
+            source_device: p.source_device,
+            version: p.version,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+            deleted_at: p.deleted_at,
+            is_deleted: p.is_deleted
+        }));
     }
 
     async findById(id: string): Promise<ClientePeso | null> {

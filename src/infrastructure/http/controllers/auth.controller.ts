@@ -39,7 +39,7 @@ export async function registerController(c: Context) {
       user_email: email,
       password: hashed,
       role: "admin",
-      createdAt: new Date()
+      created_at: new Date()
     }
   });
 
@@ -93,12 +93,14 @@ export async function loginController(c: Context) {
     role: user.role
   });
 
+
   return c.json({
     token,
     user: {
       id: user.user_id,
       nombre: user.user_nombre,
-      role: user.role
+      role: user.role, // Legacy
+      permissions: []
     }
   });
 }

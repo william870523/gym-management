@@ -1,4 +1,5 @@
 // src/infrastructure/sync/SyncService.ts
+// src/infrastructure/sync/SyncService.ts
 import { prisma } from "../db/prismaClient";
 import {
   UploadEventsDTO,
@@ -20,6 +21,7 @@ import { PrismaCuentaRepository } from "../repositories/PrismaCuentaRepository";
 import { PrismaEntrenadorRepository } from "../repositories/PrismaEntrenadorRepository";
 import { PrismaUserRepository } from "../repositories/PrismaUserRepository";
 import { PrismaSyncLogRepository } from "../repositories/PrismaSyncLogRepository";
+import { PrismaGymRepository } from "../repositories/PrismaGymRepository";
 
 import { ApplyClienteEventUseCase } from "../../application/use-cases/sync/ApplyClienteEventUseCase";
 import { ApplyClientePesoEventUseCase } from "../../application/use-cases/sync/ApplyClientePesoEventUseCase";
@@ -36,10 +38,13 @@ import { ApplyPlanesPagoEventUseCase } from "../../application/use-cases/sync/Ap
 import { ApplyCuentaEventUseCase } from "../../application/use-cases/sync/ApplyCuentaEventUseCase";
 import { ApplyEntrenadorEventUseCase } from "../../application/use-cases/sync/ApplyEntrenadorEventUseCase";
 import { ApplyUserEventUseCase } from "../../application/use-cases/sync/ApplyUserEventUseCase";
+import { ApplyGymEventUseCase } from "../../application/use-cases/sync/ApplyGymEventUseCase";
 import { UploadEventsUseCase } from "../../application/use-cases/sync/UploadEventsUseCase";
+import { databaseUtcNow } from "../time/time.service";
 
 export class SyncService {
   private uploadEventsUseCase: UploadEventsUseCase;
+  private syncLogRepository: PrismaSyncLogRepository;
 
   // Inicializa los componentes necesarios para procesar eventos de sync.
   constructor() {
@@ -59,6 +64,9 @@ export class SyncService {
     const entrenadorRepository = new PrismaEntrenadorRepository();
     const userRepository = new PrismaUserRepository();
     const syncLogRepository = new PrismaSyncLogRepository();
+    const gymRepository = new PrismaGymRepository();
+    // Repository is already instantiated here, let's use it
+    this.syncLogRepository = syncLogRepository;
 
     const applyClienteEventUseCase = new ApplyClienteEventUseCase(clienteRepository);
     const applyClientePesoEventUseCase = new ApplyClientePesoEventUseCase(clientePesoRepository);
@@ -75,6 +83,7 @@ export class SyncService {
     const applyCuentaEventUseCase = new ApplyCuentaEventUseCase(cuentaRepository);
     const applyEntrenadorEventUseCase = new ApplyEntrenadorEventUseCase(entrenadorRepository);
     const applyUserEventUseCase = new ApplyUserEventUseCase(userRepository);
+    const applyGymEventUseCase = new ApplyGymEventUseCase(gymRepository);
 
     this.uploadEventsUseCase = new UploadEventsUseCase(
       syncLogRepository,
@@ -92,7 +101,8 @@ export class SyncService {
       applyPlanesPagoEventUseCase,
       applyCuentaEventUseCase,
       applyEntrenadorEventUseCase,
-      applyUserEventUseCase
+      applyUserEventUseCase,
+      applyGymEventUseCase
     );
   }
 
@@ -109,27 +119,35 @@ export class SyncService {
 
   // Obtiene los eventos recientes desde sync_log filtrando por gym.
   async getChanges(query: ChangesQueryDTO) {
-    const sinceDate = new Date(query.since);
     const gymId = query.gym_id;
+    const sinceDate = query.since ? new Date(query.since) : undefined;
+    // El ID autoincremental evita perder eventos que comparten created_at.
+    const [watermark, maxId] = await Promise.all([
+      databaseUtcNow(),
+      prisma.syncLog.aggregate({ _max: { id: true } }),
+    ]);
+    const watermarkId = maxId._max.id ?? 0;
+    const events = await this.syncLogRepository.findChanges(
+      { afterId: query.after_id, since: sinceDate },
+      watermarkId,
+      gymId,
+    );
+    const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+    const pageIsFull = events.length >= 1000;
+    const nextCursorId = pageIsFull
+      ? Number(lastEvent?.cursor_id ?? query.after_id ?? 0)
+      : watermarkId;
+    const nextCursor =
+      pageIsFull && lastEvent?.created_at
+        ? new Date(lastEvent.created_at)
+        : watermark;
 
-    const events = await prisma.syncLog.findMany({
-      where: {
-        created_at: { gt: sinceDate },
-        OR: [{ gym_id: gymId }, { gym_id: null }]
-      },
-      orderBy: { created_at: "asc" },
-      take: 1000
-    });
-
-    return events.map((e) => ({
-      event_id: e.event_id,
-      entidad: e.entidad,
-      operacion: e.operacion,
-      entidad_id: e.entidad_id,
-      gym_id: e.gym_id,
-      device_id: e.device_id,
-      payload: JSON.parse(e.payload_json),
-      created_at: e.created_at
-    }));
+    return {
+      events,
+      next_cursor: nextCursor.toISOString(),
+      next_cursor_id: nextCursorId,
+      has_more: nextCursorId < watermarkId,
+      server_utc: watermark.toISOString(),
+    };
   }
 }

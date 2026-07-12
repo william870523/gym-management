@@ -1,6 +1,7 @@
 import type { Asistencia } from "../../../domain/entities/Asistencia";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { AsistenciaRepository } from "../../../domain/repositories/AsistenciaRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export interface ApplyAsistenciaEventInput {
     eventId: string;
@@ -34,13 +35,20 @@ export class ApplyAsistenciaEventUseCase {
         return {
             asistencia_id: input.entidadId,
             ci: String(payload.ci),
+            fecha_salida: payload.fecha_salida ? new Date(String(payload.fecha_salida)) : null,
             gym_id: input.gymId,
             source_device: (payload.source_device as string | null) ?? input.deviceId,
             version: (payload.version as number) ?? 1,
-            created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
-            updated_at: new Date(),
+            created_at: payload.created_at
+                ? new Date(String(payload.created_at))
+                : trustedClock.nowUtc(),
+            updated_at: trustedClock.nowUtc(),
             is_deleted: false,
-            deleted_at: null
+            deleted_at: null,
+            pausa_inicio: payload.pausa_inicio
+                ? new Date(String(payload.pausa_inicio))
+                : null,
+            pausa_ms: typeof payload.pausa_ms === "number" ? payload.pausa_ms : 0
         };
     }
 }

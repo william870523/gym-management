@@ -38,6 +38,9 @@ import { clientePesoRoutes } from "./routes/cliente_peso.routes";
 import { asistenciaRoutes } from "./routes/asistencia.routes";
 import { pagoClienteRoutes } from "./routes/pago_cliente.routes";
 import { detallePagoRoutes } from "./routes/detalle_pago.routes";
+import { configuracionRoutes } from "./routes/configuracion.routes";
+import { accountingRoutes } from "./routes/accounting.routes";
+import { getRemoteTimeStatus } from "../time/time.service";
 
 const app = new Hono();
 
@@ -46,27 +49,27 @@ const authLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
   max: 5,
   keyGenerator: (c) => getClientIp(c),
-  name: "auth"
+  name: "auth",
 });
 
 const syncLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 60,
   keyGenerator: (c) => {
-    const auth = c.get('auth');
-    return auth?.sub || auth?.id || `device:${getClientIp(c)}`;
+    const auth = c.get("auth");
+    return auth?.sub || `device:${getClientIp(c)}`;
   },
-  name: "sync"
+  name: "sync",
 });
 
 const adminLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 120,
   keyGenerator: (c) => {
-    const auth = c.get('auth');
-    return auth?.sub || auth?.id || `user:${getClientIp(c)}`;
+    const auth = c.get("auth");
+    return auth?.sub || `user:${getClientIp(c)}`;
   },
-  name: "admin"
+  name: "admin",
 });
 
 // Cabeceras de seguridad
@@ -81,8 +84,16 @@ app.use("*", async (c, next) => {
   logger.info(`${c.req.method} ${c.req.path} - ${ms}ms`);
 });
 
-// Healthcheck
-app.get("/health", (c) => c.json({ status: "ok-remote" }));
+// Reloj público: no expone datos sensibles y permite calibrar instalaciones.
+app.get("/system/time", async (c) =>
+  c.json(await getRemoteTimeStatus(c.req.query("gym_id"))),
+);
+app.get("/health", async (c) =>
+  c.json({
+    status: "ok-remote",
+    time: await getRemoteTimeStatus(c.req.query("gym_id")),
+  }),
+);
 
 // Rutas principales
 const authProtected = new Hono();
@@ -128,7 +139,7 @@ paymentsProtected.route("/", paymentsRoutes());
 app.route("/payments", paymentsProtected);
 
 const usersProtected = new Hono();
-usersProtected.use("*", authAdmin());
+usersProtected.use("*", authAny());
 usersProtected.use("*", adminLimiter);
 usersProtected.route("/", usersRoutes());
 app.route("/users", usersProtected);
@@ -210,6 +221,7 @@ pagosClienteProtected.use("*", authAdmin());
 pagosClienteProtected.use("*", adminLimiter);
 pagosClienteProtected.route("/", pagoClienteRoutes);
 app.route("/pagos-cliente", pagosClienteProtected);
+app.route("/pagos", pagosClienteProtected);
 
 const detallesPagoProtected = new Hono();
 detallesPagoProtected.use("*", authAdmin());
@@ -217,9 +229,21 @@ detallesPagoProtected.use("*", adminLimiter);
 detallesPagoProtected.route("/", detallePagoRoutes);
 app.route("/detalles-pago", detallesPagoProtected);
 
+const configuracionProtected = new Hono();
+configuracionProtected.use("*", authAdmin());
+configuracionProtected.use("*", adminLimiter);
+configuracionProtected.route("/", configuracionRoutes);
+app.route("/configuracion", configuracionProtected);
+
+const accountingProtected = new Hono();
+accountingProtected.use("*", authAdmin());
+accountingProtected.use("*", adminLimiter);
+accountingProtected.route("/", accountingRoutes);
+app.route("/contabilidad", accountingProtected);
+
 logger.info(`Starting REMOTE API on port ${env.port}...`);
 
 export default {
   port: env.port,
-  fetch: app.fetch
+  fetch: app.fetch,
 };

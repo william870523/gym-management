@@ -1,9 +1,13 @@
 import { User } from "@prisma/client";
 
 export interface UserRepository {
+    findAll(): Promise<User[]>;
     findByEmail(email: string): Promise<User | null>;
     findById(id: string): Promise<User | null>;
     create(data: Partial<User>): Promise<User>;
+    update(id: string, data: Partial<User>): Promise<User>;
     upsertFromSync(data: User): Promise<User>;
     softDelete(id: string): Promise<void>;
 }
+
+

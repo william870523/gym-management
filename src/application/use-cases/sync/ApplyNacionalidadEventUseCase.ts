@@ -1,6 +1,7 @@
 import type { Nacionalidad } from "../../../domain/entities/Nacionalidad";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { NacionalidadRepository } from "../../../domain/repositories/NacionalidadRepository";
+import { normalizeBinary } from "../../../shared/utils/normalizeBinary";
 
 export interface ApplyNacionalidadEventInput {
     eventId: string;
@@ -20,6 +21,7 @@ export class ApplyNacionalidadEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
+            await this.nacionalidadRepository.softDelete(input.entidadId);
             return;
         }
 
@@ -34,7 +36,7 @@ export class ApplyNacionalidadEventUseCase {
             nacionalidad_id: input.entidadId,
             nacionalidad_nombre: String(payload.nacionalidad_nombre),
             codigo_iso: String(payload.codigo_iso),
-            bandera: payload.bandera ? Buffer.from(String(payload.bandera), 'base64') : null,
+            bandera: normalizeBinary(payload.bandera),
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),

@@ -72,7 +72,7 @@ export class PrismaNacionalidadRepository implements NacionalidadRepository {
             data: {
                 nacionalidad_nombre: data.nacionalidad_nombre,
                 codigo_iso: data.codigo_iso,
-                bandera: data.bandera ? Buffer.from(data.bandera) : undefined,
+                bandera: data.bandera === undefined ? undefined : (data.bandera ? Buffer.from(data.bandera) : null),
                 version: { increment: 1 },
                 updated_at: new Date()
             }
@@ -88,5 +88,16 @@ export class PrismaNacionalidadRepository implements NacionalidadRepository {
                 updated_at: new Date()
             }
         });
+    }
+
+    async findByCode(code: string): Promise<Nacionalidad | null> {
+        const result = await prisma.nacionalidad.findUnique({
+            where: { codigo_iso: code }
+        });
+        if (!result) return null;
+        return {
+            ...result,
+            bandera: result.bandera ? new Uint8Array(result.bandera) : null
+        };
     }
 }

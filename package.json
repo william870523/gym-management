@@ -34,6 +34,7 @@
     "repair:account-gym-ownership": "bun --preload ./src/config/tz-preload.ts scripts/repair-account-gym-ownership.ts",
     "demo:client-history": "bun --preload ./src/config/tz-preload.ts scripts/demo-client-history.ts",
     "demo:management-margin": "bun --preload ./src/config/tz-preload.ts scripts/demo-management-margin.ts",
+    "migrate:exchange-rate-surcharges": "bun --preload ./src/config/tz-preload.ts scripts/migrate-exchange-rate-surcharges.ts",
     "demo:retention-year": "bun --preload ./src/config/tz-preload.ts scripts/demo-retention-year.ts"
   },
   "devDependencies": {

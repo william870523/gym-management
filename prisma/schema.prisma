@@ -173,6 +173,7 @@ model TipoCambio {
   moneda_id_base   String
   moneda_id_target String
   exchange_rate    Float
+  recargos_json    String?
   fecha_inicio     DateTime
   fecha_expiracion DateTime?
   activo           Boolean   @default(true)

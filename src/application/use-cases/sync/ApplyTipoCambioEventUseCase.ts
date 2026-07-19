@@ -36,6 +36,9 @@ export class ApplyTipoCambioEventUseCase {
             moneda_id_base: String(payload.moneda_id_base),
             moneda_id_target: String(payload.moneda_id_target),
             exchange_rate: Number(payload.exchange_rate),
+            recargos_json: payload.recargos_json != null
+                ? String(payload.recargos_json)
+                : null,
             fecha_inicio: new Date(String(payload.fecha_inicio)),
             fecha_expiracion: payload.fecha_expiracion ? new Date(String(payload.fecha_expiracion)) : null,
             activo: Boolean(payload.activo),

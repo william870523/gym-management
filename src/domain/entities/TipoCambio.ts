@@ -3,6 +3,7 @@ export interface TipoCambio {
     moneda_id_base: string;
     moneda_id_target: string;
     exchange_rate: number;
+    recargos_json?: string | null;
     fecha_inicio: Date;
     fecha_expiracion?: Date | null;
     activo: boolean;

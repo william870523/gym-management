@@ -1,6 +1,7 @@
 import type { PagoCliente } from "../entities/PagoCliente";
 
 import type { DetallePago } from "../entities/DetallePago";
+import type { PlanesPago } from "../entities/PlanesPago";
 
 export interface PagoClienteRepository {
     upsertPagoCliente(data: PagoCliente): Promise<void>;
@@ -12,6 +13,7 @@ export interface PagoClienteRepository {
     processPayment(
         pago: PagoCliente,
         detalles: DetallePago[],
-        planDurationDays: number
+        plan: PlanesPago,
+        membershipId?: string | null,
     ): Promise<void>;
 }

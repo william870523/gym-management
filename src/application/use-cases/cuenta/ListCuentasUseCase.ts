@@ -4,7 +4,7 @@ import type { CuentaRepository } from "../../../domain/repositories/CuentaReposi
 export class ListCuentasUseCase {
     constructor(private readonly cuentaRepository: CuentaRepository) { }
 
-    async execute(): Promise<Cuenta[]> {
-        return this.cuentaRepository.findAll();
+    async execute(gymId: string): Promise<Cuenta[]> {
+        return this.cuentaRepository.findAll(gymId);
     }
 }

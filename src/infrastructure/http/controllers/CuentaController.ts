@@ -29,7 +29,9 @@ export class CuentaController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.listUseCase.execute(gymId);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -39,7 +41,9 @@ export class CuentaController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, gymId);
             if (!result) {
                 return c.json({ error: "Cuenta not found" }, 404);
             }
@@ -53,7 +57,13 @@ export class CuentaController {
         try {
             const body = await c.req.json();
             const validated = CreateCuentaSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.createUseCase.execute({
+                ...validated,
+                gym_id: gymId,
+                source_device: "WEB_ADMIN",
+            });
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -68,7 +78,9 @@ export class CuentaController {
             const id = c.req.param("id");
             const body = await c.req.json();
             const validated = UpdateCuentaSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            await this.updateUseCase.execute(id, validated, gymId);
             return c.json({ message: "Cuenta updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -84,7 +96,9 @@ export class CuentaController {
     async delete(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, gymId);
             return c.json({ message: "Cuenta deleted successfully" });
         } catch (error: any) {
             if (error.message === "Cuenta not found") {
@@ -92,5 +106,10 @@ export class CuentaController {
             }
             return c.json({ error: "Internal Server Error" }, 500);
         }
+    }
+
+    private gymId(c: Context): string | null {
+        const auth = c.get("auth");
+        return auth?.gymId?.trim() || null;
     }
 }

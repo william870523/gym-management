@@ -192,7 +192,7 @@ model TipoCambio {
 model ConfiguracionSistema {
   configuracion_id String    @id
   clave            String
-  valor            String
+  valor            String    @db.Text
   descripcion      String?
   gym_id           String    @default("GLOBAL")
   is_deleted       Boolean   @default(false)
@@ -266,6 +266,210 @@ model PlanesPago {
   @@map("planes_pago")
 }
 
+// Contrato histórico de servicio. `Cliente` conserva temporalmente el plan y
+// las fechas vigentes como proyección, pero el historial vive aquí.
+model MembresiaCliente {
+  membresia_id             String    @id
+  ci                       String
+  id_planes_pago           String
+  id_entrenador            String?
+  plan_nombre_snapshot     String
+  precio_snapshot          Decimal   @db.Decimal(18, 2)
+  moneda_id                String
+  duracion_dias_snapshot   Int
+  fecha_inicio             DateTime
+  fecha_fin                DateTime
+  estado                   String    @default("PENDIENTE_PAGO") // PENDIENTE_PAGO, ACTIVA, PAUSADA, VENCIDA, CANCELADA
+  origen                   String    @default("ALTA") // ALTA, RENOVACION, CAMBIO, REACTIVACION, MIGRACION_ESTADO_ACTUAL
+  importe_pagado           Decimal   @default(0) @db.Decimal(18, 2)
+  activada_at              DateTime?
+  reconstruida             Boolean   @default(false)
+  confianza_reconstruccion String?
+  is_deleted               Boolean   @default(false)
+  created_at               DateTime? @default(now())
+  gym_id                   String
+  source_device            String?
+  version                  Int       @default(1)
+  updated_at               DateTime  @default(now())
+  deleted_at               DateTime?
+
+  @@index([ci, estado, fecha_fin], map: "idx_memb_cliente_ci_estado_fin")
+  @@index([gym_id, estado, fecha_fin], map: "idx_memb_cliente_gym_estado_fin")
+  @@index([id_planes_pago, estado], map: "idx_memb_cliente_plan_estado")
+  @@map("membresia_cliente")
+}
+
+// Intervalo auditable de congelación de una membresía. Las fechas efectivas
+// son días de calendario UTC; *_at son instantes UTC del reloj confiable.
+model MembresiaPausa {
+  pausa_id                 String    @id
+  membresia_id             String
+  fecha_pausa              DateTime
+  fecha_reanudacion        DateTime?
+  fecha_fin_anterior       DateTime
+  fecha_fin_recalculada    DateTime?
+  dias_restantes_snapshot  Int
+  motivo                   String
+  estado                   String    @default("ACTIVA") // ACTIVA, REANUDADA, CANCELADA
+  activa_clave             String?   @unique(map: "uq_memb_pausa_activa")
+  pausada_at               DateTime
+  reanudada_at             DateTime?
+  registrada_por_user_id   String?
+  reanudada_por_user_id    String?
+  reanudacion_operacion_id String?   @unique(map: "uq_memb_pausa_resume_op")
+  is_deleted               Boolean   @default(false)
+  created_at               DateTime? @default(now())
+  gym_id                   String
+  source_device            String?
+  version                  Int       @default(1)
+  updated_at               DateTime  @default(now())
+  deleted_at               DateTime?
+
+  @@index([membresia_id, estado], map: "idx_memb_pausa_memb_estado")
+  @@index([gym_id, estado, fecha_pausa], map: "idx_memb_pausa_gym_estado_fecha")
+  @@map("membresia_pausa")
+}
+
+// Solicitud protegida que no altera la vigencia hasta que otra cuenta de
+// administración registra una decisión. `pendiente_clave` impide dos
+// solicitudes abiertas para la misma membresía.
+model MembresiaSolicitud {
+  solicitud_id                   String    @id
+  membresia_id                   String
+  ci                             String
+  tipo                           String // PAUSAR, REANUDAR
+  motivo                         String
+  estado                         String    @default("PENDIENTE") // PENDIENTE, EN_DECISION (transaccional), APROBADA, RECHAZADA, CANCELADA
+  pendiente_clave                String?   @unique(map: "uq_memb_sol_pendiente")
+  fecha_efectiva_solicitada      DateTime
+  fecha_efectiva_aplicada        DateTime?
+  dias_restantes_estimados       Int
+  dias_restantes_aplicados       Int?
+  fecha_fin_estimada             DateTime?
+  fecha_fin_resultante           DateTime?
+  solicitada_por_user_id         String
+  solicitada_por_nombre_snapshot String
+  solicitada_at                  DateTime
+  decidida_por_user_id           String?
+  decidida_por_nombre_snapshot   String?
+  decision_motivo                String?
+  decision_operacion_id          String?   @unique(map: "uq_memb_sol_decision_op")
+  decidida_at                    DateTime?
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime? @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@index([gym_id, estado, solicitada_at], map: "idx_memb_sol_gym_estado_fecha")
+  @@index([membresia_id, estado], map: "idx_memb_sol_memb_estado")
+  @@index([ci, estado, solicitada_at], map: "idx_memb_sol_ci_estado_fecha")
+  @@map("membresia_solicitud")
+}
+
+// Bitácora operativa append-only de contactos por renovación. Nunca activa una
+// membresía ni sustituye la evidencia financiera del pago.
+model RetencionGestion {
+  gestion_id                     String    @id
+  membresia_id                   String
+  ci                             String
+  resultado                      String // CONTACTADO, PROMESA_PAGO, NO_LOCALIZADO, NO_DESEA_RENOVAR
+  canal                          String // LLAMADA, WHATSAPP, SMS, PRESENCIAL, OTRO
+  nota                           String?
+  promesa_fecha                  DateTime?
+  proxima_gestion_fecha          DateTime?
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime? @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@index([gym_id, ci, registrada_at], map: "idx_ret_gest_gym_ci_fecha")
+  @@index([gym_id, proxima_gestion_fecha, resultado], map: "idx_ret_gest_gym_proxima_result")
+  @@index([membresia_id, registrada_at], map: "idx_ret_gest_memb_fecha")
+  @@map("retencion_gestion")
+}
+
+// Historial no solapado de quién presta el servicio de entrenamiento.
+model MembresiaEntrenadorAsignacion {
+  asignacion_id String    @id
+  membresia_id  String
+  id_entrenador String
+  fecha_inicio  DateTime
+  fecha_fin     DateTime?
+  estado        String    @default("PENDIENTE") // PENDIENTE, ACTIVA, CERRADA, CANCELADA
+  motivo_cierre String?
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime? @default(now())
+  gym_id        String
+  source_device String?
+  version       Int       @default(1)
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@index([membresia_id, estado], map: "idx_memb_asig_memb_estado")
+  @@index([id_entrenador, estado, fecha_inicio], map: "idx_memb_asig_ent_estado_inicio")
+  @@map("membresia_entrenador_asignacion")
+}
+
+// Aplicación explícita de un cobro a una contratación. Permite varios abonos
+// sin extender varias veces el mismo periodo.
+model PagoMembresiaAplicacion {
+  aplicacion_id   String    @id
+  pago_cliente_id String
+  membresia_id    String
+  moneda_id       String
+  monto_aplicado  Decimal   @db.Decimal(18, 2)
+  is_deleted      Boolean   @default(false)
+  created_at      DateTime? @default(now())
+  gym_id          String
+  source_device   String?
+  version         Int       @default(1)
+  updated_at      DateTime  @default(now())
+  deleted_at      DateTime?
+
+  @@unique([pago_cliente_id, membresia_id], map: "uq_pago_memb_pago_memb")
+  @@index([membresia_id, is_deleted], map: "idx_pago_memb_memb_deleted")
+  @@map("pago_membresia_aplicacion")
+}
+
+// Evidencia append-only de la reversión coordinada de un cobro. El ID de la
+// reversión coincide de forma determinista con el pago para hacer converger
+// reintentos locales/remotos sin duplicar la operación.
+model PagoReversion {
+  reversion_id                   String    @id
+  pago_cliente_id                String    @unique(map: "uq_pago_rev_pago")
+  operacion_id                   String    @unique(map: "uq_pago_rev_operacion")
+  tipo                           String    @default("ANULACION") // ANULACION; REEMBOLSO queda reservado para Tesorería
+  motivo                         String    @db.Text
+  ci                             String
+  membresia_id                   String?
+  monto_total                    Float
+  moneda_id                      String
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime
+  resumen_json                   String    @db.LongText
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime? @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@index([gym_id, registrada_at], map: "idx_pago_rev_gym_fecha")
+  @@index([ci, registrada_at], map: "idx_pago_rev_ci_fecha")
+  @@map("pago_reversion")
+}
+
 model EntrenadorComisionRegla {
   regla_id       String    @id
   id_entrenador  String?
@@ -288,31 +492,345 @@ model EntrenadorComisionRegla {
 }
 
 model EntrenadorComisionDevengo {
-  devengo_id            String    @id
-  pago_cliente_id       String
-  id_entrenador         String
-  id_planes_pago        String
-  moneda_id             String
-  monto_base            Float
-  tipo_calculo          String
-  valor_calculo         Float
-  monto_total           Float
-  cuotas_total          Int
-  cuotas_pagadas        Int       @default(0)
-  estado                String    @default("PENDIENTE") // PENDIENTE, PAGADO, ANULADO
-  fecha_inicio_servicio DateTime
-  fecha_fin_servicio    DateTime?
-  is_deleted            Boolean   @default(false)
-  created_at            DateTime? @default(now())
-  gym_id                String?
-  source_device         String?
-  version               Int       @default(1)
-  updated_at            DateTime  @default(now())
-  deleted_at            DateTime?
+  devengo_id             String    @id
+  pago_cliente_id        String
+  membresia_id           String?
+  fuente_tipo            String    @default("PAGO_CLIENTE") // PAGO_CLIENTE, CREDITO_MEMBRESIA
+  fuente_id              String?
+  id_entrenador          String
+  id_planes_pago         String
+  moneda_id              String
+  monto_base             Float
+  tipo_calculo           String
+  valor_calculo          Float
+  monto_total            Float
+  cuotas_total           Int
+  cuotas_pagadas         Int       @default(0)
+  estado                 String    @default("PENDIENTE") // PENDIENTE, PAGADO, ANULADO
+  fecha_inicio_servicio  DateTime
+  fecha_fin_servicio     DateTime?
+  perfil_compensacion_id String?
+  modalidad_compensacion String?
+  metodo_devengo         String?
+  frecuencia_desembolso  String?
+  dia_corte              Int?
+  cuenta_preferida_id    String?
+  is_deleted             Boolean   @default(false)
+  created_at             DateTime? @default(now())
+  gym_id                 String?
+  source_device          String?
+  version                Int       @default(1)
+  updated_at             DateTime  @default(now())
+  deleted_at             DateTime?
 
   @@index([pago_cliente_id])
+  @@index([membresia_id, estado], map: "idx_ent_com_dev_memb_estado")
+  @@index([fuente_tipo, fuente_id], map: "idx_ent_com_dev_fuente")
   @@index([id_entrenador, estado])
   @@map("entrenador_comision_devengo")
+}
+
+model EntrenadorCompensacionPerfil {
+  perfil_id             String    @id
+  id_entrenador         String
+  modalidad             String // COMISION, FIJO, MIXTO
+  metodo_devengo        String // PERIODOS_IGUALES, DIAS_SERVICIO
+  frecuencia_desembolso String // DIARIA, SEMANAL, QUINCENAL, MENSUAL, EXTRAORDINARIA
+  dia_corte             Int?
+  monto_fijo            Decimal?  @db.Decimal(18, 2)
+  moneda_id             String?
+  cuenta_preferida_id   String?
+  activo                Boolean   @default(true)
+  fecha_inicio          DateTime  @db.DateTime(3)
+  fecha_fin             DateTime? @db.DateTime(3)
+  notas                 String?   @db.Text
+  is_deleted            Boolean   @default(false)
+  created_at            DateTime  @default(now()) @db.DateTime(3)
+  gym_id                String
+  source_device         String?
+  version               Int       @default(1)
+  updated_at            DateTime  @default(now()) @db.DateTime(3)
+  deleted_at            DateTime? @db.DateTime(3)
+
+  @@index([gym_id, id_entrenador, activo, fecha_inicio], map: "idx_ent_comp_perfil_vigencia")
+  @@map("entrenador_compensacion_perfil")
+}
+
+// Obligación periódica del componente fijo. Se mantiene separada de las
+// cuotas de comisión porque nace del perfil laboral, no de un cobro de socio.
+model EntrenadorObligacionFija {
+  obligacion_id          String    @id
+  perfil_compensacion_id String
+  id_entrenador          String
+  moneda_id              String
+  periodo_inicio         DateTime
+  periodo_fin            DateTime
+  fecha_programada       DateTime
+  monto                  Decimal   @db.Decimal(18, 2)
+  estado                 String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
+  metodo_prorrateo       String // PERIODOS_IGUALES, DIAS_SERVICIO
+  dias_cubiertos         Int
+  dias_periodo           Int
+  formula_snapshot_json  String    @db.Text
+  is_deleted             Boolean   @default(false)
+  created_at             DateTime  @default(now())
+  gym_id                 String
+  source_device          String?
+  version                Int       @default(1)
+  updated_at             DateTime  @default(now())
+  deleted_at             DateTime?
+
+  @@unique([perfil_compensacion_id, periodo_inicio, periodo_fin], map: "uq_ent_obl_fija_periodo")
+  @@index([gym_id, id_entrenador, estado, fecha_programada], map: "idx_ent_obl_fija_pago")
+  @@map("entrenador_obligacion_fija")
+}
+
+// Expediente administrativo previo a la baja. Conserva el impacto original y
+// permanece abierto hasta que las membresías y saldos se ejecuten o cancelen.
+model EntrenadorBajaExpediente {
+  expediente_id                 String    @id
+  id_entrenador                 String
+  abierto_clave                 String?   @unique(map: "uq_ent_baja_abierta")
+  fecha_efectiva                DateTime
+  estado                        String    @default("BORRADOR") // BORRADOR, LISTO_PARA_REVISION, EN_EJECUCION, EJECUTADO, CANCELADO
+  motivo                        String    @db.Text
+  decisiones_total              Int       @default(0)
+  decisiones_pendientes         Int       @default(0)
+  creado_por_user_id            String
+  creado_por_nombre_snapshot    String
+  creado_at                     DateTime
+  impacto_snapshot_json         String    @db.LongText
+  ejecucion_operacion_id        String?   @unique(map: "uq_ent_baja_ejec_op")
+  ejecutado_por_user_id         String?
+  ejecutado_por_nombre_snapshot String?
+  ejecutado_at                  DateTime?
+  ejecucion_resumen_json        String?   @db.LongText
+  cierre_operacion_id           String?   @unique(map: "uq_ent_baja_cierre_op")
+  cerrado_por_user_id           String?
+  cerrado_por_nombre_snapshot   String?
+  cerrado_at                    DateTime?
+  cierre_resumen_json           String?   @db.LongText
+  is_deleted                    Boolean   @default(false)
+  created_at                    DateTime  @default(now())
+  gym_id                        String
+  source_device                 String?
+  version                       Int       @default(1)
+  updated_at                    DateTime  @default(now())
+  deleted_at                    DateTime?
+
+  @@index([gym_id, id_entrenador, estado], map: "idx_ent_baja_ent_estado")
+  @@index([gym_id, fecha_efectiva, estado], map: "idx_ent_baja_fecha_estado")
+  @@map("entrenador_baja_expediente")
+}
+
+// Una decisión por membresía afectada. En esta fase solo prepara y valida la
+// resolución; la ejecución posterior volverá a comprobar la realidad actual.
+model EntrenadorBajaDecision {
+  decision_id                     String    @id
+  expediente_id                   String
+  membresia_id                    String
+  asignacion_origen_id            String?
+  tipo                            String    @default("PENDIENTE") // PENDIENTE, REASIGNAR, SIN_ENTRENADOR, AJUSTAR_CANCELAR
+  id_entrenador_destino           String?
+  motivo                          String?   @db.Text
+  socio_ci_snapshot               String
+  socio_nombre_snapshot           String
+  plan_nombre_snapshot            String
+  membresia_estado_snapshot       String
+  membresia_fecha_inicio_snapshot DateTime
+  membresia_fecha_fin_snapshot    DateTime
+  origen_asignacion_snapshot      String
+  decidida_por_user_id            String?
+  decidida_por_nombre_snapshot    String?
+  decidida_at                     DateTime?
+  estado_ejecucion                String    @default("PENDIENTE") // PENDIENTE, APLICADA
+  asignacion_destino_id           String?
+  ejecutada_at                    DateTime?
+  ejecucion_resultado_json        String?   @db.LongText
+  is_deleted                      Boolean   @default(false)
+  created_at                      DateTime  @default(now())
+  gym_id                          String
+  source_device                   String?
+  version                         Int       @default(1)
+  updated_at                      DateTime  @default(now())
+  deleted_at                      DateTime?
+
+  @@unique([expediente_id, membresia_id], map: "uq_ent_baja_dec_memb")
+  @@index([gym_id, expediente_id, tipo], map: "idx_ent_baja_dec_exp_tipo")
+  @@index([gym_id, membresia_id], map: "idx_ent_baja_dec_memb")
+  @@map("entrenador_baja_decision")
+}
+
+// Evidencia append-only de la transferencia o cancelación de una cuota futura
+// causada por una baja. La cuota conserva su identidad e historia original.
+model EntrenadorBajaComisionAjuste {
+  ajuste_id                      String    @id
+  expediente_id                  String
+  decision_id                    String
+  membresia_id                   String
+  devengo_id                     String
+  cuota_id                       String
+  tipo                           String // TRANSFERIR, ANULAR
+  id_entrenador_origen           String
+  id_entrenador_destino          String?
+  moneda_id                      String
+  monto                          Float
+  periodo_inicio                 DateTime
+  periodo_fin                    DateTime
+  estado_anterior                String
+  estado_resultante              String
+  registrado_por_user_id         String
+  registrado_por_nombre_snapshot String
+  registrado_at                  DateTime
+  resumen_json                   String    @db.LongText
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@unique([expediente_id, cuota_id], map: "uq_ent_baja_aj_exp_cuota")
+  @@index([gym_id, expediente_id, registrado_at], map: "idx_ent_baja_aj_exp_fecha")
+  @@index([gym_id, id_entrenador_origen, tipo], map: "idx_ent_baja_aj_origen_tipo")
+  @@map("entrenador_baja_comision_ajuste")
+}
+
+// Resolución financiera explícita de una membresía dentro de una baja. No
+// representa efectivo: conserva la valoración, el destino y la decisión.
+model MembresiaAjusteFinanciero {
+  ajuste_financiero_id           String    @id
+  operacion_id                   String    @unique(map: "uq_memb_aj_fin_operacion")
+  expediente_id                  String
+  decision_id                    String    @unique(map: "uq_memb_aj_fin_decision")
+  membresia_origen_id            String
+  membresia_destino_id           String?
+  tipo                           String // CAMBIO_PLAN, CREDITO_CLIENTE, REEMBOLSO_PENDIENTE
+  estado                         String // APLICADA, PENDIENTE_TESORERIA
+  plan_destino_id                String?
+  id_entrenador_destino          String?
+  moneda_id                      String
+  precio_origen                  Decimal   @db.Decimal(18, 2)
+  importe_pagado_origen          Decimal   @db.Decimal(18, 2)
+  valor_no_consumido             Decimal   @db.Decimal(18, 2)
+  precio_destino                 Decimal?  @db.Decimal(18, 2)
+  credito_aplicado               Decimal   @default(0) @db.Decimal(18, 2)
+  importe_pendiente              Decimal   @default(0) @db.Decimal(18, 2)
+  saldo_credito_generado         Decimal   @default(0) @db.Decimal(18, 2)
+  importe_reembolso              Decimal   @default(0) @db.Decimal(18, 2)
+  fecha_efectiva                 DateTime
+  motivo                         String    @db.Text
+  formula_snapshot_json          String    @db.LongText
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@index([gym_id, expediente_id, estado], map: "idx_memb_aj_fin_exp_estado")
+  @@index([gym_id, membresia_origen_id], map: "idx_memb_aj_fin_memb")
+  @@map("membresia_ajuste_financiero")
+}
+
+model ClienteCredito {
+  credito_id                   String    @id
+  ajuste_financiero_id         String    @unique(map: "uq_cli_cred_ajuste")
+  ci                           String
+  moneda_id                    String
+  monto_original               Decimal   @db.Decimal(18, 2)
+  saldo                        Decimal   @db.Decimal(18, 2)
+  estado                       String    @default("DISPONIBLE")
+  motivo                       String    @db.Text
+  generado_por_user_id         String
+  generado_por_nombre_snapshot String
+  generado_at                  DateTime
+  is_deleted                   Boolean   @default(false)
+  created_at                   DateTime  @default(now())
+  gym_id                       String
+  source_device                String?
+  version                      Int       @default(1)
+  updated_at                   DateTime  @default(now())
+  deleted_at                   DateTime?
+
+  @@index([gym_id, ci, moneda_id, estado], map: "idx_cli_cred_disponible")
+  @@map("cliente_credito")
+}
+
+model CreditoMembresiaAplicacion {
+  aplicacion_id  String    @id
+  credito_id     String
+  membresia_id   String
+  moneda_id      String
+  monto_aplicado Decimal   @db.Decimal(18, 2)
+  aplicada_at    DateTime
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime  @default(now())
+  gym_id         String
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@unique([credito_id, membresia_id], map: "uq_cred_memb_aplicacion")
+  @@index([gym_id, membresia_id], map: "idx_cred_memb_memb")
+  @@map("credito_membresia_aplicacion")
+}
+
+model ClienteReembolsoTesoreria {
+  reembolso_id                   String    @id
+  ajuste_financiero_id           String
+  operacion_id                   String    @unique(map: "uq_cli_reemb_operacion")
+  comprobante_numero             String
+  ci                             String
+  membresia_id                   String
+  moneda_id                      String
+  monto                          Decimal
+  estado                         String
+  cuenta_id                      String?
+  tipo_pago_id                   String?
+  motivo                         String
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@unique([gym_id, comprobante_numero], map: "uq_cli_reemb_gym_comprobante")
+  @@index([gym_id, estado, registrada_at], map: "idx_cli_reemb_gym_estado_fecha")
+  @@index([gym_id, ajuste_financiero_id], map: "idx_cli_reemb_ajuste")
+  @@map("cliente_reembolso_tesoreria")
+}
+
+model ClienteReembolsoReversion {
+  reversion_id                   String    @id
+  reembolso_id                   String    @unique(map: "uq_cli_reemb_rev_reembolso")
+  operacion_id                   String    @unique(map: "uq_cli_reemb_rev_operacion")
+  motivo                         String
+  monto                          Decimal
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@index([gym_id, registrada_at], map: "idx_cli_reemb_rev_gym_fecha")
+  @@map("cliente_reembolso_reversion")
 }
 
 model EntrenadorComisionCuota {
@@ -324,7 +842,7 @@ model EntrenadorComisionCuota {
   periodo_fin      DateTime
   fecha_programada DateTime
   monto            Float
-  estado           String    @default("PENDIENTE") // PENDIENTE, PAGADO, ANULADO
+  estado           String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
   fecha_pago       DateTime?
   cuenta_id        String?
   notas            String?
@@ -339,6 +857,331 @@ model EntrenadorComisionCuota {
   @@index([devengo_id])
   @@index([id_entrenador, estado, fecha_programada])
   @@map("entrenador_comision_cuota")
+}
+
+model EntrenadorLiquidacion {
+  liquidacion_id             String    @id
+  operacion_id               String    @unique
+  comprobante_numero         String
+  intencion_firma            String    @db.Text
+  tipo                       String    @default("ORDINARIA") // ORDINARIA, BAJA_FINAL
+  expediente_id              String?
+  id_entrenador              String
+  moneda_id                  String
+  cuenta_id                  String
+  tipo_pago_id               String
+  monto_total                Decimal   @db.Decimal(18, 2)
+  estado                     String    @default("PAGADA") // PAGADA, ANULADA
+  notas                      String?   @db.Text
+  pagada_por_user_id         String
+  pagada_por_nombre_snapshot String
+  pagada_at                  DateTime  @db.DateTime(3)
+  is_deleted                 Boolean   @default(false)
+  created_at                 DateTime  @default(now()) @db.DateTime(3)
+  gym_id                     String
+  source_device              String?
+  version                    Int       @default(1)
+  updated_at                 DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                 DateTime? @db.DateTime(3)
+
+  @@unique([gym_id, comprobante_numero], map: "uq_ent_liq_gym_comprobante")
+  @@index([gym_id, pagada_at], map: "idx_ent_liq_gym_fecha")
+  @@index([gym_id, id_entrenador, estado], map: "idx_ent_liq_entrenador_estado")
+  @@index([gym_id, expediente_id, estado], map: "idx_ent_liq_expediente_estado")
+  @@map("entrenador_liquidacion")
+}
+
+model EntrenadorLiquidacionAplicacion {
+  aplicacion_id  String    @id
+  liquidacion_id String
+  cuota_id       String
+  monto_aplicado Decimal   @db.Decimal(18, 2)
+  estado         String    @default("APLICADA") // APLICADA, REVERSADA
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime  @default(now()) @db.DateTime(3)
+  gym_id         String
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now()) @db.DateTime(3)
+  deleted_at     DateTime? @db.DateTime(3)
+
+  @@unique([liquidacion_id, cuota_id], map: "uq_ent_liq_app_cuota")
+  @@index([gym_id, cuota_id, estado], map: "idx_ent_liq_app_cuota_estado")
+  @@index([gym_id, liquidacion_id], map: "idx_ent_liq_app_liquidacion")
+  @@map("entrenador_liquidacion_aplicacion")
+}
+
+// Aplicación propia del componente fijo. Se mantiene separada de las cuotas de
+// comisión aunque ambas puedan pertenecer al mismo comprobante.
+model EntrenadorLiquidacionObligacionAplicacion {
+  aplicacion_id  String    @id
+  liquidacion_id String
+  obligacion_id  String
+  monto_aplicado Decimal   @db.Decimal(18, 2)
+  estado         String    @default("APLICADA") // APLICADA, REVERSADA
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime  @default(now()) @db.DateTime(3)
+  gym_id         String
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now()) @db.DateTime(3)
+  deleted_at     DateTime? @db.DateTime(3)
+
+  @@unique([liquidacion_id, obligacion_id], map: "uq_ent_liq_obl_app_obligacion")
+  @@index([gym_id, obligacion_id, estado], map: "idx_ent_liq_obl_app_obl_estado")
+  @@index([gym_id, liquidacion_id], map: "idx_ent_liq_obl_app_liquidacion")
+  @@map("entrenador_liquidacion_obligacion_aplicacion")
+}
+
+model EntrenadorLiquidacionReversion {
+  reversion_id                   String    @id
+  liquidacion_id                 String    @unique
+  operacion_id                   String    @unique
+  motivo                         String    @db.Text
+  monto_total                    Decimal   @db.Decimal(18, 2)
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime  @db.DateTime(3)
+  resumen_json                   String    @db.LongText
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now()) @db.DateTime(3)
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                     DateTime? @db.DateTime(3)
+
+  @@index([gym_id, registrada_at], map: "idx_ent_liq_rev_gym_fecha")
+  @@map("entrenador_liquidacion_reversion")
+}
+
+model TesoreriaOperacionManual {
+  operacion_manual_id            String    @id
+  operacion_id                   String    @unique(map: "uq_tes_op_manual_operacion")
+  intencion_firma                String
+  comprobante_numero             String
+  tipo                           String
+  concepto                       String
+  descripcion                    String?   @db.Text
+  evidencia_referencia           String    @db.Text
+  cuenta_origen_id               String?
+  cuenta_destino_id              String?
+  tipo_pago_origen_id            String?
+  tipo_pago_destino_id           String?
+  moneda_id                      String
+  monto                          Decimal   @db.Decimal(18, 2)
+  fecha_negocio                  DateTime  @db.DateTime(3)
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime  @db.DateTime(3)
+  resumen_json                   String    @db.LongText
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now()) @db.DateTime(3)
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                     DateTime? @db.DateTime(3)
+
+  @@unique([gym_id, comprobante_numero], map: "uq_tes_op_manual_gym_comprobante")
+  @@index([gym_id, fecha_negocio], map: "idx_tes_op_manual_gym_dia")
+  @@index([gym_id, tipo, registrada_at], map: "idx_tes_op_manual_gym_tipo_fecha")
+  @@map("tesoreria_operacion_manual")
+}
+
+// Libro append-only de entradas y salidas reales. Las anulaciones no editan
+// el movimiento original: insertan un contramovimiento enlazado.
+model TesoreriaMovimiento {
+  movimiento_id          String    @id
+  clave_origen           String
+  origen_tipo            String
+  origen_id              String
+  origen_detalle_id      String?
+  direccion              String
+  concepto               String
+  cuenta_id              String?
+  moneda_id              String
+  tipo_pago_id           String?
+  monto                  Decimal
+  ocurrido_at            DateTime
+  fecha_negocio          DateTime
+  descripcion            String?
+  contramovimiento_de_id String?
+  requiere_revision      Boolean   @default(false)
+  revision_motivo        String?
+  is_deleted             Boolean   @default(false)
+  created_at             DateTime  @default(now())
+  gym_id                 String
+  source_device          String?
+  version                Int       @default(1)
+  updated_at             DateTime  @default(now())
+  deleted_at             DateTime?
+
+  @@unique([gym_id, clave_origen], map: "uq_tes_mov_gym_origen")
+  @@index([gym_id, fecha_negocio, cuenta_id], map: "idx_tes_mov_gym_dia_cuenta")
+  @@index([gym_id, moneda_id, ocurrido_at], map: "idx_tes_mov_gym_moneda_fecha")
+  @@index([gym_id, origen_tipo, origen_id], map: "idx_tes_mov_gym_origen")
+  @@map("tesoreria_movimiento")
+}
+
+model TesoreriaCierre {
+  cierre_id                    String    @id
+  operacion_id                 String    @unique(map: "uq_tes_cierre_operacion")
+  clave_cierre                 String    @unique(map: "uq_tes_cierre_clave")
+  comprobante_numero           String
+  fecha_negocio                DateTime
+  cuenta_id                    String
+  moneda_id                    String
+  saldo_inicial                Decimal
+  total_entradas               Decimal
+  total_salidas                Decimal
+  saldo_esperado               Decimal
+  saldo_contado                Decimal
+  diferencia                   Decimal
+  aprobacion_estado            String    @default("NO_REQUERIDA")
+  tolerancia_aplicada          Decimal   @default(0)
+  solicitud_id                 String?
+  justificacion_diferencia     String?
+  aprobado_por_user_id         String?
+  aprobado_por_nombre_snapshot String?
+  aprobado_por_rol_snapshot    String?
+  aprobado_at                  DateTime?
+  movimientos_cantidad         Int
+  movimientos_hasta_at         DateTime?
+  cerrado_por_user_id          String
+  cerrado_por_nombre_snapshot  String
+  cerrado_at                   DateTime
+  snapshot_json                String
+  is_deleted                   Boolean   @default(false)
+  created_at                   DateTime  @default(now())
+  gym_id                       String
+  source_device                String?
+  version                      Int       @default(1)
+  updated_at                   DateTime  @default(now())
+  deleted_at                   DateTime?
+
+  @@unique([gym_id, comprobante_numero], map: "uq_tes_cierre_gym_comprobante")
+  @@index([gym_id, fecha_negocio], map: "idx_tes_cierre_gym_dia")
+  @@index([gym_id, cuenta_id, fecha_negocio], map: "idx_tes_cierre_gym_cuenta_dia")
+  @@map("tesoreria_cierre")
+}
+
+model TesoreriaCierreSolicitud {
+  solicitud_id                   String    @id
+  operacion_id                   String    @unique(map: "uq_tes_cierre_sol_operacion")
+  decision_operacion_id          String?   @unique(map: "uq_tes_cierre_sol_decision")
+  intencion_firma                String
+  pendiente_clave                String?   @unique(map: "uq_tes_cierre_sol_pendiente")
+  fecha_negocio                  DateTime
+  cuenta_id                      String
+  moneda_id                      String
+  saldo_inicial                  Decimal
+  total_entradas                 Decimal
+  total_salidas                  Decimal
+  saldo_esperado                 Decimal
+  saldo_contado                  Decimal
+  diferencia                     Decimal
+  tolerancia_aplicada            Decimal
+  movimientos_cantidad           Int
+  movimientos_hasta_at           DateTime?
+  movimiento_ids_json            String
+  motivo                         String
+  estado                         String
+  solicitada_por_user_id         String
+  solicitada_por_nombre_snapshot String
+  solicitada_por_rol_snapshot    String
+  solicitada_at                  DateTime
+  decidida_por_user_id           String?
+  decidida_por_nombre_snapshot   String?
+  decidida_por_rol_snapshot      String?
+  decision_motivo                String?
+  decidida_at                    DateTime?
+  cierre_id                      String?
+  politica_snapshot_json         String
+  snapshot_json                  String
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@unique([gym_id, intencion_firma], map: "uq_tes_cierre_sol_gym_intencion")
+  @@index([gym_id, estado, solicitada_at], map: "idx_tes_cierre_sol_gym_estado")
+  @@index([gym_id, cuenta_id, fecha_negocio], map: "idx_tes_cierre_sol_gym_cuenta_dia")
+  @@map("tesoreria_cierre_solicitud")
+}
+
+model TesoreriaConciliacion {
+  conciliacion_id                String    @id
+  operacion_id                   String    @unique(map: "uq_tes_conc_operacion")
+  intencion_firma                String
+  comprobante_numero             String
+  cierre_id                      String
+  fecha_negocio                  DateTime  @db.DateTime(3)
+  cuenta_id                      String
+  moneda_id                      String
+  movimiento_ids_json            String    @db.LongText
+  movimientos_cantidad           Int
+  total_entradas                 Decimal   @db.Decimal(18, 2)
+  total_salidas                  Decimal   @db.Decimal(18, 2)
+  ajuste_neto                    Decimal   @db.Decimal(18, 2)
+  saldo_cierre_original          Decimal   @db.Decimal(18, 2)
+  saldo_ajustado                 Decimal   @db.Decimal(18, 2)
+  motivo                         String    @db.Text
+  evidencia_referencia           String    @db.Text
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime  @db.DateTime(3)
+  snapshot_json                  String    @db.LongText
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now()) @db.DateTime(3)
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                     DateTime? @db.DateTime(3)
+
+  @@unique([gym_id, intencion_firma], map: "uq_tes_conc_gym_intencion")
+  @@unique([gym_id, comprobante_numero], map: "uq_tes_conc_gym_comprobante")
+  @@index([gym_id, cierre_id, registrada_at], map: "idx_tes_conc_gym_cierre_fecha")
+  @@index([gym_id, cuenta_id, fecha_negocio], map: "idx_tes_conc_gym_cuenta_dia")
+  @@map("tesoreria_conciliacion")
+}
+
+model TesoreriaCierreMensual {
+  cierre_mensual_id             String    @id
+  operacion_id                  String    @unique(map: "uq_tes_cierre_mes_operacion")
+  reapertura_operacion_id       String?   @unique(map: "uq_tes_cierre_mes_reapertura")
+  bloqueo_clave                 String?   @unique(map: "uq_tes_cierre_mes_bloqueo")
+  mes                           String
+  fecha_desde                   DateTime  @db.DateTime(3)
+  fecha_hasta_exclusiva         DateTime  @db.DateTime(3)
+  estado                        String
+  motivo_cierre                 String    @db.Text
+  resumen_snapshot_json         String    @db.LongText
+  resumen_sha256                String
+  cerrado_por_user_id           String
+  cerrado_por_nombre_snapshot   String
+  cerrado_por_rol_snapshot      String
+  cerrado_at                    DateTime  @db.DateTime(3)
+  reapertura_motivo             String?   @db.Text
+  reabierto_por_user_id         String?
+  reabierto_por_nombre_snapshot String?
+  reabierto_por_rol_snapshot    String?
+  reabierto_at                  DateTime? @db.DateTime(3)
+  is_deleted                    Boolean   @default(false)
+  created_at                    DateTime  @default(now()) @db.DateTime(3)
+  gym_id                        String
+  source_device                 String?
+  version                       Int       @default(1)
+  updated_at                    DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                    DateTime? @db.DateTime(3)
+
+  @@index([gym_id, mes, cerrado_at], map: "idx_tes_cierre_mes_gym_periodo")
+  @@index([gym_id, estado, mes], map: "idx_tes_cierre_mes_gym_estado")
+  @@map("tesoreria_cierre_mensual")
 }
 
 model Cuenta {
@@ -562,4 +1405,96 @@ model SecurityAuditLog {
   metadata  String?  @db.LongText // JSON stringified
 
   @@map("security_audit_log")
+}
+
+// --- R4.6: GASTOS DEVENGADOS GOBERNADOS ---
+// Gastos reales del gimnasio (alquiler, electricidad, limpieza, mantenimiento,
+// proveedores) gobernados por un mes de pertenencia distinto de la fecha de
+// pago. El devengo reconoce a qué mes pertenece el gasto; el libro de
+// Tesorería refleja cuándo salió el dinero. Siempre separado por moneda.
+
+model GastoCategoria {
+  categoria_id  String   @id
+  gym_id        String
+  nombre        String
+  naturaleza    String   @default("OPERATIVO") // OPERATIVO, ADMINISTRATIVO, COSTO_VENTAS
+  es_sistema    Boolean  @default(false)
+  is_deleted    Boolean  @default(false)
+  created_at    DateTime @default(now())
+  source_device String?
+  version       Int      @default(1)
+  updated_at    DateTime @default(now())
+  deleted_at    DateTime?
+
+  @@unique([gym_id, nombre], map: "uq_gasto_categoria_nombre")
+  @@index([gym_id, naturaleza], map: "idx_gasto_categoria_naturaleza")
+  @@map("gasto_categoria")
+}
+
+model GastoProveedor {
+  proveedor_id           String   @id
+  gym_id                 String
+  nombre                 String
+  documento              String?
+  cuenta_pago_default_id String?
+  is_deleted             Boolean  @default(false)
+  created_at             DateTime @default(now())
+  source_device          String?
+  version                Int      @default(1)
+  updated_at             DateTime @default(now())
+  deleted_at             DateTime?
+
+  @@unique([gym_id, documento], map: "uq_gasto_proveedor_documento")
+  @@index([gym_id, nombre], map: "idx_gasto_proveedor_nombre")
+  @@map("gasto_proveedor")
+}
+
+model GastoGobernado {
+  gasto_id                String    @id
+  gym_id                  String
+  categoria_id            String
+  proveedor_id            String?
+  moneda_id               String
+  descripcion             String
+  monto                   Decimal
+  periodo_pertenencia_mes String // AAAA-MM, mes al que pertenece el gasto
+  fecha_pago              DateTime? // cuándo salió el dinero (nullable hasta pagar)
+  fecha_programada        DateTime // cuándo se espera pagar
+  metodo_devengo          String    @default("MES_PERTENENCIA")
+  estado                  String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
+  pagado_acumulado        Decimal   @default(0)
+  comprobante_referencia  String?
+  registrada_por_user_id  String
+  formula_snapshot_json   String    @db.LongText
+  is_deleted              Boolean   @default(false)
+  created_at              DateTime  @default(now())
+  source_device           String?
+  version                 Int       @default(1)
+  updated_at              DateTime  @default(now())
+  deleted_at              DateTime?
+
+  @@index([gym_id, periodo_pertenencia_mes, estado], map: "idx_gasto_mes_estado")
+  @@index([gym_id, categoria_id], map: "idx_gasto_categoria")
+  @@index([gym_id, proveedor_id], map: "idx_gasto_proveedor")
+  @@map("gasto_gobernado")
+}
+
+model GastoGobernadoAplicacion {
+  aplicacion_id  String    @id
+  gasto_id       String
+  movimiento_id  String
+  monto_aplicado Decimal
+  estado         String    @default("APLICADA") // APLICADA, REVERSADA
+  aplicada_at    DateTime
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime   @default(now())
+  gym_id         String
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@unique([gasto_id, movimiento_id], map: "uq_gasto_aplicacion_mov")
+  @@index([gasto_id, estado], map: "idx_gasto_aplicacion_estado")
+  @@map("gasto_gobernado_aplicacion")
 }

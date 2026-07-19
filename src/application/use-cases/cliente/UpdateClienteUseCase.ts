@@ -3,6 +3,7 @@ import type { UpdateClienteDTO } from "../../dtos/ClienteDTO";
 import type { Cliente } from "../../../domain/entities/Cliente";
 import type { ClienteRepository } from "../../../domain/repositories/ClienteRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export class UpdateClienteUseCase {
     constructor(
@@ -21,7 +22,7 @@ export class UpdateClienteUseCase {
             foto_cliente: dto.foto_cliente ? Buffer.from(dto.foto_cliente, 'base64') : undefined,
             fecha_inicio: dto.fecha_inicio ? new Date(dto.fecha_inicio) : undefined,
             fecha_fin: dto.fecha_fin ? new Date(dto.fecha_fin) : undefined,
-            updated_at: new Date(),
+            updated_at: trustedClock.nowUtc(),
             version: (existing.version ?? 0) + 1
         };
 
@@ -29,6 +30,12 @@ export class UpdateClienteUseCase {
 
         const updated = await this.clienteRepository.findById(id);
         if (updated) {
+            const nationalityCode = await this.clienteRepository.findNationalityCode(
+                updated.nacionalidad_id,
+            );
+            if (!nationalityCode) {
+                throw new Error("La nacionalidad del cliente no está disponible.");
+            }
             await this.syncLogRepository.register({
                 eventId: randomUUID(),
                 entidad: "cliente",
@@ -38,6 +45,7 @@ export class UpdateClienteUseCase {
                 deviceId: "WEB_ADMIN",
                 payload: {
                     ...updated,
+                    nacionalidad_codigo_iso: nationalityCode,
                     foto_cliente: updated.foto_cliente ? Buffer.from(updated.foto_cliente).toString('base64') : null
                 } as any
             });

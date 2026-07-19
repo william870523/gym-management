@@ -1,7 +1,10 @@
+import { Prisma } from "@prisma/client";
+
 export function serialize(obj: any): any {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Date) return obj;
     if (typeof obj === 'bigint') return Number(obj);
+    if (Prisma.Decimal.isDecimal(obj)) return obj.toString();
     if (obj instanceof Uint8Array) return Buffer.from(obj);
     if (Buffer.isBuffer(obj)) return obj;
     if (Array.isArray(obj)) return obj.map(serialize);

@@ -33,9 +33,9 @@ export class PrismaCuentaRepository implements CuentaRepository {
         });
     }
 
-    async findAll(): Promise<Cuenta[]> {
+    async findAll(gymId: string): Promise<Cuenta[]> {
         const result = await prisma.cuenta.findMany({
-            where: { is_deleted: false },
+            where: { gym_id: gymId, is_deleted: false },
             include: { moneda: true }
         });
 
@@ -54,9 +54,9 @@ export class PrismaCuentaRepository implements CuentaRepository {
         }));
     }
 
-    async findById(id: string): Promise<Cuenta | null> {
-        return prisma.cuenta.findUnique({
-            where: { cuenta_id: id, is_deleted: false }
+    async findById(id: string, gymId: string): Promise<Cuenta | null> {
+        return prisma.cuenta.findFirst({
+            where: { cuenta_id: id, gym_id: gymId, is_deleted: false }
         });
     }
 
@@ -78,23 +78,22 @@ export class PrismaCuentaRepository implements CuentaRepository {
         });
     }
 
-    async update(id: string, data: Partial<Cuenta>): Promise<void> {
-        await prisma.cuenta.update({
-            where: { cuenta_id: id },
+    async update(id: string, gymId: string, data: Partial<Cuenta>): Promise<void> {
+        await prisma.cuenta.updateMany({
+            where: { cuenta_id: id, gym_id: gymId, is_deleted: false },
             data: {
                 nombre_cuenta: data.nombre_cuenta,
                 moneda_id: data.moneda_id,
-                tipo_pago_id: data.tipo_pago_id || null,
-                gym_id: data.gym_id ?? null,
+                tipo_pago_id: data.tipo_pago_id,
                 version: { increment: 1 },
                 updated_at: new Date()
             }
         });
     }
 
-    async softDelete(id: string): Promise<void> {
-        await prisma.cuenta.update({
-            where: { cuenta_id: id },
+    async softDelete(id: string, gymId: string): Promise<void> {
+        await prisma.cuenta.updateMany({
+            where: { cuenta_id: id, gym_id: gymId, is_deleted: false },
             data: {
                 is_deleted: true,
                 deleted_at: new Date(),

@@ -20,7 +20,7 @@ export class ApplyCuentaEventUseCase {
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.cuentaRepository.softDelete(input.entidadId);
+            await this.cuentaRepository.softDelete(input.entidadId, input.gymId);
             return;
         }
 

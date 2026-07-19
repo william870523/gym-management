@@ -10,6 +10,12 @@ import { GetClienteUseCase } from "../../../application/use-cases/cliente/GetCli
 import { ListClientesUseCase } from "../../../application/use-cases/cliente/ListClientesUseCase";
 import { CreateClienteSchema, UpdateClienteSchema } from "../../../application/dtos/ClienteDTO";
 import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
+import { PrismaClienteExpedienteRepository } from "../../repositories/PrismaClienteExpedienteRepository";
+import { GetClienteExpedienteUseCase } from "../../../application/use-cases/cliente/GetClienteExpedienteUseCase";
+import {
+    MembershipPauseError,
+    MembershipPauseService,
+} from "../../../application/membership/membership-pause.service";
 
 export class ClienteController {
     private createUseCase: CreateClienteUseCase;
@@ -17,6 +23,8 @@ export class ClienteController {
     private deleteUseCase: DeleteClienteUseCase;
     private getUseCase: GetClienteUseCase;
     private listUseCase: ListClientesUseCase;
+    private recordUseCase: GetClienteExpedienteUseCase;
+    private membershipPauseService: MembershipPauseService;
 
     constructor() {
         const repository = new PrismaClienteRepository();
@@ -28,6 +36,71 @@ export class ClienteController {
         this.deleteUseCase = new DeleteClienteUseCase(repository, syncLogRepository);
         this.getUseCase = new GetClienteUseCase(repository);
         this.listUseCase = new ListClientesUseCase(repository);
+        this.recordUseCase = new GetClienteExpedienteUseCase(
+            new PrismaClienteExpedienteRepository(),
+        );
+        this.membershipPauseService = new MembershipPauseService();
+    }
+
+    async pauseMembership(c: Context) {
+        const auth = c.get("auth");
+        if (!auth?.gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            const body = await c.req.json();
+            const result = await this.membershipPauseService.pause({
+                gymId: auth.gymId,
+                clientId: c.req.param("id"),
+                membershipId: c.req.param("membershipId"),
+                operationId: String(body.operation_id ?? ""),
+                reason: String(body.motivo ?? ""),
+                userId: auth.sub,
+            });
+            return c.json(serialize(result));
+        } catch (error) {
+            if (error instanceof MembershipPauseError) {
+                return c.json({ error: error.message }, error.status as 400 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async resumeMembership(c: Context) {
+        const auth = c.get("auth");
+        if (!auth?.gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            const body = await c.req.json();
+            const result = await this.membershipPauseService.resume({
+                gymId: auth.gymId,
+                clientId: c.req.param("id"),
+                membershipId: c.req.param("membershipId"),
+                operationId: String(body.operation_id ?? ""),
+                userId: auth.sub,
+            });
+            return c.json(serialize(result));
+        } catch (error) {
+            if (error instanceof MembershipPauseError) {
+                return c.json({ error: error.message }, error.status as 400 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async getRecord(c: Context) {
+        try {
+            const gymId = c.get("auth")?.gymId;
+            if (!gymId) {
+                return c.json({ error: "El token no identifica un gimnasio." }, 403);
+            }
+            const result = await this.recordUseCase.execute(
+                c.req.param("id"),
+                gymId,
+            );
+            if (!result) return c.json({ error: "Cliente not found" }, 404);
+            return c.json(serialize(result));
+        } catch (error) {
+            logger.error("Error getting cliente record:", error);
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
     }
 
     async list(c: Context) {
@@ -78,6 +151,12 @@ export class ClienteController {
             } else {
                 body = await c.req.json();
             }
+
+            const gymId = c.get("auth")?.gymId;
+            if (!gymId) {
+                return c.json({ error: "El token no identifica un gimnasio." }, 403);
+            }
+            body.gym_id = gymId;
 
             const validated = CreateClienteSchema.parse(body);
             const result = await this.createUseCase.execute(validated);

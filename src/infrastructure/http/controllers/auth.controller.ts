@@ -90,7 +90,8 @@ export async function loginController(c: Context) {
 
   const token = JwtService.signAdminToken({
     userId: user.user_id,
-    role: user.role
+    role: user.role,
+    gymId: user.gym_id,
   });
 
 

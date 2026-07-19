@@ -6,9 +6,11 @@ import type { CreateDetallePagoDTO } from "../../dtos/DetallePagoDTO";
 import type { PagoCliente } from "../../../domain/entities/PagoCliente";
 import type { DetallePago } from "../../../domain/entities/DetallePago";
 import { trustedClock } from "../../../config/trusted-clock";
+import { isFullPayment } from "../../../domain/membership-policy";
 
 export interface ProcessPaymentInput extends CreatePagoClienteDTO {
     detalles: Omit<CreateDetallePagoDTO, 'pago_cliente_id'>[];
+    membresia_id?: string | null;
 }
 
 export class ProcessPaymentUseCase {
@@ -24,6 +26,14 @@ export class ProcessPaymentUseCase {
         if (!plan) {
             throw new Error(`Plan con ID ${input.id_planes_pago} no encontrado.`);
         }
+        if (!plan.activo || plan.is_deleted) {
+            throw new Error(`El plan ${input.id_planes_pago} no está disponible.`);
+        }
+        if (!isFullPayment(input.monto_total, plan.importe_plan_pago)) {
+            throw new Error(
+                `El cobro completo requiere ${plan.importe_plan_pago.toFixed(2)} ${plan.moneda_id}.`,
+            );
+        }
 
         const pagoId = input.pago_cliente_id ?? randomUUID();
 
@@ -33,7 +43,9 @@ export class ProcessPaymentUseCase {
             ci: input.ci,
             // El servidor fija el instante; la zona del gimnasio solo se usa al mostrar.
             fecha: occurredAt,
-            monto_total: input.monto_total,
+            // El encabezado representa el precio aplicado al plan. Si recepción
+            // recibe efectivo de más, el cambio se modelará como salida de caja.
+            monto_total: plan.importe_plan_pago,
             id_entrenador: input.id_entrenador ?? null,
             id_planes_pago: input.id_planes_pago,
             moneda_id: input.moneda_id,
@@ -65,7 +77,12 @@ export class ProcessPaymentUseCase {
         }));
 
         // 4. Process Logic
-        await this.pagoClienteRepository.processPayment(pago, detalles, plan.duracion_plan_pago);
+        await this.pagoClienteRepository.processPayment(
+            pago,
+            detalles,
+            plan,
+            input.membresia_id,
+        );
 
         return pago;
     }

@@ -1,10 +1,52 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { prisma } from "../../db/prismaClient";
+import {
+    RetentionSettingsError,
+    RetentionSettingsService,
+} from "../../../application/retention/retention-settings.service";
 
 export const configuracionRoutes = new Hono();
 const BASE_CURRENCY_KEY = "BASE_CURRENCY_ID";
 const BASE_CURRENCY_CONFIG_ID = "config-base-currency-global";
+const retentionSettings = new RetentionSettingsService();
+
+const adminIdentity = (c: any) => {
+    const auth = c.get("auth") as
+        { sub?: string; role?: string; gymId?: string } | undefined;
+    return auth?.sub && auth.gymId && auth.role === "admin" ? auth : null;
+};
+
+const settingsError = (c: any, error: unknown) => {
+    if (error instanceof RetentionSettingsError) {
+        return c.json({ error: error.message }, error.status);
+    }
+    throw error;
+};
+
+configuracionRoutes.get("/retention", async (c) => {
+    const auth = adminIdentity(c);
+    if (!auth?.gymId) {
+        return c.json({ error: "Se requiere una cuenta administradora del gimnasio." }, 403);
+    }
+    return c.json(await retentionSettings.get(auth.gymId));
+});
+
+configuracionRoutes.put("/retention", async (c) => {
+    const auth = adminIdentity(c);
+    if (!auth?.gymId) {
+        return c.json({ error: "Se requiere una cuenta administradora del gimnasio." }, 403);
+    }
+    try {
+        const body = await c.req.json();
+        return c.json(await retentionSettings.update(auth.gymId, {
+            graceDays: body.grace_days,
+            horizonDays: body.horizon_days,
+        }));
+    } catch (error) {
+        return settingsError(c, error);
+    }
+});
 
 configuracionRoutes.get("/base-currency", async (c) => {
     const config = await prisma.configuracionSistema.findUnique({

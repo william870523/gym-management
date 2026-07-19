@@ -40,6 +40,8 @@ import { pagoClienteRoutes } from "./routes/pago_cliente.routes";
 import { detallePagoRoutes } from "./routes/detalle_pago.routes";
 import { configuracionRoutes } from "./routes/configuracion.routes";
 import { accountingRoutes } from "./routes/accounting.routes";
+import membershipRequestRoutes from "./routes/membership-request.routes";
+import retentionRoutes from "./routes/retention.routes";
 import { getRemoteTimeStatus } from "../time/time.service";
 
 const app = new Hono();
@@ -236,10 +238,22 @@ configuracionProtected.route("/", configuracionRoutes);
 app.route("/configuracion", configuracionProtected);
 
 const accountingProtected = new Hono();
-accountingProtected.use("*", authAdmin());
+accountingProtected.use("*", authAny());
 accountingProtected.use("*", adminLimiter);
 accountingProtected.route("/", accountingRoutes);
 app.route("/contabilidad", accountingProtected);
+
+const membershipRequestsProtected = new Hono();
+membershipRequestsProtected.use("*", authAny());
+membershipRequestsProtected.use("*", adminLimiter);
+membershipRequestsProtected.route("/", membershipRequestRoutes);
+app.route("/membresias/solicitudes", membershipRequestsProtected);
+
+const retentionProtected = new Hono();
+retentionProtected.use("*", authAny());
+retentionProtected.use("*", adminLimiter);
+retentionProtected.route("/", retentionRoutes);
+app.route("/retencion", retentionProtected);
 
 logger.info(`Starting REMOTE API on port ${env.port}...`);
 

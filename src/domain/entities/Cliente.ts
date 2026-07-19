@@ -26,4 +26,10 @@ export interface Cliente {
   is_deleted?: boolean;
   version: number;
   gym_id?: string | null;
+  // Proyección de lectura durante la migración al historial contractual.
+  membresia_id?: string | null;
+  membresia_estado?: string | null;
+  membresia_precio?: number | null;
+  membresia_importe_pagado?: number | null;
+  membresia_saldo_pendiente?: number | null;
 }

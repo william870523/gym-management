@@ -77,7 +77,44 @@ export class AsistenciaController {
         try {
             const body = await c.req.json();
             const validated = CreateAsistenciaSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const gymId = c.get("auth")?.gymId;
+            if (!gymId) {
+                return c.json({ error: "El token no identifica un gimnasio." }, 403);
+            }
+
+            const memberships = await prisma.membresiaCliente.findMany({
+                where: {
+                    ci: validated.ci,
+                    gym_id: gymId,
+                    is_deleted: false,
+                    estado: { in: ["ACTIVA", "PAUSADA", "PENDIENTE_PAGO"] },
+                },
+                select: { estado: true },
+            });
+            const hasActiveMembership = memberships.some(
+                (membership) => membership.estado === "ACTIVA",
+            );
+            if (!hasActiveMembership && memberships.some(
+                (membership) => membership.estado === "PAUSADA",
+            )) {
+                return c.json({
+                    error: "La membresía está pausada. Reanúdala antes de registrar la entrada.",
+                }, 409);
+            }
+            if (!hasActiveMembership && memberships.some(
+                (membership) => membership.estado === "PENDIENTE_PAGO",
+            )) {
+                return c.json({
+                    error: "La membresía está pendiente de pago. Registra el cobro antes de permitir la entrada.",
+                }, 409);
+            }
+
+            // El gimnasio proviene del JWT; nunca se acepta el gym_id libre
+            // que pueda enviar el cliente HTTP.
+            const result = await this.createUseCase.execute({
+                ...validated,
+                gym_id: gymId,
+            });
 
             await prisma.syncLog.create({
                 data: {

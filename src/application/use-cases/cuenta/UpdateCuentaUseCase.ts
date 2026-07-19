@@ -10,8 +10,8 @@ export class UpdateCuentaUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string, dto: UpdateCuentaDTO): Promise<void> {
-        const existing = await this.cuentaRepository.findById(id);
+    async execute(id: string, dto: UpdateCuentaDTO, gymId: string): Promise<void> {
+        const existing = await this.cuentaRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Cuenta not found");
         }
@@ -22,9 +22,9 @@ export class UpdateCuentaUseCase {
             version: (existing.version ?? 0) + 1
         };
 
-        await this.cuentaRepository.update(id, updateData);
+        await this.cuentaRepository.update(id, gymId, updateData);
 
-        const updated = await this.cuentaRepository.findById(id);
+        const updated = await this.cuentaRepository.findById(id, gymId);
         if (updated) {
             await this.syncLogRepository.register({
                 eventId: randomUUID(),

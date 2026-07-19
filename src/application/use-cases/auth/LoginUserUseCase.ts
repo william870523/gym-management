@@ -7,7 +7,12 @@ import { env } from "../../../config/env";
 export class LoginUserUseCase {
     constructor(private userRepository: UserRepository) { }
 
-    async execute(dto: LoginUserDTO): Promise<{ user_id: string; role: string; email: string }> {
+    async execute(dto: LoginUserDTO): Promise<{
+        user_id: string;
+        role: string;
+        email: string;
+        gym_id: string | null;
+    }> {
         const user = await this.userRepository.findByEmail(dto.email);
         if (!user || user.is_deleted) {
             throw new Error("Invalid credentials");
@@ -22,6 +27,11 @@ export class LoginUserUseCase {
             throw new Error("Invalid credentials");
         }
 
-        return { user_id: user.user_id, role: user.role, email: user.user_email };
+        return {
+            user_id: user.user_id,
+            role: user.role,
+            email: user.user_email,
+            gym_id: user.gym_id,
+        };
     }
 }

@@ -4,6 +4,7 @@ import type { Cliente } from "../../../domain/entities/Cliente";
 import type { ClienteRepository } from "../../../domain/repositories/ClienteRepository";
 import type { ClientePesoRepository } from "../../../domain/repositories/ClientePesoRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export class CreateClienteUseCase {
     constructor(
@@ -12,7 +13,11 @@ export class CreateClienteUseCase {
         private readonly clientePesoRepository: ClientePesoRepository
     ) { }
 
-    async execute(dto: CreateClienteDTO): Promise<Cliente> {
+    async execute(dto: CreateClienteDTO): Promise<Cliente & {
+        membresia_id?: string | null;
+        membresia_estado?: string | null;
+    }> {
+        const now = trustedClock.nowUtc();
         const newCliente: Cliente = {
             ci: dto.ci,
             nombres: dto.nombres,
@@ -30,47 +35,74 @@ export class CreateClienteUseCase {
             id_entrenador: dto.id_entrenador ?? null,
             fecha_inicio: new Date(dto.fecha_inicio),
             fecha_fin: new Date(dto.fecha_fin),
-            activo: dto.activo,
+            // El repositorio fuerza false cuando existe un plan y crea una
+            // membresía pendiente de cobro en la misma transacción.
+            activo: dto.id_planes_pago ? false : Boolean(dto.activo),
             id_horarios: dto.id_horarios,
             referencia_id: dto.referencia_id ?? null,
             gym_id: dto.gym_id ?? null,
             source_device: null,
             version: 1,
-            created_at: new Date(),
-            updated_at: new Date(),
+            created_at: now,
+            updated_at: now,
             deleted_at: null,
             is_deleted: false
         };
 
-        await this.clienteRepository.create(newCliente);
+        const creation = await this.clienteRepository.create(newCliente);
+        const createdClient = creation.client;
 
         // Record for sync (Cliente Link)
         await this.syncLogRepository.register({
             eventId: randomUUID(),
             entidad: "cliente",
             operacion: "INSERT",
-            entidadId: newCliente.ci,
-            gymId: newCliente.gym_id ?? null,
+            entidadId: createdClient.ci,
+            gymId: createdClient.gym_id ?? null,
             deviceId: "WEB_ADMIN",
             payload: {
-                ...newCliente,
-                foto_cliente: newCliente.foto_cliente ? Buffer.from(newCliente.foto_cliente).toString('base64') : null
+                ...createdClient,
+                nacionalidad_codigo_iso: creation.nationalityCode,
+                foto_cliente: createdClient.foto_cliente ? Buffer.from(createdClient.foto_cliente).toString('base64') : null
             } as any
         });
+
+        if (creation.membership) {
+            await this.syncLogRepository.register({
+                eventId: randomUUID(),
+                entidad: "membresia_cliente",
+                operacion: "INSERT",
+                entidadId: creation.membership.membresia_id,
+                gymId: creation.membership.gym_id,
+                deviceId: "WEB_ADMIN",
+                payload: creation.membership as any,
+            });
+        }
+        if (creation.assignment) {
+            await this.syncLogRepository.register({
+                eventId: randomUUID(),
+                entidad: "membresia_entrenador_asignacion",
+                operacion: "INSERT",
+                entidadId: creation.assignment.asignacion_id,
+                gymId: creation.assignment.gym_id,
+                deviceId: "WEB_ADMIN",
+                payload: creation.assignment as any,
+            });
+        }
 
         // Handle Weight Logic
         if (dto.peso !== undefined && dto.peso !== null) {
             const pesoId = randomUUID();
             const pesoRecord = {
                 cliente_peso_id: pesoId,
-                ci: newCliente.ci,
+                ci: createdClient.ci,
                 peso: Number(dto.peso),
-                fecha: newCliente.fecha_inicio,
-                gym_id: newCliente.gym_id ?? null,
+                fecha: createdClient.fecha_inicio,
+                gym_id: createdClient.gym_id ?? null,
                 source_device: "WEB_ADMIN",
                 version: 1,
-                created_at: new Date(),
-                updated_at: new Date(),
+                created_at: now,
+                updated_at: now,
                 deleted_at: null,
                 is_deleted: false,
                 sync_status: 'pending' // Optional depending on entity definition
@@ -96,25 +128,30 @@ export class CreateClienteUseCase {
             });
 
             // 3. Update Client with Weight ID
-            newCliente.cliente_peso_id = pesoId;
-            await this.clienteRepository.update(newCliente.ci, { cliente_peso_id: pesoId });
+            createdClient.cliente_peso_id = pesoId;
+            await this.clienteRepository.update(createdClient.ci, { cliente_peso_id: pesoId });
 
             // 4. Sync Client Update
             await this.syncLogRepository.register({
                 eventId: randomUUID(),
                 entidad: "cliente",
                 operacion: "UPDATE",
-                entidadId: newCliente.ci,
-                gymId: newCliente.gym_id ?? null,
+                entidadId: createdClient.ci,
+                gymId: createdClient.gym_id ?? null,
                 deviceId: "WEB_ADMIN",
                 payload: {
-                    ...newCliente,
-                    foto_cliente: newCliente.foto_cliente ? Buffer.from(newCliente.foto_cliente).toString('base64') : null
+                    ...createdClient,
+                    nacionalidad_codigo_iso: creation.nationalityCode,
+                    foto_cliente: createdClient.foto_cliente ? Buffer.from(createdClient.foto_cliente).toString('base64') : null
                 } as any
             });
         }
 
-        return newCliente;
+        return {
+            ...createdClient,
+            membresia_id: creation.membership?.membresia_id ?? null,
+            membresia_estado: creation.membership?.estado ?? null,
+        };
     }
 }
 

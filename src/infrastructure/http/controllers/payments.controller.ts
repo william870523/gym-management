@@ -5,9 +5,12 @@ import {
     CreateDetallePagoSchema, UpdateDetallePagoSchema
 } from "../../../application/validation/payments.schemas";
 
+const authenticatedGymId = (c: Context) => c.get("auth")?.gymId ?? null;
+
 // --- PagoCliente ---
 export const getPagosCliente = async (c: Context) => {
-    const gymId = c.get("gym_id"); // From auth middleware
+    const gymId = authenticatedGymId(c);
+    if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
     const items = await prisma.pagoCliente.findMany({
         where: {
             is_deleted: false,
@@ -19,7 +22,8 @@ export const getPagosCliente = async (c: Context) => {
 
 export const getPagoClienteById = async (c: Context) => {
     const id = c.req.param("id");
-    const gymId = c.get("gym_id"); // From auth middleware
+    const gymId = authenticatedGymId(c);
+    if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
     const item = await prisma.pagoCliente.findFirst({
         where: {
             pago_cliente_id: id,
@@ -74,13 +78,21 @@ export const deletePagoCliente = async (c: Context) => {
 
 // --- DetallePago ---
 export const getDetallesPago = async (c: Context) => {
-    const items = await prisma.detallePago.findMany({ where: { is_deleted: false } });
+    const gymId = authenticatedGymId(c);
+    if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+    const items = await prisma.detallePago.findMany({
+        where: { is_deleted: false, gym_id: gymId },
+    });
     return c.json(items);
 };
 
 export const getDetallePagoById = async (c: Context) => {
     const id = c.req.param("id");
-    const item = await prisma.detallePago.findUnique({ where: { detalle_pago_id: id } });
+    const gymId = authenticatedGymId(c);
+    if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+    const item = await prisma.detallePago.findFirst({
+        where: { detalle_pago_id: id, gym_id: gymId },
+    });
     if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
     return c.json(item);
 };

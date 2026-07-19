@@ -8,13 +8,13 @@ export class DeleteCuentaUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string): Promise<void> {
-        const existing = await this.cuentaRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<void> {
+        const existing = await this.cuentaRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Cuenta not found");
         }
 
-        await this.cuentaRepository.softDelete(id);
+        await this.cuentaRepository.softDelete(id, gymId);
 
         await this.syncLogRepository.register({
             eventId: randomUUID(),

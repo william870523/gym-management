@@ -77,7 +77,8 @@ export class AuthController {
             const token = JwtService.signAdminToken({
                 userId: user.user_id,
                 role: user.role,
-                email: user.email
+                email: user.email,
+                gymId: user.gym_id,
             });
 
             auditSecurityEvent({

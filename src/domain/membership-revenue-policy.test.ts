@@ -39,7 +39,7 @@ function membership(
   };
 }
 
-describe("remote membership revenue policy parity", () => {
+describe("membership revenue policy", () => {
   test("reparte un plan multimeses por días de servicio y no por fecha de cobro", () => {
     const result = buildMembershipRevenueReport({
       month: "2026-02",
@@ -233,5 +233,59 @@ describe("remote membership revenue policy parity", () => {
     expect(result.cobertura.requieren_revision).toBe(1);
     expect(result.monedas[0]?.membresias[0]?.explicacion)
       .toContain("fechas heredadas");
+  });
+
+  test("R5.2: con tramos de cuota, cada tramo se devenga sobre su cobertura", () => {
+    // Plan trimestral 900.00 (90 días). Cuota 1 = 540.00 cubre ene (31 días),
+    // cuota 2 = 360.00 cubre feb+mar (59 días). Reportamos enero: debe devengar
+    // completo el tramo 1 (540.00), no el prorrateo lineal del total (310.00).
+    const result = buildMembershipRevenueReport({
+      month: "2026-01",
+      currentBusinessDate: day("2026-04-10"),
+      memberships: [membership({
+        installmentTranches: [
+          { numeroCuota: 1, amount: "540.00", coverageStart: day("2026-01-01"), coverageEndExclusive: day("2026-02-01") },
+          { numeroCuota: 2, amount: "360.00", coverageStart: day("2026-02-01"), coverageEndExclusive: day("2026-04-01") },
+        ],
+      })],
+    });
+    const cup = result.monedas[0]!;
+    expect(cup.ingreso_devengado_mes).toBe("540.00");
+    expect(cup.ingreso_devengado_acumulado).toBe("540.00");
+    expect(cup.saldo_servicio_pendiente).toBe("360.00");
+  });
+
+  test("R5.2: el tramo 2 se devenga en su propio mes sin inflar el mes 1", () => {
+    // Mismo plan. Reportamos febrero: el devengo del mes es la porción del
+    // tramo 2 (360.00 sobre 59 días) que cae en febrero (28 días), NO el
+    // prorrateo lineal del total. Y el acumulado ya tiene enero completo.
+    const result = buildMembershipRevenueReport({
+      month: "2026-02",
+      currentBusinessDate: day("2026-04-10"),
+      memberships: [membership({
+        installmentTranches: [
+          { numeroCuota: 1, amount: "540.00", coverageStart: day("2026-01-01"), coverageEndExclusive: day("2026-02-01") },
+          { numeroCuota: 2, amount: "360.00", coverageStart: day("2026-02-01"), coverageEndExclusive: day("2026-04-01") },
+        ],
+      })],
+    });
+    const cup = result.monedas[0]!;
+    // Tramo 2: 360.00 / 59 días ≈ 6.10/día; febrero tiene 28 días → 170.64 aprox.
+    // El acumulado = enero completo (540.00) + porción de febrero.
+    expect(Number(cup.ingreso_devengado_mes)).toBeGreaterThan(160);
+    expect(Number(cup.ingreso_devengado_mes)).toBeLessThan(180);
+    expect(Number(cup.ingreso_devengado_acumulado)).toBeGreaterThan(700);
+  });
+
+  test("R5.2: sin tramos el devengo sigue siendo lineal (compatible hacia atrás)", () => {
+    // La misma membresía SIN tramos debe producir el resultado lineal original.
+    const result = buildMembershipRevenueReport({
+      month: "2026-02",
+      currentBusinessDate: day("2026-04-10"),
+      memberships: [membership()],
+    });
+    const cup = result.monedas[0]!;
+    // Prueba existente ya verifica 280.00; aquí solo confirmamos el modo lineal.
+    expect(cup.ingreso_devengado_mes).toBe("280.00");
   });
 });

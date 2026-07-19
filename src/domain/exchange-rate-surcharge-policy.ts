@@ -102,7 +102,11 @@ export function surchargeMinor(
   const pct = surcharges[paymentTypeId];
   if (!pct) return 0n;
   const pctMinor = treasuryMoneyToMinor(pct); // 5.00 % → 500
-  return (baseMinor * pctMinor + 5000n) / 10000n;
+  const rawCents = (baseMinor * pctMinor + 9999n) / 10000n;
+  if (rawCents === 0n) return 0n;
+  // Redondeo al entero superior en unidades principales (múltiplos de 100 centavos):
+  const integerUnits = (rawCents + 99n) / 100n;
+  return integerUnits * 100n;
 }
 
 /** Desglose listo para recibo: base, recargo y total como decimales. */

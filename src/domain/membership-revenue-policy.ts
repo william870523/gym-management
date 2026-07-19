@@ -48,6 +48,22 @@ export type MembershipRevenueSnapshot = {
   funding: MembershipFundingSnapshot[];
   pauses: MembershipPauseRevenueSnapshot[];
   adjustments: MembershipAdjustmentRevenueSnapshot[];
+  /**
+   * R5.2: tramos de cuota del cliente. Cuando están presentes, el devengo
+   * reconoce cada tramo sobre su propio rango de cobertura (la cuota 1 de 15
+   * compra el mes 1 completo, no 15/N del total). Sin tramos, el devengo se
+   * prorratea linealmente entre todos los días (comportamiento R4.1 original).
+   * Cada tramo declara su importe (amount) y su ventana [coverageStart,
+   * coverageEndExclusive). La suma de amount debe igualar el precio del plan.
+   */
+  installmentTranches?: InstallmentTrancheSnapshot[];
+};
+
+export type InstallmentTrancheSnapshot = {
+  numeroCuota: number;
+  amount: string;
+  coverageStart: Date;
+  coverageEndExclusive: Date;
 };
 
 export class MembershipRevenuePolicyError extends Error {
@@ -279,22 +295,80 @@ function projectMembership(
   const enumerationEnd = new Date(
     Math.min(scheduleEnd.getTime(), cutoffExclusive.getTime()),
   );
-  for (
-    let day = start;
-    day.getTime() < enumerationEnd.getTime() && serviceIndex < membership.durationDays;
-    day = addDays(day, 1)
-  ) {
-    if (paused(day, pauses)) continue;
-    serviceIndex += 1;
-    const amount = serviceDayAmount(fundedMinor, membership.durationDays, serviceIndex);
-    earnedToCutoffMinor += amount;
-    serviceDaysToCutoff += 1;
-    if (
-      day.getTime() >= monthStart.getTime() &&
-      day.getTime() < monthEndExclusive.getTime()
+
+  // R5.2: si la membresía tiene tramos de cuota, el devengo reconoce cada tramo
+  // sobre su propia ventana de cobertura. Sin tramos, prorrateo lineal (R4.1).
+  const tranches = membership.installmentTranches
+    ?.slice()
+    .sort((a, b) => a.coverageStart.getTime() - b.coverageStart.getTime());
+
+  if (tranches && tranches.length > 0) {
+    // Cada tramo se devenga día a día sobre sus días de servicio (respetando
+    // pausas igual que el modo lineal), pero su importe es el del tramo, no el
+    // prorrateo del total. serviceIndex se mantiene global para respetar el
+    // tope de durationDays en caso de datos incoherentes.
+    for (const tranche of tranches) {
+      const trancheStart = calendarDate(tranche.coverageStart, "El inicio del tramo");
+      const trancheEndExclusive = calendarDate(
+        tranche.coverageEndExclusive,
+        "El fin del tramo",
+      );
+      if (trancheEndExclusive.getTime() <= trancheStart.getTime()) continue;
+      const trancheAmount = money(tranche.amount, "importe del tramo de cuota");
+      if (trancheAmount <= 0n) continue;
+      // Días calendario del tramo (ventana total, sin excluir pausas): define
+      // el denominador del prorrateo interno del tramo.
+      const trancheCalendarDays = Math.trunc(
+        (trancheEndExclusive.getTime() - trancheStart.getTime()) / DAY_MS,
+      );
+      if (trancheCalendarDays <= 0) continue;
+      const trancheEnd = new Date(
+        Math.min(trancheEndExclusive.getTime(), enumerationEnd.getTime()),
+      );
+      if (trancheStart.getTime() >= trancheEnd.getTime()) continue;
+      let trancheServiceOrdinal = 0;
+      for (
+        let day = trancheStart;
+        day.getTime() < trancheEnd.getTime() && serviceIndex < membership.durationDays;
+        day = addDays(day, 1)
+      ) {
+        if (paused(day, pauses)) continue;
+        serviceIndex += 1;
+        trancheServiceOrdinal += 1;
+        const amount = serviceDayAmount(
+          trancheAmount,
+          trancheCalendarDays,
+          trancheServiceOrdinal,
+        );
+        earnedToCutoffMinor += amount;
+        serviceDaysToCutoff += 1;
+        if (
+          day.getTime() >= monthStart.getTime() &&
+          day.getTime() < monthEndExclusive.getTime()
+        ) {
+          earnedInMonthMinor += amount;
+          serviceDaysInMonth += 1;
+        }
+      }
+    }
+  } else {
+    for (
+      let day = start;
+      day.getTime() < enumerationEnd.getTime() && serviceIndex < membership.durationDays;
+      day = addDays(day, 1)
     ) {
-      earnedInMonthMinor += amount;
-      serviceDaysInMonth += 1;
+      if (paused(day, pauses)) continue;
+      serviceIndex += 1;
+      const amount = serviceDayAmount(fundedMinor, membership.durationDays, serviceIndex);
+      earnedToCutoffMinor += amount;
+      serviceDaysToCutoff += 1;
+      if (
+        day.getTime() >= monthStart.getTime() &&
+        day.getTime() < monthEndExclusive.getTime()
+      ) {
+        earnedInMonthMinor += amount;
+        serviceDaysInMonth += 1;
+      }
     }
   }
 

@@ -252,6 +252,9 @@ model PlanesPago {
   incluye_entrenador        Boolean   @default(false)
   comision_entrenador_tipo  String    @default("NONE") // NONE, PERCENTAGE, FIXED_AMOUNT
   comision_entrenador_valor Float?
+  // R5.2: indica si el plan admite pago por cuotas. El esquema real vive en
+  // plan_cuota_esquema. false (por defecto) = pago único, comportamiento actual.
+  acepta_cuotas             Boolean   @default(false)
   is_deleted                Boolean   @default(false)
   created_at                DateTime? @default(now())
   gym_id                    String?
@@ -1415,16 +1418,16 @@ model SecurityAuditLog {
 // Tesorería refleja cuándo salió el dinero. Siempre separado por moneda.
 
 model GastoCategoria {
-  categoria_id  String   @id
+  categoria_id  String    @id
   gym_id        String
   nombre        String
-  naturaleza    String   @default("OPERATIVO") // OPERATIVO, ADMINISTRATIVO, COSTO_VENTAS
-  es_sistema    Boolean  @default(false)
-  is_deleted    Boolean  @default(false)
-  created_at    DateTime @default(now())
+  naturaleza    String    @default("OPERATIVO") // OPERATIVO, ADMINISTRATIVO, COSTO_VENTAS
+  es_sistema    Boolean   @default(false)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
   source_device String?
-  version       Int      @default(1)
-  updated_at    DateTime @default(now())
+  version       Int       @default(1)
+  updated_at    DateTime  @default(now())
   deleted_at    DateTime?
 
   @@unique([gym_id, nombre], map: "uq_gasto_categoria_nombre")
@@ -1433,16 +1436,16 @@ model GastoCategoria {
 }
 
 model GastoProveedor {
-  proveedor_id           String   @id
+  proveedor_id           String    @id
   gym_id                 String
   nombre                 String
   documento              String?
   cuenta_pago_default_id String?
-  is_deleted             Boolean  @default(false)
-  created_at             DateTime @default(now())
+  is_deleted             Boolean   @default(false)
+  created_at             DateTime  @default(now())
   source_device          String?
-  version                Int      @default(1)
-  updated_at             DateTime @default(now())
+  version                Int       @default(1)
+  updated_at             DateTime  @default(now())
   deleted_at             DateTime?
 
   @@unique([gym_id, documento], map: "uq_gasto_proveedor_documento")
@@ -1488,7 +1491,7 @@ model GastoGobernadoAplicacion {
   estado         String    @default("APLICADA") // APLICADA, REVERSADA
   aplicada_at    DateTime
   is_deleted     Boolean   @default(false)
-  created_at     DateTime   @default(now())
+  created_at     DateTime  @default(now())
   gym_id         String
   source_device  String?
   version        Int       @default(1)
@@ -1498,4 +1501,76 @@ model GastoGobernadoAplicacion {
   @@unique([gasto_id, movimiento_id], map: "uq_gasto_aplicacion_mov")
   @@index([gasto_id, estado], map: "idx_gasto_aplicacion_estado")
   @@map("gasto_gobernado_aplicacion")
+}
+
+// --- R5.2: CALENDARIO DE CUOTAS DEL CLIENTE EN PLANES LARGOS ---
+// Un plan largo (trimestral, semestral, anual) puede pagarse por cuotas con
+// calendario asimétrico. El plan sigue siendo uno; las cuotas son su forma de
+// pago. El esquema define cuántas cuotas, su importe y el tramo que cada una
+// cubre. La suma de dias_cobertura debe igualar duracion_plan_pago.
+
+model PlanCuotaEsquema {
+  esquema_id     String    @id
+  gym_id         String
+  plan_id        String
+  numero_cuota   Int
+  importe        Decimal
+  dias_cobertura Int
+  orden          Int
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime  @default(now())
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@unique([plan_id, numero_cuota], map: "uq_plan_cuota_numero")
+  @@index([gym_id, plan_id], map: "idx_plan_cuota_plan")
+  @@map("plan_cuota_esquema")
+}
+
+model MembresiaCuota {
+  cuota_instancia_id     String    @id
+  gym_id                 String
+  membresia_id           String
+  numero_cuota           Int
+  importe                Decimal
+  dias_cobertura         Int
+  fecha_exigible         DateTime
+  fecha_cobertura_inicio DateTime
+  fecha_cobertura_fin    DateTime
+  estado                 String    @default("PENDIENTE") // PENDIENTE, PAGADA, ANTICIPADA, ANULADA
+  fecha_pagada           DateTime?
+  pago_detalle_id        String?
+  is_deleted             Boolean   @default(false)
+  created_at             DateTime  @default(now())
+  source_device          String?
+  version                Int       @default(1)
+  updated_at             DateTime  @default(now())
+  deleted_at             DateTime?
+
+  @@unique([membresia_id, numero_cuota], map: "uq_membresia_cuota_numero")
+  @@index([gym_id, estado, fecha_exigible], map: "idx_membresia_cuota_mora")
+  @@index([membresia_id, numero_cuota], map: "idx_membresia_cuota_orden")
+  @@map("membresia_cuota")
+}
+
+model AvisoAdministracion {
+  aviso_id      String    @id
+  gym_id        String
+  tipo          String
+  referencia_id String?
+  mensaje       String
+  actor_user_id String?
+  actor_nombre  String?
+  leido         Boolean   @default(false)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  source_device String?
+  version       Int       @default(1)
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@index([gym_id, leido, created_at], map: "idx_aviso_admin_bandeja")
+  @@map("aviso_administracion")
 }

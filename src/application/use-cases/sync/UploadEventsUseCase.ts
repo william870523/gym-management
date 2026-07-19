@@ -241,6 +241,9 @@ export class UploadEventsUseCase {
           "gasto_proveedor",
           "gasto_gobernado",
           "gasto_gobernado_aplicacion",
+          "plan_cuota_esquema",
+          "membresia_cuota",
+          "aviso_administracion",
         ].includes(ev.entidad)
       ) {
         await this.applyPrismaMappedEvent(ev, gym_id, device_id);
@@ -463,6 +466,18 @@ export class UploadEventsUseCase {
       pago_reversion: {
         delegate: (prisma as any).pagoReversion,
         pk: "reversion_id",
+      },
+      plan_cuota_esquema: {
+        delegate: (prisma as any).planCuotaEsquema,
+        pk: "esquema_id",
+      },
+      membresia_cuota: {
+        delegate: (prisma as any).membresiaCuota,
+        pk: "cuota_instancia_id",
+      },
+      aviso_administracion: {
+        delegate: (prisma as any).avisoAdministracion,
+        pk: "aviso_id",
       },
     };
     const target = mapping[ev.entidad];

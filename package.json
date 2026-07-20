@@ -39,7 +39,8 @@
     "migrate:plan-installments": "bun --preload ./src/config/tz-preload.ts scripts/migrate-plan-installments.ts",
     "migrate:r5-3-client-plan-attrs": "bun --preload ./src/config/tz-preload.ts scripts/migrate-r5-3-client-plan-attrs.ts",
     "demo:retention-year": "bun --preload ./src/config/tz-preload.ts scripts/demo-retention-year.ts",
-    "demo:r5-3-client-plan-attrs": "bun --preload ./src/config/tz-preload.ts scripts/demo-r5-3-client-plan-attrs.ts"
+    "demo:r5-3-client-plan-attrs": "bun --preload ./src/config/tz-preload.ts scripts/demo-r5-3-client-plan-attrs.ts",
+    "demo:exchange-revaluation": "bun --preload ./src/config/tz-preload.ts scripts/demo-exchange-revaluation.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

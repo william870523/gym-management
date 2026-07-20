@@ -5,11 +5,16 @@ import {
     RetentionSettingsError,
     RetentionSettingsService,
 } from "../../../application/retention/retention-settings.service";
+import {
+    ClientDiscountSettingsError,
+    ClientDiscountSettingsService,
+} from "../../../application/clients/client-discount-settings.service";
 
 export const configuracionRoutes = new Hono();
 const BASE_CURRENCY_KEY = "BASE_CURRENCY_ID";
 const BASE_CURRENCY_CONFIG_ID = "config-base-currency-global";
 const retentionSettings = new RetentionSettingsService();
+const clientDiscountSettings = new ClientDiscountSettingsService();
 
 const adminIdentity = (c: any) => {
     const auth = c.get("auth") as
@@ -19,6 +24,9 @@ const adminIdentity = (c: any) => {
 
 const settingsError = (c: any, error: unknown) => {
     if (error instanceof RetentionSettingsError) {
+        return c.json({ error: error.message }, error.status);
+    }
+    if (error instanceof ClientDiscountSettingsError) {
         return c.json({ error: error.message }, error.status);
     }
     throw error;
@@ -43,6 +51,29 @@ configuracionRoutes.put("/retention", async (c) => {
             graceDays: body.grace_days,
             horizonDays: body.horizon_days,
         }));
+    } catch (error) {
+        return settingsError(c, error);
+    }
+});
+
+configuracionRoutes.get("/client-discount", async (c) => {
+    const auth = adminIdentity(c);
+    if (!auth?.gymId) {
+        return c.json({ error: "Se requiere una cuenta administradora del gimnasio." }, 403);
+    }
+    return c.json(await clientDiscountSettings.get(auth.gymId));
+});
+
+configuracionRoutes.put("/client-discount", async (c) => {
+    const auth = adminIdentity(c);
+    if (!auth?.gymId) {
+        return c.json({ error: "Se requiere una cuenta administradora del gimnasio." }, 403);
+    }
+    try {
+        const body = await c.req.json();
+        return c.json(
+            await clientDiscountSettings.update(auth.gymId, body.cliente_viejo_pct),
+        );
     } catch (error) {
         return settingsError(c, error);
     }

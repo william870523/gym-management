@@ -60,6 +60,8 @@ export class ApplyClienteEventUseCase {
       activo: Boolean(payload.activo),
       id_horarios: (payload.id_horarios as string | null) ?? null,
       referencia_id: (payload.referencia_id as string | null) ?? null,
+      // R5.3: categoría del cliente; default NUEVO si no viene en el payload.
+      categoria: String(payload.categoria ?? "NUEVO"),
       gym_id: input.gymId,
       source_device: (payload.source_device as string | null) ?? input.deviceId,
       version: (payload.version as number) ?? 1,

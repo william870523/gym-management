@@ -43,6 +43,15 @@ export class ApplyPlanesPagoEventUseCase {
             comision_entrenador_valor: payload.comision_entrenador_valor === null || payload.comision_entrenador_valor === undefined
                 ? null
                 : Number(payload.comision_entrenador_valor),
+            // R5.2 (deuda alineada)
+            acepta_cuotas: Boolean(payload.acepta_cuotas ?? false),
+            // R5.3
+            codigo: payload.codigo === null || payload.codigo === undefined
+                ? null
+                : String(payload.codigo),
+            precio_viejo_excepcion: payload.precio_viejo_excepcion === null || payload.precio_viejo_excepcion === undefined
+                ? null
+                : Number(payload.precio_viejo_excepcion),
             gym_id: input.gymId,
             source_device: (payload.source_device as string | null) ?? input.deviceId,
             version: (payload.version as number) ?? 1,

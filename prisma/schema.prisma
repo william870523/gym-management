@@ -255,6 +255,12 @@ model PlanesPago {
   // R5.2: indica si el plan admite pago por cuotas. El esquema real vive en
   // plan_cuota_esquema. false (por defecto) = pago único, comportamiento actual.
   acepta_cuotas             Boolean   @default(false)
+  // R5.3: código corto para recepción (PMV, PMN, TCN...). Campo libre, sin
+  // unicidad forzada; la cuota añade sufijos /1, /2, /3 desde el esquema R5.2.
+  codigo                    String?
+  // R5.3: precio fijo para cliente VIEJO. Si es null, se aplica el % global
+  // (DESCUENTO_CLIENTE_VIEJO_PCT); si está seteado, anula el % para este plan.
+  precio_viejo_excepcion    Float?
   is_deleted                Boolean   @default(false)
   created_at                DateTime? @default(now())
   gym_id                    String?
@@ -1275,6 +1281,9 @@ model Cliente {
   activo           Boolean
   id_horarios      String?
   referencia_id    String?
+  // R5.3: categoría del cliente para el descuento. El default de DB es NUEVO
+  // para no romper filas heredadas, pero el alta lo exige explícito (Zod).
+  categoria        String    @default("NUEVO") // NUEVO, VIEJO
   is_deleted       Boolean   @default(false)
   created_at       DateTime? @default(now())
   gym_id           String?
@@ -1325,6 +1334,13 @@ model PagoCliente {
   id_entrenador   String?
   id_planes_pago  String
   moneda_id       String
+  // R5.3: snapshot del descuento aplicado al cobrar (cliente VIEJO). El monto
+  // cobrado vive en `monto_total`; estos tres campos permiten reconstruir el
+  // descuento histórico sin perder el precio de lista (igual que tipo_cambio_id
+  // congela el recargo R5.1). Null cuando no hubo descuento (cliente NUEVO).
+  precio_lista_snapshot    Float?
+  descuento_pct_snapshot   String?
+  descuento_monto_snapshot Float?
   is_deleted      Boolean   @default(false)
   created_at      DateTime? @default(now())
   gym_id          String?

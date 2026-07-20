@@ -8,6 +8,12 @@ export interface PlanesPago {
     incluye_entrenador?: boolean;
     comision_entrenador_tipo?: string;
     comision_entrenador_valor?: number | null;
+    // R5.2: indica si el plan admite pago por cuotas (deuda técnica alineada).
+    acepta_cuotas?: boolean;
+    // R5.3: código corto de recepción (PMV, TCN...). Campo libre.
+    codigo?: string | null;
+    // R5.3: precio fijo cliente VIEJO; null = aplicar % global.
+    precio_viejo_excepcion?: number | null;
     gym_id: string | null;
     source_device?: string | null;
     version: number;

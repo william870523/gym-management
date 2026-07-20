@@ -19,6 +19,8 @@ export interface Cliente {
   activo: boolean;
   id_horarios?: string | null;
   referencia_id?: string | null;
+  // R5.3: categoría del cliente para el descuento (NUEVO | VIEJO).
+  categoria?: string;
   source_device?: string | null;
   created_at?: Date | null;
   updated_at?: Date;

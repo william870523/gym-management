@@ -33,6 +33,10 @@ import {
   asOperationalResultsServiceError,
 } from "../../../application/reporting/operational-results.service";
 import {
+  ExchangeRevaluationService,
+  asExchangeRevaluationServiceError,
+} from "../../../application/reporting/exchange-revaluation.service";
+import {
   MembershipRevenueService,
   asMembershipRevenueServiceError,
 } from "../../../application/reporting/membership-revenue.service";
@@ -55,6 +59,7 @@ import {
 import { trustedClock } from "../../../config/trusted-clock";
 import { prisma } from "../../db/prismaClient";
 import { PrismaOperationalResultsReader } from "../../reporting/prisma-operational-results.reader";
+import { PrismaExchangeRevaluationReader } from "../../reporting/prisma-exchange-revaluation.reader";
 import { PrismaMembershipRevenueReader } from "../../reporting/prisma-membership-revenue.reader";
 import { PrismaTrainerServiceCostReader } from "../../reporting/prisma-trainer-service-cost.reader";
 import { PrismaManagementMarginMonthlyCloseReader } from
@@ -77,6 +82,9 @@ const operationalResults = new OperationalResultsService(
 );
 const membershipRevenue = new MembershipRevenueService(
   new PrismaMembershipRevenueReader(),
+);
+const exchangeRevaluation = new ExchangeRevaluationService(
+  new PrismaExchangeRevaluationReader(),
 );
 const trainerServiceCost = new TrainerServiceCostService(
   new PrismaTrainerServiceCostReader(),
@@ -523,6 +531,23 @@ accountingRoutes.get("/operational-results/annual", async (c) => {
     }));
   } catch (error) {
     return handleOperationalResultsError(c, error);
+  }
+});
+
+accountingRoutes.get("/exchange-revaluation", async (c) => {
+  const auth = gymIdentity(c);
+  if (!auth?.gymId) {
+    return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
+  }
+  try {
+    return c.json(await exchangeRevaluation.get({
+      gymId: auth.gymId,
+      month: c.req.query("mes"),
+    }));
+  } catch (error) {
+    const known = asExchangeRevaluationServiceError(error);
+    if (known) return c.json({ error: known.message }, known.status);
+    throw error;
   }
 });
 

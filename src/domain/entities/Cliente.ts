@@ -32,6 +32,14 @@ export interface Cliente {
   // Proyección de lectura durante la migración al historial contractual.
   membresia_id?: string | null;
   membresia_estado?: string | null;
+  /**
+   * Vigencia DERIVADA de la cobertura contra la fecha de negocio de la sede.
+   * No se guarda: `membresia_estado` registra el acto y nunca dice `VENCIDA`
+   * (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
+   */
+  membresia_vigencia?: string | null;
+  membresia_dias_desde_vencimiento?: number | null;
+  membresia_cubre_hoy?: boolean | null;
   membresia_precio?: number | null;
   membresia_importe_pagado?: number | null;
   membresia_saldo_pendiente?: number | null;

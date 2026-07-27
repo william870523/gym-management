@@ -47,6 +47,8 @@
     "audit:orphan-sync-log": "bun --preload ./src/config/tz-preload.ts scripts/audit-orphan-sync-log.ts",
     "demo:payment-collector": "bun --preload ./src/config/tz-preload.ts scripts/demo-payment-collector.ts",
     "demo:multi-sede": "bun --preload ./src/config/tz-preload.ts scripts/demo-multi-sede.ts",
+    "demo:membership-vigencia": "bun --preload ./src/config/tz-preload.ts scripts/demo-membership-vigencia.ts",
+    "verify:membership-vigencia": "bun --preload ./src/config/tz-preload.ts scripts/verify-membership-vigencia.ts",
     "verify:multi-sede": "bun --preload ./src/config/tz-preload.ts scripts/verify-multi-sede.ts",
     "demo:plan-installments": "bun --preload ./src/config/tz-preload.ts scripts/demo-plan-installments.ts",
     "migrate:plan-installments": "bun --preload ./src/config/tz-preload.ts scripts/migrate-plan-installments.ts",

@@ -16,6 +16,9 @@ export class CreateClienteUseCase {
     async execute(dto: CreateClienteDTO, gymId: string): Promise<Cliente & {
         membresia_id?: string | null;
         membresia_estado?: string | null;
+        membresia_vigencia?: string | null;
+        membresia_dias_desde_vencimiento?: number | null;
+        membresia_cubre_hoy?: boolean | null;
     }> {
         const now = trustedClock.nowUtc();
         const newCliente: Cliente = {
@@ -152,10 +155,21 @@ export class CreateClienteUseCase {
             });
         }
 
+        // La vigencia la deriva el repositorio, que es quien conoce la zona
+        // horaria de la sede. Se relee la ficha recién creada en vez de repetir
+        // el cálculo aquí: si el alta y el listado lo resolvieran por separado,
+        // acabarían discrepando (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
+        const proyeccion = creation.membership
+            ? await this.clienteRepository.findById(createdClient.ci, gymId)
+            : null;
         return {
             ...createdClient,
             membresia_id: creation.membership?.membresia_id ?? null,
             membresia_estado: creation.membership?.estado ?? null,
+            membresia_vigencia: proyeccion?.membresia_vigencia ?? "SIN_MEMBRESIA",
+            membresia_dias_desde_vencimiento:
+                proyeccion?.membresia_dias_desde_vencimiento ?? null,
+            membresia_cubre_hoy: proyeccion?.membresia_cubre_hoy ?? false,
         };
     }
 }

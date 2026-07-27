@@ -10,10 +10,50 @@ import {
   upsertGymScopedSyncRecord,
 } from "./gym-scoped-sync-write";
 import { assertGymScopedReference } from "./gym-scoped-reference";
+import { datePartsInZone, nowUtc } from "../../config/tz";
+import {
+  fechaNegocioDesdePartes,
+  resolveMembershipVigencia,
+} from "../../domain/membership-vigencia";
+
+/** Proyección de vigencia que acompaña a la membresía en cada payload. */
+const proyectarVigencia = (
+  membership: { estado: string; fecha_fin: Date } | null | undefined,
+  fechaNegocio: Date,
+) => {
+  // `estado` dice qué acto ocurrió; la vigencia se deriva de la cobertura.
+  // Nadie escribe nunca VENCIDA, así que una ACTIVA con la fecha pasada
+  // seguiría diciendo que cubre (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
+  const resultado = resolveMembershipVigencia({
+    estado: membership?.estado,
+    fechaFin: membership?.fecha_fin,
+    fechaNegocio,
+  });
+  return {
+    membresia_vigencia: resultado.vigencia,
+    membresia_dias_desde_vencimiento: resultado.diasDesdeVencimiento,
+    membresia_cubre_hoy: resultado.cubreHoy,
+  };
+};
 
 export class PrismaClienteRepository implements ClienteRepository {
   // Unidad 01: `client` es prisma o el cliente de la transacción del upload.
   constructor(private readonly client: any = prisma) {}
+
+  /**
+   * Fecha de negocio de ESA sede. Cada gimnasio de la cadena puede tener su
+   * zona, así que no se puede resolver con una constante del proceso
+   * (docs/TIME_CONTRACT.md).
+   */
+  private async fechaNegocio(gymId: string) {
+    const gym = await this.client.gym.findUnique({
+      where: { gym_id: gymId },
+      select: { timezone: true },
+    });
+    return fechaNegocioDesdePartes(
+      datePartsInZone(gym?.timezone?.trim() || "Etc/UTC", nowUtc()),
+    );
+  }
 
   withTransaction(tx: SyncTransactionContext): PrismaClienteRepository {
     return new PrismaClienteRepository(tx);
@@ -148,6 +188,7 @@ export class PrismaClienteRepository implements ClienteRepository {
         membershipByClient.set(membership.ci, membership);
       }
     }
+    const hoy = await this.fechaNegocio(gymId);
     return result.map((c: any) => ({
       ...c,
       foto_cliente: c.foto_cliente ? new Uint8Array(c.foto_cliente) : null,
@@ -155,6 +196,7 @@ export class PrismaClienteRepository implements ClienteRepository {
       gym_id: c.gym_id ?? "",
       membresia_id: membershipByClient.get(c.ci)?.membresia_id ?? null,
       membresia_estado: membershipByClient.get(c.ci)?.estado ?? null,
+      ...proyectarVigencia(membershipByClient.get(c.ci), hoy),
       membresia_precio: membershipByClient.has(c.ci)
         ? Number(membershipByClient.get(c.ci)!.precio_snapshot)
         : null,
@@ -192,6 +234,7 @@ export class PrismaClienteRepository implements ClienteRepository {
       gym_id: result.gym_id ?? "",
       membresia_id: membership?.membresia_id ?? null,
       membresia_estado: membership?.estado ?? null,
+      ...proyectarVigencia(membership, await this.fechaNegocio(gymId)),
       membresia_precio: membership ? Number(membership.precio_snapshot) : null,
       membresia_importe_pagado: membership ? Number(membership.importe_pagado) : null,
       membresia_saldo_pendiente: membership

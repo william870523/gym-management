@@ -9,6 +9,7 @@ import { GetAsistenciaUseCase } from "../../../application/use-cases/asistencia/
 import { ListAsistenciasUseCase } from "../../../application/use-cases/asistencia/ListAsistenciasUseCase";
 import { CreateAsistenciaSchema, UpdateAsistenciaSchema } from "../../../application/dtos/AsistenciaDTO";
 import { trustedClock } from "../../../config/trusted-clock";
+import { getUserGymActor } from "../middleware/auth.middleware";
 
 export class AsistenciaController {
     private createUseCase: CreateAsistenciaUseCase;
@@ -28,9 +29,12 @@ export class AsistenciaController {
 
     async list(c: Context) {
         try {
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const page = Number(c.req.query("page")) || 1;
             const limit = Math.min(Number(c.req.query("limit")) || 10, 200);
-            const result = await this.listUseCase.execute(page, limit);
+            const ci = c.req.param("ci") || c.req.query("ci");
+            const result = await this.listUseCase.execute(actor.gymId, page, limit, ci);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -39,10 +43,12 @@ export class AsistenciaController {
 
     async listActive(c: Context) {
         try {
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const page = Number(c.req.query("page")) || 1;
             const limit = Math.min(Number(c.req.query("limit")) || 100, 200);
             const skip = (page - 1) * limit;
-            const result = await new PrismaAsistenciaRepository().findActive(skip, limit);
+            const result = await new PrismaAsistenciaRepository().findActive(actor.gymId, skip, limit);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -51,9 +57,9 @@ export class AsistenciaController {
 
     async listToday(c: Context) {
         try {
-            const auth = c.get("auth");
-            const gymId = c.req.query("gym_id") ?? auth?.gymId ?? null;
-            const result = await new PrismaAsistenciaRepository().findToday(gymId);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await new PrismaAsistenciaRepository().findToday(actor.gymId);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -63,7 +69,9 @@ export class AsistenciaController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, actor.gymId);
             if (!result) {
                 return c.json({ error: "Asistencia not found" }, 404);
             }
@@ -77,10 +85,11 @@ export class AsistenciaController {
         try {
             const body = await c.req.json();
             const validated = CreateAsistenciaSchema.parse(body);
-            const gymId = c.get("auth")?.gymId;
-            if (!gymId) {
+            const actor = getUserGymActor(c);
+            if (!actor) {
                 return c.json({ error: "El token no identifica un gimnasio." }, 403);
             }
+            const gymId = actor.gymId;
 
             const memberships = await prisma.membresiaCliente.findMany({
                 where: {
@@ -111,10 +120,7 @@ export class AsistenciaController {
 
             // El gimnasio proviene del JWT; nunca se acepta el gym_id libre
             // que pueda enviar el cliente HTTP.
-            const result = await this.createUseCase.execute({
-                ...validated,
-                gym_id: gymId,
-            });
+            const result = await this.createUseCase.execute(validated, gymId);
 
             await prisma.syncLog.create({
                 data: {
@@ -133,6 +139,9 @@ export class AsistenciaController {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
+            if (String(error.message).includes("no pertenece al gimnasio")) {
+                return c.json({ error: error.message }, 400);
+            }
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }
@@ -140,13 +149,15 @@ export class AsistenciaController {
     async finalize(c: Context) {
         try {
             const id = c.req.param("id");
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const repository = new PrismaAsistenciaRepository();
-            const existing = await repository.findById(id);
+            const existing = await repository.findById(id, actor.gymId);
             if (!existing) {
                 return c.json({ error: "Asistencia not found" }, 404);
             }
 
-            const result = await repository.finalize(id, trustedClock.nowUtc());
+            const result = await repository.finalize(id, actor.gymId, trustedClock.nowUtc());
 
             await prisma.syncLog.create({
                 data: {
@@ -170,8 +181,10 @@ export class AsistenciaController {
         try {
             const id = c.req.param("id");
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdateAsistenciaSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            await this.updateUseCase.execute(id, validated, actor.gymId);
             return c.json({ message: "Asistencia updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -187,7 +200,9 @@ export class AsistenciaController {
     async delete(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, actor.gymId);
             return c.json({ message: "Asistencia deleted successfully" });
         } catch (error: any) {
             if (error.message === "Asistencia not found") {

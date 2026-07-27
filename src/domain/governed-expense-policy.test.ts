@@ -254,6 +254,56 @@ describe("governed expense policy", () => {
     expect(result.cobertura.completa).toBe(false);
   });
 
+  test("clasifica cada pago por su propio día comercial y expone el acumulado real", () => {
+    const result = buildGovernedExpenseReport({
+      month: "2026-07",
+      currentBusinessDate: new Date("2026-08-10T00:00:00.000Z"),
+      expenses: [
+        baseExpense({
+          amount: "300.00",
+          // La cabecera guarda el último pago y no puede reclasificar los
+          // pagos anteriores: cada aplicación trae el día de su movimiento.
+          paidAt: new Date("2026-08-03T00:00:00.000Z"),
+          state: "PAGADO",
+          paidAccumulated: "300.00",
+          applications: [
+            {
+              applicationId: "app-junio",
+              expenseId: "gasto-1",
+              movementId: "mov-junio",
+              amount: "100.00",
+              state: "APLICADA",
+              paidAt: new Date("2026-06-29T00:00:00.000Z"),
+              appliedAt: new Date("2026-06-29T15:00:00.000Z"),
+              createdAt: new Date("2026-06-29T15:00:00.000Z"),
+              updatedAt: new Date("2026-06-29T15:00:00.000Z"),
+            },
+            {
+              applicationId: "app-julio",
+              expenseId: "gasto-1",
+              movementId: "mov-julio",
+              amount: "200.00",
+              state: "APLICADA",
+              paidAt: new Date("2026-07-08T00:00:00.000Z"),
+              appliedAt: new Date("2026-07-08T16:00:00.000Z"),
+              createdAt: new Date("2026-07-08T16:00:00.000Z"),
+              updatedAt: new Date("2026-07-08T16:00:00.000Z"),
+            },
+          ],
+        }),
+      ],
+    });
+
+    const cup = result.monedas[0];
+    expect(cup.pago_anticipado).toBe("100.00");
+    expect(cup.pagado_mes).toBe("200.00");
+    expect(cup.gastos[0].pagado_acumulado).toBe("300.00");
+    expect(cup.gastos[0].aplicaciones.map((row) => row.aplicacion_id)).toEqual([
+      "app-junio",
+      "app-julio",
+    ]);
+  });
+
   test("rechaza un mes con formato inválido", () => {
     expect(() =>
       buildGovernedExpenseReport({

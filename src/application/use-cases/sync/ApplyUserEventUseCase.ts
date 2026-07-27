@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 
 import type { User } from "@prisma/client";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
@@ -10,6 +11,8 @@ export interface ApplyUserEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyUserEventUseCase {
@@ -18,13 +21,16 @@ export class ApplyUserEventUseCase {
     ) { }
 
     async execute(input: ApplyUserEventInput): Promise<{ processed: boolean }> {
+        const repo = input.tx
+            ? this.userRepository.withTransaction(input.tx)
+            : this.userRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.userRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId, input.gymId);
         } else {
             const user = this.mapPayloadToUser(input);
-            await this.userRepository.upsertFromSync(user);
+            await repo.upsertFromSync(user);
         }
 
         return { processed: true };
@@ -43,8 +49,13 @@ export class ApplyUserEventUseCase {
             active: payload.active !== undefined ? Boolean(payload.active) : true,
             is_deleted: Boolean(payload.is_deleted),
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
-            gym_id: (payload.gym_id as string | null) ?? input.gymId,
-            source_device: (payload.source_device as string | null) ?? input.deviceId,
+            gym_id: input.gymId,
+            // El nivel de Dueño de la cadena viaja con el usuario para que se le
+            // reconozca desde cualquier sede (docs/MULTI_SEDE.md §3). Ausente en
+            // un evento antiguo significa `false`: la autoridad no se hereda por
+            // omisión ni se regala al sincronizar.
+            es_plataforma: Boolean(payload.es_plataforma),
+            source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             updated_at: payload.updated_at ? new Date(String(payload.updated_at)) : new Date(),
             deleted_at: payload.deleted_at ? new Date(String(payload.deleted_at)) : null

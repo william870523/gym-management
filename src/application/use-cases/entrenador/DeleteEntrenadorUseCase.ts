@@ -8,13 +8,13 @@ export class DeleteEntrenadorUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string): Promise<void> {
-        const existing = await this.entrenadorRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<void> {
+        const existing = await this.entrenadorRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Entrenador not found");
         }
 
-        await this.entrenadorRepository.softDelete(id);
+        await this.entrenadorRepository.softDelete(id, gymId);
 
         await this.syncLogRepository.register({
             eventId: randomUUID(),

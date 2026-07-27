@@ -8,13 +8,13 @@ export class DeleteClienteUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string): Promise<void> {
-        const existing = await this.clienteRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<void> {
+        const existing = await this.clienteRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Cliente not found");
         }
 
-        await this.clienteRepository.softDelete(id);
+        await this.clienteRepository.softDelete(id, gymId);
 
         await this.syncLogRepository.register({
             eventId: randomUUID(),

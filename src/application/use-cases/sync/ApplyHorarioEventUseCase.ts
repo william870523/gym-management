@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Horario } from "../../../domain/entities/Horario";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { HorarioRepository } from "../../../domain/repositories/HorarioRepository";
@@ -9,6 +10,8 @@ export interface ApplyHorarioEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyHorarioEventUseCase {
@@ -18,14 +21,17 @@ export class ApplyHorarioEventUseCase {
 
     async execute(input: ApplyHorarioEventInput): Promise<void> {
         const { operacion } = input;
+        const repo = input.tx
+            ? this.horarioRepository.withTransaction(input.tx)
+            : this.horarioRepository;
 
         if (operacion === "DELETE") {
-            await this.horarioRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId, input.gymId);
             return;
         }
 
         const horario = this.mapPayloadToHorario(input);
-        await this.horarioRepository.upsertHorario(horario);
+        await repo.upsertHorario(horario);
     }
 
     private mapPayloadToHorario(input: ApplyHorarioEventInput): Horario {
@@ -37,7 +43,7 @@ export class ApplyHorarioEventUseCase {
             hora_inicio: Number(payload.hora_inicio),
             hora_fin: Number(payload.hora_fin),
             gym_id: input.gymId,
-            source_device: (payload.source_device as string | null) ?? input.deviceId,
+            source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),

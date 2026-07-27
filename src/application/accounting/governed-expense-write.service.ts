@@ -5,9 +5,11 @@ import { parseTreasuryMonth, treasuryMinorToMoney, treasuryMoneyToMinor } from "
 import { prisma } from "../../infrastructure/db/prismaClient";
 import { CompensationProfileService } from "./compensation-profile.service";
 import { TreasuryLedgerService } from "./treasury-ledger.service";
+import { assertTreasuryMonthOpen } from "./treasury-month-lock.service";
+import { serialize } from "../../shared/utils/serialize";
 
 type Tx = Prisma.TransactionClient;
-const DEVICE_ID = "REMOTE";
+const DEVICE_ID = "WEB_ADMIN";
 
 export class GovernedExpenseWriteServiceError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -38,6 +40,8 @@ export interface CreateGovernedExpenseInput {
   fecha_programada?: Date | string | null;
   comprobante_referencia?: string | null;
   registrada_por_user_id?: string | null;
+  /** R4.7: plantilla que generó el gasto; null o ausente = gasto manual. */
+  recurrente_id?: string | null;
 }
 
 export interface PayGovernedExpenseInput {
@@ -71,6 +75,12 @@ export class GovernedExpenseWriteService {
     if (!nombre) {
       throw new GovernedExpenseWriteServiceError("El nombre de la categoría es obligatorio.");
     }
+    const naturaleza = String(input.naturaleza ?? "").trim().toUpperCase();
+    if (!["OPERATIVO", "ADMINISTRATIVO", "COSTO_VENTAS"].includes(naturaleza)) {
+      throw new GovernedExpenseWriteServiceError(
+        "La naturaleza debe ser OPERATIVO, ADMINISTRATIVO o COSTO_VENTAS.",
+      );
+    }
     const now = trustedClock.nowUtc();
     const categoriaId = `cat_${randomUUID()}`;
 
@@ -82,12 +92,12 @@ export class GovernedExpenseWriteService {
         throw new GovernedExpenseWriteServiceError(`Ya existe una categoría con el nombre "${nombre}".`);
       }
 
-      return tx.gastoCategoria.create({
+      const row = await tx.gastoCategoria.create({
         data: {
           categoria_id: categoriaId,
           gym_id: gymId,
           nombre,
-          naturaleza: input.naturaleza,
+          naturaleza,
           es_sistema: input.es_sistema ?? false,
           is_deleted: false,
           created_at: now,
@@ -96,6 +106,8 @@ export class GovernedExpenseWriteService {
           version: 1,
         },
       });
+      await this.recordSync(tx, "gasto_categoria", "INSERT", gymId, row.categoria_id, row);
+      return row;
     });
   }
 
@@ -116,6 +128,21 @@ export class GovernedExpenseWriteService {
     const proveedorId = `prov_${randomUUID()}`;
 
     return prisma.$transaction(async (tx: Tx) => {
+      if (input.cuenta_pago_default_id) {
+        const account = await tx.cuenta.findFirst({
+          where: {
+            cuenta_id: input.cuenta_pago_default_id,
+            gym_id: gymId,
+            is_deleted: false,
+          },
+          select: { cuenta_id: true },
+        });
+        if (!account) {
+          throw new GovernedExpenseWriteServiceError(
+            "La cuenta predeterminada no pertenece al gimnasio.",
+          );
+        }
+      }
       if (doc) {
         const existingDoc = await tx.gastoProveedor.findFirst({
           where: { gym_id: gymId, documento: doc, is_deleted: false },
@@ -125,7 +152,7 @@ export class GovernedExpenseWriteService {
         }
       }
 
-      return tx.gastoProveedor.create({
+      const row = await tx.gastoProveedor.create({
         data: {
           proveedor_id: proveedorId,
           gym_id: gymId,
@@ -139,10 +166,16 @@ export class GovernedExpenseWriteService {
           version: 1,
         },
       });
+      await this.recordSync(tx, "gasto_proveedor", "INSERT", gymId, row.proveedor_id, row);
+      return row;
     });
   }
 
-  async createExpense(gymId: string, input: CreateGovernedExpenseInput) {
+  async createExpense(
+    gymId: string,
+    input: CreateGovernedExpenseInput,
+    existingTx?: Tx,
+  ) {
     const period = parseTreasuryMonth(input.periodo_pertenencia_mes);
     const montoMinor = treasuryMoneyToMinor(input.monto);
     if (montoMinor <= 0n) {
@@ -156,7 +189,13 @@ export class GovernedExpenseWriteService {
     const now = trustedClock.nowUtc();
     const gastoId = `gasto_${randomUUID()}`;
 
-    return prisma.$transaction(async (tx: Tx) => {
+    const createInTx = async (tx: Tx) => {
+      // El gasto devengado del mes entra al resultado certificado (snapshot v4),
+      // así que un mes ya firmado no puede recibir gasto nuevo: cambiaría la
+      // cifra que la firma dice congelada. El bloqueo mira el mes de
+      // pertenencia, no el día en que se registra.
+      await assertTreasuryMonthOpen(tx, gymId, period.start);
+
       const category = await tx.gastoCategoria.findFirst({
         where: { categoria_id: input.categoria_id, gym_id: gymId, is_deleted: false },
       });
@@ -176,6 +215,11 @@ export class GovernedExpenseWriteService {
       const rawFechaProg = input.fecha_programada
         ? new Date(input.fecha_programada)
         : now;
+      if (Number.isNaN(rawFechaProg.getTime())) {
+        throw new GovernedExpenseWriteServiceError(
+          "La fecha programada no es válida.",
+        );
+      }
       const fechaProg = new Date(
         Date.UTC(
           rawFechaProg.getUTCFullYear(),
@@ -190,7 +234,15 @@ export class GovernedExpenseWriteService {
         creado_at: now.toISOString(),
       };
 
-      return tx.gastoGobernado.create({
+      const currency = await tx.moneda.findFirst({
+        where: { moneda_id: input.moneda_id, is_deleted: false },
+        select: { moneda_id: true },
+      });
+      if (!currency) {
+        throw new GovernedExpenseWriteServiceError("La moneda especificada no existe.");
+      }
+
+      const row = await tx.gastoGobernado.create({
         data: {
           gasto_id: gastoId,
           gym_id: gymId,
@@ -202,6 +254,7 @@ export class GovernedExpenseWriteService {
           periodo_pertenencia_mes: period.month,
           fecha_pago: null,
           fecha_programada: fechaProg,
+          recurrente_id: input.recurrente_id ?? null,
           metodo_devengo: "MES_PERTENENCIA",
           estado: "PENDIENTE",
           pagado_acumulado: 0,
@@ -215,7 +268,10 @@ export class GovernedExpenseWriteService {
           version: 1,
         },
       });
-    });
+      await this.recordSync(tx, "gasto_gobernado", "INSERT", gymId, row.gasto_id, row);
+      return row;
+    };
+    return existingTx ? createInTx(existingTx) : prisma.$transaction(createInTx);
   }
 
   async payExpense(gymId: string, input: PayGovernedExpenseInput) {
@@ -252,6 +308,28 @@ export class GovernedExpenseWriteService {
       const newPaidMinor = currentPaidMinor + payMinor;
       const newState = newPaidMinor >= totalMinor ? "PAGADO" : "PARCIAL";
       const businessDate = await this.profiles.businessDateForInstant(tx, gymId, now);
+
+      if (input.cuenta_id) {
+        const account = await tx.cuenta.findFirst({
+          where: {
+            cuenta_id: input.cuenta_id,
+            gym_id: gymId,
+            is_deleted: false,
+          },
+          select: { moneda_id: true, tipo_pago_id: true },
+        });
+        if (
+          !account ||
+          account.moneda_id !== expense.moneda_id ||
+          (input.tipo_pago_id &&
+            account.tipo_pago_id &&
+            account.tipo_pago_id !== input.tipo_pago_id)
+        ) {
+          throw new GovernedExpenseWriteServiceError(
+            "La cuenta de salida no pertenece al gimnasio o no corresponde a la moneda/método del gasto.",
+          );
+        }
+      }
 
       const aplicacionId = `app_${randomUUID()}`;
 
@@ -296,6 +374,23 @@ export class GovernedExpenseWriteService {
         },
       });
 
+      await this.recordSync(
+        tx,
+        "gasto_gobernado_aplicacion",
+        "INSERT",
+        gymId,
+        appRow.aplicacion_id,
+        appRow,
+      );
+      await this.recordSync(
+        tx,
+        "gasto_gobernado",
+        "UPDATE",
+        gymId,
+        updatedExpense.gasto_id,
+        updatedExpense,
+      );
+
       return {
         expense: updatedExpense,
         application: appRow,
@@ -329,6 +424,20 @@ export class GovernedExpenseWriteService {
         throw new GovernedExpenseWriteServiceError("El gasto asociado no existe.");
       }
 
+      const originalMovement = await tx.tesoreriaMovimiento.findFirst({
+        where: {
+          movimiento_id: appRow.movimiento_id,
+          gym_id: gymId,
+          is_deleted: false,
+        },
+      });
+      if (!originalMovement || originalMovement.moneda_id !== expense.moneda_id) {
+        throw new GovernedExpenseWriteServiceError(
+          "El movimiento original del pago no existe o no coincide con la moneda del gasto.",
+          409,
+        );
+      }
+
       const currentPaidMinor = treasuryMoneyToMinor(expense.pagado_acumulado.toString());
       const appMinor = treasuryMoneyToMinor(appRow.monto_aplicado.toString());
       const newPaidMinor = currentPaidMinor > appMinor ? currentPaidMinor - appMinor : 0n;
@@ -348,8 +457,8 @@ export class GovernedExpenseWriteService {
         gasto_id: expense.gasto_id,
         aplicacion_id: appRow.aplicacion_id,
         moneda_id: expense.moneda_id,
-        cuenta_id: null,
-        tipo_pago_id: null,
+        cuenta_id: originalMovement.cuenta_id,
+        tipo_pago_id: originalMovement.tipo_pago_id,
         monto: treasuryMinorToMoney(appMinor),
         fecha_negocio: businessDate,
         motivo,
@@ -376,11 +485,49 @@ export class GovernedExpenseWriteService {
         },
       });
 
+      await this.recordSync(
+        tx,
+        "gasto_gobernado_aplicacion",
+        "UPDATE",
+        gymId,
+        updatedApp.aplicacion_id,
+        updatedApp,
+      );
+      await this.recordSync(
+        tx,
+        "gasto_gobernado",
+        "UPDATE",
+        gymId,
+        updatedExpense.gasto_id,
+        updatedExpense,
+      );
+
       return {
         expense: updatedExpense,
         application: updatedApp,
         reversalMovement: movement,
       };
+    });
+  }
+
+  private async recordSync(
+    tx: Tx,
+    entity: string,
+    operation: "INSERT" | "UPDATE",
+    gymId: string,
+    entityId: string,
+    row: unknown,
+  ) {
+    await tx.syncLog.create({
+      data: {
+        event_id: randomUUID(),
+        entidad: entity,
+        operacion: operation,
+        entidad_id: entityId,
+        gym_id: gymId,
+        device_id: DEVICE_ID,
+        payload_json: JSON.stringify(serialize(row)),
+      },
     });
   }
 }

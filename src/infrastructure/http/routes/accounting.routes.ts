@@ -53,6 +53,14 @@ import {
   asGovernedExpenseServiceError,
 } from "../../../application/reporting/governed-expense.service";
 import {
+  AccrualOperatingResultService,
+  asAccrualOperatingResultServiceError,
+} from "../../../application/reporting/accrual-operating-result.service";
+import {
+  RecurringExpenseService,
+  asRecurringExpenseServiceError,
+} from "../../../application/accounting/recurring-expense.service";
+import {
   GovernedExpenseWriteService,
   GovernedExpenseWriteServiceError,
 } from "../../../application/accounting/governed-expense-write.service";
@@ -74,6 +82,7 @@ const governedExpenseReadService = new GovernedExpenseService(
   new PrismaGovernedExpenseReader(),
 );
 const governedExpenseWriteService = new GovernedExpenseWriteService();
+const recurringExpenses = new RecurringExpenseService();
 const fixedObligations = new FixedObligationService();
 const treasuryRefunds = new TreasuryRefundService();
 const treasuryLedger = new TreasuryLedgerService();
@@ -94,9 +103,15 @@ const managementMargin = new ManagementMarginService(
   new PrismaTrainerServiceCostReader(),
   new PrismaManagementMarginMonthlyCloseReader(),
 );
+const accrualOperatingResult = new AccrualOperatingResultService(
+  managementMargin,
+  governedExpenseReadService,
+  new PrismaManagementMarginMonthlyCloseReader(),
+);
 const treasuryMonthCloses = new TreasuryMonthCloseService(
   operationalResults,
   managementMargin,
+  governedExpenseReadService,
 );
 
 function gymIdentity(c: any) {
@@ -169,6 +184,18 @@ function handleTrainerServiceCostError(c: any, error: unknown) {
 
 function handleManagementMarginError(c: any, error: unknown) {
   const known = asManagementMarginServiceError(error);
+  if (known) return c.json({ error: known.message }, known.status);
+  throw error;
+}
+
+function handleAccrualOperatingResultError(c: any, error: unknown) {
+  const known = asAccrualOperatingResultServiceError(error);
+  if (known) return c.json({ error: known.message }, known.status);
+  throw error;
+}
+
+function handleRecurringExpenseError(c: any, error: unknown) {
+  const known = asRecurringExpenseServiceError(error);
   if (known) return c.json({ error: known.message }, known.status);
   throw error;
 }
@@ -594,6 +621,21 @@ accountingRoutes.get("/management-margin", async (c) => {
   }
 });
 
+accountingRoutes.get("/accrual-operating-result", async (c) => {
+  const actor = accountingIdentity(c);
+  if (!actor?.gymId) {
+    return c.json({ error: "Se requiere una cuenta operadora." }, 403);
+  }
+  try {
+    return c.json(await accrualOperatingResult.get({
+      gymId: actor.gymId,
+      month: c.req.query("mes"),
+    }));
+  } catch (error) {
+    return handleAccrualOperatingResultError(c, error);
+  }
+});
+
 accountingRoutes.get("/management-margin/annual", async (c) => {
   const actor = accountingIdentity(c);
   if (!actor?.gymId) {
@@ -843,6 +885,74 @@ function handleGovernedExpenseError(c: any, error: unknown) {
   }
   return c.json({ error: (error as Error)?.message ?? "Error en gastos devengados." }, 500);
 }
+
+// R4.7 Gastos recurrentes (plantillas y generación mensual)
+accountingRoutes.get("/recurring-expenses", async (c) => {
+  const auth = gymIdentity(c);
+  if (!auth?.gymId) {
+    return c.json({ error: "El token no identifica un gimnasio." }, 403);
+  }
+  return c.json(await recurringExpenses.list(auth.gymId));
+});
+
+accountingRoutes.post("/recurring-expenses", async (c) => {
+  const auth = gymIdentity(c);
+  if (!auth?.gymId) {
+    return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
+  }
+  try {
+    return c.json(
+      await recurringExpenses.create(auth.gymId, await c.req.json()),
+      201,
+    );
+  } catch (error) {
+    return handleRecurringExpenseError(c, error);
+  }
+});
+
+accountingRoutes.put("/recurring-expenses/:id", async (c) => {
+  const auth = gymIdentity(c);
+  if (!auth?.gymId) {
+    return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
+  }
+  try {
+    const body = await c.req.json();
+    return c.json(await recurringExpenses.update(auth.gymId, {
+      ...body,
+      recurrente_id: c.req.param("id"),
+    }));
+  } catch (error) {
+    return handleRecurringExpenseError(c, error);
+  }
+});
+
+accountingRoutes.get("/recurring-expenses/preview", async (c) => {
+  const auth = gymIdentity(c);
+  if (!auth?.gymId) {
+    return c.json({ error: "El token no identifica un gimnasio." }, 403);
+  }
+  try {
+    return c.json(await recurringExpenses.preview(auth.gymId, c.req.query("mes")));
+  } catch (error) {
+    return handleRecurringExpenseError(c, error);
+  }
+});
+
+accountingRoutes.post("/recurring-expenses/generate", async (c) => {
+  const auth = gymIdentity(c);
+  if (!auth?.gymId) {
+    return c.json({ error: "El token no identifica un gimnasio." }, 403);
+  }
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    return c.json(await recurringExpenses.generate(auth.gymId, {
+      month: body?.mes,
+      userId: auth.sub ?? null,
+    }));
+  } catch (error) {
+    return handleRecurringExpenseError(c, error);
+  }
+});
 
 // R4.6 Gastos Devengados Gobernados
 accountingRoutes.get("/governed-expenses", async (c) => {

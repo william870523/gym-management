@@ -8,6 +8,7 @@ import { DeleteClientePesoUseCase } from "../../../application/use-cases/cliente
 import { GetClientePesoUseCase } from "../../../application/use-cases/cliente_peso/GetClientePesoUseCase";
 import { ListClientePesosUseCase } from "../../../application/use-cases/cliente_peso/ListClientePesosUseCase";
 import { CreateClientePesoSchema, UpdateClientePesoSchema } from "../../../application/dtos/ClientePesoDTO";
+import { getUserGymActor } from "../middleware/auth.middleware";
 
 export class ClientePesoController {
     private createUseCase: CreateClientePesoUseCase;
@@ -27,11 +28,13 @@ export class ClientePesoController {
 
     async list(c: Context) {
         try {
-            const ci = c.req.query("ci");
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const ci = c.req.param("ci") || c.req.query("ci");
             if (!ci) {
                 return c.json({ error: "Query parameter 'ci' is required" }, 400);
             }
-            const result = await this.listUseCase.execute(ci);
+            const result = await this.listUseCase.execute(actor.gymId, ci);
             return c.json(result);
         } catch (error: any) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -41,7 +44,9 @@ export class ClientePesoController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, actor.gymId);
             if (!result) {
                 return c.json({ error: "ClientePeso not found" }, 404);
             }
@@ -54,8 +59,10 @@ export class ClientePesoController {
     async create(c: Context) {
         try {
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = CreateClientePesoSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const result = await this.createUseCase.execute(validated, actor.gymId);
 
             await prisma.syncLog.create({
                 data: {
@@ -74,6 +81,9 @@ export class ClientePesoController {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
+            if (String(error.message).includes("no pertenece al gimnasio")) {
+                return c.json({ error: error.message }, 400);
+            }
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }
@@ -82,8 +92,10 @@ export class ClientePesoController {
         try {
             const id = c.req.param("id");
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdateClientePesoSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            await this.updateUseCase.execute(id, validated, actor.gymId);
             return c.json({ message: "ClientePeso updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -99,7 +111,9 @@ export class ClientePesoController {
     async delete(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, actor.gymId);
             return c.json({ message: "ClientePeso deleted successfully" });
         } catch (error: any) {
             if (error.message === "ClientePeso not found") {

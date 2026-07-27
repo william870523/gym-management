@@ -1,6 +1,7 @@
 // src/domain/entities/Cliente.ts
 export interface Cliente {
   ci: string;
+  tipo_documento: string;
   nombres: string;
   apellidos: string;
   sexo: string;

@@ -1,9 +1,5 @@
 import type { Context } from "hono";
 import { prisma } from "../../db/prismaClient";
-import {
-    CreatePagoClienteSchema, UpdatePagoClienteSchema,
-    CreateDetallePagoSchema, UpdateDetallePagoSchema
-} from "../../../application/validation/payments.schemas";
 
 const authenticatedGymId = (c: Context) => c.get("auth")?.gymId ?? null;
 
@@ -36,44 +32,15 @@ export const getPagoClienteById = async (c: Context) => {
 };
 
 export const createPagoCliente = async (c: Context) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreatePagoClienteSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const newItem = await prisma.pagoCliente.create({
-        data: { ...parsed.data, pago_cliente_id: crypto.randomUUID() }
-    });
-    return c.json(newItem, 201);
+    return c.json({ error: "Legacy payment writes are disabled" }, 410);
 };
 
 export const updatePagoCliente = async (c: Context) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => null);
-    const parsed = UpdatePagoClienteSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    try {
-        const updated = await prisma.pagoCliente.update({
-            where: { pago_cliente_id: id },
-            data: parsed.data
-        });
-        return c.json(updated);
-    } catch (e) {
-        return c.json({ error: "Update failed or not found" }, 404);
-    }
+    return c.json({ error: "Legacy payment writes are disabled" }, 410);
 };
 
 export const deletePagoCliente = async (c: Context) => {
-    const id = c.req.param("id");
-    try {
-        await prisma.pagoCliente.update({
-            where: { pago_cliente_id: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
-        return c.json({ ok: true });
-    } catch (e) {
-        return c.json({ error: "Delete failed or not found" }, 404);
-    }
+    return c.json({ error: "Legacy payment writes are disabled" }, 410);
 };
 
 // --- DetallePago ---
@@ -98,42 +65,13 @@ export const getDetallePagoById = async (c: Context) => {
 };
 
 export const createDetallePago = async (c: Context) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreateDetallePagoSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const newItem = await prisma.detallePago.create({
-        data: { ...parsed.data, detalle_pago_id: crypto.randomUUID() }
-    });
-    return c.json(newItem, 201);
+    return c.json({ error: "Legacy payment detail writes are disabled" }, 410);
 };
 
 export const updateDetallePago = async (c: Context) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => null);
-    const parsed = UpdateDetallePagoSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    try {
-        const updated = await prisma.detallePago.update({
-            where: { detalle_pago_id: id },
-            data: parsed.data
-        });
-        return c.json(updated);
-    } catch (e) {
-        return c.json({ error: "Update failed or not found" }, 404);
-    }
+    return c.json({ error: "Legacy payment detail writes are disabled" }, 410);
 };
 
 export const deleteDetallePago = async (c: Context) => {
-    const id = c.req.param("id");
-    try {
-        await prisma.detallePago.update({
-            where: { detalle_pago_id: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
-        return c.json({ ok: true });
-    } catch (e) {
-        return c.json({ error: "Delete failed or not found" }, 404);
-    }
+    return c.json({ error: "Legacy payment detail writes are disabled" }, 410);
 };

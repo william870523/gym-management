@@ -71,7 +71,6 @@ export const HorarioSchema = z.object({
     nombre_horario: z.string().min(1, "Nombre es requerido"),
     hora_inicio: z.number().int().min(0).max(23),
     hora_fin: z.number().int().min(0).max(23),
-    gym_id: z.string().optional().nullable(),
     is_deleted: z.boolean().optional(),
     version: z.number().optional(),
 });
@@ -87,7 +86,6 @@ export const PlanesPagoSchema = z.object({
     duracion_plan_pago: z.number().int().min(1),
     activo: z.boolean().optional(),
     moneda_id: z.string().min(1, "Moneda es requerida"),
-    gym_id: z.string().optional().nullable(),
     is_deleted: z.boolean().optional(),
     version: z.number().optional(),
 });
@@ -100,7 +98,6 @@ export const CuentaSchema = z.object({
     cuenta_id: z.string().optional(),
     nombre_cuenta: z.string().min(1, "Nombre es requerido"),
     moneda_id: z.string().min(1, "Moneda es requerida"),
-    gym_id: z.string().optional().nullable(),
     is_deleted: z.boolean().optional(),
     version: z.number().optional(),
 });

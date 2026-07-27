@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { TipoCambio } from "../../../domain/entities/TipoCambio";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { TipoCambioRepository } from "../../../domain/repositories/TipoCambioRepository";
@@ -9,6 +10,8 @@ export interface ApplyTipoCambioEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyTipoCambioEventUseCase {
@@ -17,15 +20,18 @@ export class ApplyTipoCambioEventUseCase {
     ) { }
 
     async execute(input: ApplyTipoCambioEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.tipoCambioRepository.withTransaction(input.tx)
+            : this.tipoCambioRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.tipoCambioRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId);
             return;
         }
 
         const tipoCambio = this.mapPayloadToTipoCambio(input);
-        await this.tipoCambioRepository.upsertTipoCambio(tipoCambio);
+        await repo.upsertTipoCambio(tipoCambio);
     }
 
     private mapPayloadToTipoCambio(input: ApplyTipoCambioEventInput): TipoCambio {

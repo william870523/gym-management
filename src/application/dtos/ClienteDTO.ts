@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const CreateClienteSchema = z.object({
     ci: z.string().min(1),
+    tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).default("DESCONOCIDO"),
     nombres: z.string().min(1),
     apellidos: z.string().min(1),
     sexo: z.string(),
@@ -21,12 +22,12 @@ export const CreateClienteSchema = z.object({
     activo: z.any(),
     id_horarios: z.string().min(1).optional().nullable(),
     referencia_id: z.string().min(1).optional().nullable(),
-    gym_id: z.string().optional().nullable(),
 });
 
 export type CreateClienteDTO = z.infer<typeof CreateClienteSchema>;
 
 export const UpdateClienteSchema = z.object({
+    tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).optional(),
     nombres: z.string().min(1).optional(),
     apellidos: z.string().min(1).optional(),
     sexo: z.string().optional(),
@@ -47,7 +48,6 @@ export const UpdateClienteSchema = z.object({
     id_horarios: z.string().min(1).optional().nullable(),
     fecha_nacimiento: z.string().datetime().optional().nullable(),
     referencia_id: z.string().min(1).optional().nullable(),
-    gym_id: z.string().optional().nullable(),
 });
 
 export type UpdateClienteDTO = z.infer<typeof UpdateClienteSchema>;

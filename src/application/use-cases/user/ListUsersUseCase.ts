@@ -4,8 +4,8 @@ import { User } from "@prisma/client";
 export class ListUsersUseCase {
     constructor(private readonly userRepository: UserRepository) { }
 
-    async execute(): Promise<User[]> {
-        return this.userRepository.findAll();
+    async execute(gymId: string): Promise<User[]> {
+        return this.userRepository.findAll(gymId);
     }
 }
 

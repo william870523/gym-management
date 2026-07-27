@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Referencia } from "../../../domain/entities/Referencia";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { ReferenciaRepository } from "../../../domain/repositories/ReferenciaRepository";
@@ -9,6 +10,8 @@ export interface ApplyReferenciaEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyReferenciaEventUseCase {
@@ -17,15 +20,18 @@ export class ApplyReferenciaEventUseCase {
     ) { }
 
     async execute(input: ApplyReferenciaEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.referenciaRepository.withTransaction(input.tx)
+            : this.referenciaRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.referenciaRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId);
             return;
         }
 
         const referencia = this.mapPayloadToReferencia(input);
-        await this.referenciaRepository.upsertReferencia(referencia);
+        await repo.upsertReferencia(referencia);
     }
 
     private mapPayloadToReferencia(input: ApplyReferenciaEventInput): Referencia {

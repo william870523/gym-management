@@ -59,11 +59,7 @@ export class CuentaController {
             const validated = CreateCuentaSchema.parse(body);
             const gymId = this.gymId(c);
             if (!gymId) return c.json({ error: "Gym scope required" }, 403);
-            const result = await this.createUseCase.execute({
-                ...validated,
-                gym_id: gymId,
-                source_device: "WEB_ADMIN",
-            });
+            const result = await this.createUseCase.execute(validated, gymId);
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {

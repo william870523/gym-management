@@ -8,20 +8,20 @@ export class DeletePlanesPagoUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string): Promise<void> {
-        const existing = await this.planesPagoRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<void> {
+        const existing = await this.planesPagoRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("PlanesPago not found");
         }
 
-        await this.planesPagoRepository.softDelete(id);
+        await this.planesPagoRepository.softDelete(id, gymId);
 
         await this.syncLogRepository.register({
             eventId: randomUUID(),
             entidad: "planes_pago",
             operacion: "DELETE",
             entidadId: id,
-            gymId: existing.gym_id,
+            gymId,
             deviceId: "WEB_ADMIN",
             payload: { id_planes_pago: id }
         });

@@ -13,13 +13,14 @@ export class CreateClienteUseCase {
         private readonly clientePesoRepository: ClientePesoRepository
     ) { }
 
-    async execute(dto: CreateClienteDTO): Promise<Cliente & {
+    async execute(dto: CreateClienteDTO, gymId: string): Promise<Cliente & {
         membresia_id?: string | null;
         membresia_estado?: string | null;
     }> {
         const now = trustedClock.nowUtc();
         const newCliente: Cliente = {
             ci: dto.ci,
+            tipo_documento: dto.tipo_documento,
             nombres: dto.nombres,
             apellidos: dto.apellidos,
             sexo: dto.sexo,
@@ -40,7 +41,7 @@ export class CreateClienteUseCase {
             activo: dto.id_planes_pago ? false : Boolean(dto.activo),
             id_horarios: dto.id_horarios,
             referencia_id: dto.referencia_id ?? null,
-            gym_id: dto.gym_id ?? null,
+            gym_id: gymId,
             source_device: null,
             version: 1,
             created_at: now,
@@ -129,7 +130,11 @@ export class CreateClienteUseCase {
 
             // 3. Update Client with Weight ID
             createdClient.cliente_peso_id = pesoId;
-            await this.clienteRepository.update(createdClient.ci, { cliente_peso_id: pesoId });
+            await this.clienteRepository.update(
+                createdClient.ci,
+                gymId,
+                { cliente_peso_id: pesoId },
+            );
 
             // 4. Sync Client Update
             await this.syncLogRepository.register({

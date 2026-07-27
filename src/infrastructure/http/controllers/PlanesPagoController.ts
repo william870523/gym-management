@@ -7,6 +7,8 @@ import { GetPlanesPagoUseCase } from "../../../application/use-cases/planes_pago
 import { ListPlanesPagosUseCase } from "../../../application/use-cases/planes_pago/ListPlanesPagosUseCase";
 import { CreatePlanesPagoSchema, UpdatePlanesPagoSchema } from "../../../application/dtos/PlanesPagoDTO";
 import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
+import type { PlanesPagoRepository } from "../../../domain/repositories/PlanesPagoRepository";
+import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 
 export class PlanesPagoController {
     private createUseCase: CreatePlanesPagoUseCase;
@@ -15,10 +17,10 @@ export class PlanesPagoController {
     private getUseCase: GetPlanesPagoUseCase;
     private listUseCase: ListPlanesPagosUseCase;
 
-    constructor() {
-        const repository = new PrismaPlanesPagoRepository();
-        const syncLogRepository = new PrismaSyncLogRepository();
-
+    constructor(
+        repository: PlanesPagoRepository = new PrismaPlanesPagoRepository(),
+        syncLogRepository: SyncLogRepository = new PrismaSyncLogRepository(),
+    ) {
         this.createUseCase = new CreatePlanesPagoUseCase(repository, syncLogRepository);
         this.updateUseCase = new UpdatePlanesPagoUseCase(repository, syncLogRepository);
         this.deleteUseCase = new DeletePlanesPagoUseCase(repository, syncLogRepository);
@@ -29,7 +31,9 @@ export class PlanesPagoController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.listUseCase.execute(gymId);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -39,7 +43,9 @@ export class PlanesPagoController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, gymId);
             if (!result) {
                 return c.json({ error: "PlanesPago not found" }, 404);
             }
@@ -53,7 +59,9 @@ export class PlanesPagoController {
         try {
             const body = await c.req.json();
             const validated = CreatePlanesPagoSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.createUseCase.execute(validated, gymId);
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -68,7 +76,9 @@ export class PlanesPagoController {
             const id = c.req.param("id");
             const body = await c.req.json();
             const validated = UpdatePlanesPagoSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            await this.updateUseCase.execute(id, validated, gymId);
             return c.json({ message: "PlanesPago updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -84,7 +94,9 @@ export class PlanesPagoController {
     async delete(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, gymId);
             return c.json({ message: "PlanesPago deleted successfully" });
         } catch (error: any) {
             if (error.message === "PlanesPago not found") {
@@ -92,5 +104,10 @@ export class PlanesPagoController {
             }
             return c.json({ error: "Internal Server Error" }, 500);
         }
+    }
+
+    private gymId(c: Context): string | null {
+        const auth = c.get("auth");
+        return auth?.gymId?.trim() || null;
     }
 }

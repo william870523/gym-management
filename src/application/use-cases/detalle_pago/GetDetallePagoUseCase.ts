@@ -4,7 +4,7 @@ import type { DetallePagoRepository } from "../../../domain/repositories/Detalle
 export class GetDetallePagoUseCase {
     constructor(private readonly detallePagoRepository: DetallePagoRepository) { }
 
-    async execute(id: string): Promise<DetallePago | null> {
-        return this.detallePagoRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<DetallePago | null> {
+        return this.detallePagoRepository.findById(id, gymId);
     }
 }

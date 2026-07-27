@@ -4,7 +4,7 @@ import type { PagoClienteRepository } from "../../../domain/repositories/PagoCli
 export class ListPagoClientesUseCase {
     constructor(private readonly pagoClienteRepository: PagoClienteRepository) { }
 
-    async execute(): Promise<PagoCliente[]> {
-        return this.pagoClienteRepository.findAll();
+    async execute(gymId: string): Promise<PagoCliente[]> {
+        return this.pagoClienteRepository.findAll(gymId);
     }
 }

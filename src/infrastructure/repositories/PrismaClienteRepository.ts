@@ -1,17 +1,77 @@
 import type { Cliente } from "../../domain/entities/Cliente";
 import type { ClienteRepository } from "../../domain/repositories/ClienteRepository";
 import { prisma } from "../db/prismaClient";
+import { type SyncTransactionContext } from "../../application/use-cases/sync/sync-transaction";
 import type { ClienteCreationResult } from "../../domain/repositories/ClienteRepository";
 import { trustedClock } from "../../config/trusted-clock";
 import { randomUUID } from "crypto";
+import {
+  softDeleteGymScopedSyncRecord,
+  upsertGymScopedSyncRecord,
+} from "./gym-scoped-sync-write";
+import { assertGymScopedReference } from "./gym-scoped-reference";
 
 export class PrismaClienteRepository implements ClienteRepository {
+  // Unidad 01: `client` es prisma o el cliente de la transacción del upload.
+  constructor(private readonly client: any = prisma) {}
+
+  withTransaction(tx: SyncTransactionContext): PrismaClienteRepository {
+    return new PrismaClienteRepository(tx);
+  }
+
+  // Unidad 01: usa una transacción propia cuando `client` es el prisma raíz;
+  // si ya es el cliente de una transacción (upload), la reutiliza en vez de
+  // anidar otra —Prisma no soporta transacciones anidadas y un TransactionClient
+  // no expone `$transaction`.
+  private runInClient<T>(work: (c: any) => Promise<T>): Promise<T> {
+    return typeof this.client.$transaction === "function"
+      ? this.client.$transaction(work)
+      : work(this.client);
+  }
+
   // Guarda o actualiza un cliente a partir de un evento de sincronizacion.
   async upsertFromSync(payload: Cliente): Promise<void> {
-    await prisma.cliente.upsert({
-      where: { ci: payload.ci },
+    const now = trustedClock.nowUtc();
+    if (!payload.gym_id) throw new Error("El evento de cliente no tiene gimnasio autenticado.");
+    await this.runInClient(async (tx) => {
+      await Promise.all([
+        payload.id_planes_pago
+          ? assertGymScopedReference({
+              delegate: tx.planesPago,
+              entity: "plan",
+              pk: "id_planes_pago",
+              id: payload.id_planes_pago,
+              gymId: payload.gym_id!,
+            })
+          : Promise.resolve(),
+        payload.id_entrenador
+          ? assertGymScopedReference({
+              delegate: tx.entrenador,
+              entity: "entrenador",
+              pk: "id_entrenador",
+              id: payload.id_entrenador,
+              gymId: payload.gym_id!,
+            })
+          : Promise.resolve(),
+        payload.id_horarios
+          ? assertGymScopedReference({
+              delegate: tx.horario,
+              entity: "horario",
+              pk: "horario_id",
+              id: payload.id_horarios,
+              gymId: payload.gym_id!,
+            })
+          : Promise.resolve(),
+      ]);
+      await upsertGymScopedSyncRecord({
+      delegate: tx.cliente,
+      entity: "cliente",
+      pk: "ci",
+      id: payload.ci,
+      gymId: payload.gym_id,
       create: {
         ci: payload.ci,
+        tipo_documento: payload.tipo_documento,
         nombres: payload.nombres,
         apellidos: payload.apellidos,
         sexo: payload.sexo,
@@ -31,14 +91,15 @@ export class PrismaClienteRepository implements ClienteRepository {
         id_horarios: payload.id_horarios,
         referencia_id: payload.referencia_id ?? null,
         is_deleted: false,
-        created_at: payload.created_at ?? new Date(),
+        created_at: payload.created_at ?? now,
         gym_id: payload.gym_id,
         source_device: payload.source_device ?? null,
         version: payload.version ?? 1,
-        updated_at: new Date(),
+        updated_at: now,
         deleted_at: null
       },
       update: {
+        tipo_documento: payload.tipo_documento,
         nombres: payload.nombres,
         apellidos: payload.apellidos,
         sexo: payload.sexo,
@@ -61,19 +122,21 @@ export class PrismaClienteRepository implements ClienteRepository {
         source_device: payload.source_device ?? null,
         is_deleted: false,
         version: payload.version ?? 1,
-        updated_at: new Date(),
+        updated_at: now,
         deleted_at: null
       }
+      });
     });
   }
 
-  async findAll(): Promise<Cliente[]> {
-    const result = await prisma.cliente.findMany({
-      where: { is_deleted: false }
+  async findAll(gymId: string): Promise<Cliente[]> {
+    const result = await this.client.cliente.findMany({
+      where: { gym_id: gymId, is_deleted: false }
     });
-    const memberships = await prisma.membresiaCliente.findMany({
+    const memberships = await this.client.membresiaCliente.findMany({
       where: {
-        ci: { in: result.map((client) => client.ci) },
+        gym_id: gymId,
+        ci: { in: result.map((client: any) => client.ci) },
         is_deleted: false,
         estado: { in: ["PENDIENTE_PAGO", "ACTIVA", "PAUSADA"] },
       },
@@ -85,7 +148,7 @@ export class PrismaClienteRepository implements ClienteRepository {
         membershipByClient.set(membership.ci, membership);
       }
     }
-    return result.map(c => ({
+    return result.map((c: any) => ({
       ...c,
       foto_cliente: c.foto_cliente ? new Uint8Array(c.foto_cliente) : null,
       telefono: c.telefono == null ? null : Number(c.telefono),
@@ -108,15 +171,15 @@ export class PrismaClienteRepository implements ClienteRepository {
     }));
   }
 
-  async findById(id: string): Promise<Cliente | null> {
-    const result = await prisma.cliente.findUnique({
-      where: { ci: id, is_deleted: false }
+  async findById(id: string, gymId: string): Promise<Cliente | null> {
+    const result = await this.client.cliente.findFirst({
+      where: { ci: id, gym_id: gymId, is_deleted: false }
     });
     if (!result) return null;
-    const membership = await prisma.membresiaCliente.findFirst({
+    const membership = await this.client.membresiaCliente.findFirst({
       where: {
         ci: result.ci,
-        gym_id: result.gym_id ?? undefined,
+        gym_id: gymId,
         is_deleted: false,
         estado: { in: ["PENDIENTE_PAGO", "ACTIVA", "PAUSADA"] },
       },
@@ -138,7 +201,7 @@ export class PrismaClienteRepository implements ClienteRepository {
   }
 
   async findNationalityCode(nacionalidadId: string): Promise<string | null> {
-    const nationality = await prisma.nacionalidad.findUnique({
+    const nationality = await this.client.nacionalidad.findUnique({
       where: { nacionalidad_id: nacionalidadId },
       select: { codigo_iso: true, is_deleted: true },
     });
@@ -146,11 +209,39 @@ export class PrismaClienteRepository implements ClienteRepository {
   }
 
   async create(data: Cliente): Promise<ClienteCreationResult> {
-    return prisma.$transaction(async (tx) => {
+    return this.runInClient(async (tx) => {
       const now = trustedClock.nowUtc();
+      if (!data.gym_id) {
+        throw new Error("El token debe identificar el gimnasio del cliente.");
+      }
       const plan = data.id_planes_pago
-        ? await tx.planesPago.findUnique({
-            where: { id_planes_pago: data.id_planes_pago },
+        ? await tx.planesPago.findFirst({
+            where: {
+              id_planes_pago: data.id_planes_pago,
+              gym_id: data.gym_id,
+              is_deleted: false,
+            },
+          })
+        : null;
+      const trainer = data.id_entrenador
+        ? await tx.entrenador.findFirst({
+            where: {
+              id_entrenador: data.id_entrenador,
+              gym_id: data.gym_id,
+              is_deleted: false,
+              activo_entrenador: true,
+            },
+            select: { id_entrenador: true },
+          })
+        : null;
+      const schedule = data.id_horarios
+        ? await tx.horario.findFirst({
+            where: {
+              horario_id: data.id_horarios,
+              gym_id: data.gym_id,
+              is_deleted: false,
+            },
+            select: { horario_id: true },
           })
         : null;
       const nationality = await tx.nacionalidad.findUnique({
@@ -160,14 +251,18 @@ export class PrismaClienteRepository implements ClienteRepository {
         throw new Error("La nacionalidad seleccionada no está disponible.");
       }
       if (data.id_planes_pago && !plan) {
-        throw new Error(`Plan ${data.id_planes_pago} no encontrado.`);
+        throw new Error("El plan seleccionado no pertenece al gimnasio autenticado.");
       }
-      if (plan && !data.gym_id) {
-        throw new Error("El token debe identificar el gimnasio del cliente.");
+      if (data.id_entrenador && !trainer) {
+        throw new Error("El entrenador seleccionado no pertenece al gimnasio autenticado.");
+      }
+      if (data.id_horarios && !schedule) {
+        throw new Error("El horario seleccionado no pertenece al gimnasio autenticado.");
       }
 
       const client = await tx.cliente.create({ data: {
         ci: data.ci,
+        tipo_documento: data.tipo_documento,
         nombres: data.nombres,
         apellidos: data.apellidos,
         sexo: data.sexo,
@@ -262,11 +357,47 @@ export class PrismaClienteRepository implements ClienteRepository {
     });
   }
 
-  async update(id: string, data: Partial<Cliente>): Promise<void> {
-    await prisma.cliente.update({
-      where: { ci: id },
-      data: {
+  async update(id: string, gymId: string, data: Partial<Cliente>): Promise<void> {
+    await this.runInClient(async (tx) => {
+      if (data.id_planes_pago) {
+        const plan = await tx.planesPago.findFirst({
+          where: {
+            id_planes_pago: data.id_planes_pago,
+            gym_id: gymId,
+            is_deleted: false,
+          },
+          select: { id_planes_pago: true },
+        });
+        if (!plan) throw new Error("El plan seleccionado no pertenece al gimnasio autenticado.");
+      }
+      if (data.id_entrenador) {
+        const trainer = await tx.entrenador.findFirst({
+          where: {
+            id_entrenador: data.id_entrenador,
+            gym_id: gymId,
+            is_deleted: false,
+            activo_entrenador: true,
+          },
+          select: { id_entrenador: true },
+        });
+        if (!trainer) throw new Error("El entrenador seleccionado no pertenece al gimnasio autenticado.");
+      }
+      if (data.id_horarios) {
+        const schedule = await tx.horario.findFirst({
+          where: {
+            horario_id: data.id_horarios,
+            gym_id: gymId,
+            is_deleted: false,
+          },
+          select: { horario_id: true },
+        });
+        if (!schedule) throw new Error("El horario seleccionado no pertenece al gimnasio autenticado.");
+      }
+      const result = await tx.cliente.updateMany({
+        where: { ci: id, gym_id: gymId, is_deleted: false },
+        data: {
         nombres: data.nombres,
+        tipo_documento: data.tipo_documento,
         apellidos: data.apellidos,
         sexo: data.sexo,
         foto_cliente: data.foto_cliente ? Buffer.from(data.foto_cliente) : undefined,
@@ -284,21 +415,23 @@ export class PrismaClienteRepository implements ClienteRepository {
         activo: data.activo,
         id_horarios: data.id_horarios,
         referencia_id: data.referencia_id ?? undefined,
-        gym_id: data.gym_id ?? undefined,
         version: { increment: 1 },
         updated_at: trustedClock.nowUtc()
-      }
+        },
+      });
+      if (result.count !== 1) throw new Error("Cliente not found");
     });
   }
 
-  async softDelete(id: string): Promise<void> {
-    await prisma.cliente.update({
-      where: { ci: id },
-      data: {
-        is_deleted: true,
-        deleted_at: trustedClock.nowUtc(),
-        updated_at: trustedClock.nowUtc()
-      }
+  async softDelete(id: string, gymId: string): Promise<void> {
+    const now = trustedClock.nowUtc();
+    await softDeleteGymScopedSyncRecord({
+      delegate: this.client.cliente,
+      entity: "cliente",
+      pk: "ci",
+      id,
+      gymId,
+      now,
     });
   }
 }

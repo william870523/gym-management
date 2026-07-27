@@ -5,7 +5,7 @@ export const authRoutes = () => {
   const app = new Hono();
   const controller = new AuthController();
 
-  // Registro de nuevo usuario (público)
+  // Fail closed: el bootstrap de administradores no se expone por HTTP.
   app.post("/register", (c) => controller.registerUser(c));
 
   // Login de usuario

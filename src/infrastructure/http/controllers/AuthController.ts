@@ -1,11 +1,9 @@
 import type { Context } from "hono";
 import { PrismaUserRepository } from "../../repositories/PrismaUserRepository";
 import { PrismaDeviceRepository } from "../../repositories/PrismaDeviceRepository";
-import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 import { LoginUserUseCase } from "../../../application/use-cases/auth/LoginUserUseCase";
 import { LoginDeviceUseCase } from "../../../application/use-cases/auth/LoginDeviceUseCase";
-import { RegisterUserUseCase } from "../../../application/use-cases/auth/RegisterUserUseCase";
-import { LoginUserSchema, LoginDeviceSchema, RegisterUserSchema } from "../../../application/dtos/AuthDTO";
+import { LoginUserSchema, LoginDeviceSchema } from "../../../application/dtos/AuthDTO";
 import { JwtService } from "../../auth/jwt.service";
 import { auditSecurityEvent } from "../../logging/audit-logger";
 import { getClientIp } from "../middleware/rate-limit.middleware";
@@ -21,16 +19,13 @@ const extractRetryAfterSeconds = (message: string): number | null => {
 export class AuthController {
     private loginUserUseCase: LoginUserUseCase;
     private loginDeviceUseCase: LoginDeviceUseCase;
-    private registerUserUseCase: RegisterUserUseCase;
 
     constructor() {
         const userRepository = new PrismaUserRepository();
         const deviceRepository = new PrismaDeviceRepository();
-        const syncLogRepository = new PrismaSyncLogRepository();
 
         this.loginUserUseCase = new LoginUserUseCase(userRepository);
         this.loginDeviceUseCase = new LoginDeviceUseCase(deviceRepository);
-        this.registerUserUseCase = new RegisterUserUseCase(userRepository, syncLogRepository);
     }
 
 
@@ -39,25 +34,10 @@ export class AuthController {
      * POST /auth/register
      */
     async registerUser(c: Context) {
-        try {
-            const body = await c.req.json();
-            const validated = RegisterUserSchema.parse(body);
-            const result = await this.registerUserUseCase.execute(validated);
-            return c.json({
-                ok: true,
-                message: "Usuario registrado exitosamente",
-                ...result
-            }, 201);
-        } catch (error: any) {
-            if (error.name === 'ZodError') {
-                return c.json({ error: "Datos inválidos", error_code: "INVALID_PAYLOAD", details: error.errors }, 400);
-            }
-            if (error.message === "Email already registered") {
-                return c.json({ error: "El email ya está registrado", error_code: "EMAIL_ALREADY_REGISTERED" }, 409);
-            }
-            console.error("Error en registro:", error);
-            return c.json({ error: "Error interno del servidor", error_code: "INTERNAL_ERROR" }, 500);
-        }
+        return c.json({
+            error: "El registro público está deshabilitado.",
+            error_code: "PUBLIC_REGISTRATION_DISABLED",
+        }, 403);
     }
 
     /**

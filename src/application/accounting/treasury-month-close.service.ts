@@ -24,6 +24,12 @@ import {
   ManagementMarginCertificationPolicyError,
   prepareManagementMarginForCertification,
 } from "../../domain/management-margin-certification-policy";
+import {
+  GovernedExpenseCertificationPolicyError,
+  prepareGovernedExpenseForCertification,
+} from "../../domain/governed-expense-certification-policy";
+import type { GovernedExpenseSnapshotProvider } from
+  "../reporting/governed-expense.reader";
 import type { OperationalResultsSnapshotProvider } from
   "../reporting/operational-results.reader";
 import type { ManagementMarginSnapshotProvider } from
@@ -50,6 +56,12 @@ export class TreasuryMonthCloseService {
   constructor(
     private readonly operationalResults: OperationalResultsSnapshotProvider,
     private readonly managementMargin: ManagementMarginSnapshotProvider,
+    /**
+     * R4.6: opcional para no romper a quien construya el servicio sin gastos.
+     * Si falta, el snapshot se firma en v3 (sin gasto devengado) y el resultado
+     * operativo devengado sigue leyéndose en vivo.
+     */
+    private readonly governedExpenses?: GovernedExpenseSnapshotProvider,
   ) {}
 
   async summary(gymId: string, monthValue: unknown, userId: string, role: unknown) {
@@ -106,10 +118,12 @@ export class TreasuryMonthCloseService {
       period.start,
       period.endExclusive,
     );
-    const [live, operationalLive, managementLive] = await Promise.all([
+    const [live, operationalLive, managementLive, expenseLive] = await Promise.all([
       this.ledger.monthly(input.gymId, period.month),
       this.operationalResults.get({ gymId: input.gymId, month: period.month }),
       this.managementMargin.get({ gymId: input.gymId, month: period.month }),
+      this.governedExpenses?.get({ gymId: input.gymId, month: period.month }) ??
+        Promise.resolve(null),
     ]);
     const operationalSnapshot = this.policy(() =>
       prepareOperationalResultsForCertification(operationalLive, period.month)
@@ -117,6 +131,11 @@ export class TreasuryMonthCloseService {
     const managementSnapshot = this.policy(() =>
       prepareManagementMarginForCertification(managementLive, period.month)
     );
+    const expenseSnapshot = expenseLive
+      ? this.policy(() =>
+        prepareGovernedExpenseForCertification(expenseLive, period.month)
+      )
+      : null;
     const revision = await this.periodRevision(
       prisma,
       input.gymId,
@@ -144,7 +163,10 @@ export class TreasuryMonthCloseService {
       input.userId,
     );
     const snapshot = {
-      version: 3,
+      // v4 añade el gasto devengado gobernado (R4.6). Un cierre firmado en v3
+      // sigue siendo válido: la verificación exige version >= 3 y el gasto se
+      // recalcula en vivo cuando el snapshot no lo trae.
+      version: expenseSnapshot ? 4 : 3,
       gym_id: input.gymId,
       timezone: gym?.timezone?.trim() || "Etc/UTC",
       mes: period.month,
@@ -158,6 +180,7 @@ export class TreasuryMonthCloseService {
       resumen: live,
       resultado_operativo: operationalSnapshot,
       resultado_devengado: managementSnapshot,
+      ...(expenseSnapshot ? { gasto_devengado: expenseSnapshot } : {}),
     };
     const snapshotJson = JSON.stringify(snapshot);
     const hash = this.hash(snapshotJson);
@@ -429,6 +452,20 @@ export class TreasuryMonthCloseService {
         _count: true,
         _max: { updated_at: true },
       }),
+      // El snapshot v4 firma también el gasto devengado. Se usa una revisión
+      // conservadora de todas las cabeceras y aplicaciones del gimnasio para
+      // que un pago o gasto concurrente nunca permita sellar una fotografía
+      // obsoleta entre la previsualización y el commit serializable.
+      db.gastoGobernado.aggregate({
+        where: { gym_id: gymId },
+        _count: true,
+        _max: { updated_at: true },
+      }),
+      db.gastoGobernadoAplicacion.aggregate({
+        where: { gym_id: gymId },
+        _count: true,
+        _max: { updated_at: true },
+      }),
       db.entrenadorComisionCuota.aggregate({
         where: { gym_id: gymId },
         _count: true,
@@ -584,7 +621,8 @@ export class TreasuryMonthCloseService {
       if (
         error instanceof TreasuryMonthClosePolicyError ||
         error instanceof OperationalResultsCertificationPolicyError ||
-        error instanceof ManagementMarginCertificationPolicyError
+        error instanceof ManagementMarginCertificationPolicyError ||
+        error instanceof GovernedExpenseCertificationPolicyError
       ) {
         throw new TreasuryMonthCloseServiceError(error.message, 409);
       }
@@ -605,6 +643,9 @@ export function asTreasuryMonthCloseError(error: unknown) {
     return new TreasuryMonthCloseServiceError(error.message, 409);
   }
   if (error instanceof ManagementMarginCertificationPolicyError) {
+    return new TreasuryMonthCloseServiceError(error.message, 409);
+  }
+  if (error instanceof GovernedExpenseCertificationPolicyError) {
     return new TreasuryMonthCloseServiceError(error.message, 409);
   }
   return null;

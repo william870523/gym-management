@@ -19,7 +19,6 @@ export const RegisterUserSchema = z.object({
     user_nombre: z.string().min(1, "Nombre es requerido"),
     user_email: z.string().email("Email inválido"),
     password: z.string().min(6, "Password debe tener al menos 6 caracteres"),
-    role: z.enum(["admin", "user"]).default("user")
 });
 
 export type RegisterUserDTO = z.infer<typeof RegisterUserSchema>;

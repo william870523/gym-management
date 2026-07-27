@@ -2,10 +2,28 @@ import { randomUUID } from "crypto";
 import type { Moneda } from "../../domain/entities/Moneda";
 import type { MonedaRepository } from "../../domain/repositories/MonedaRepository";
 import { prisma } from "../db/prismaClient";
+import { type SyncTransactionContext } from "../../application/use-cases/sync/sync-transaction";
 
 export class PrismaMonedaRepository implements MonedaRepository {
+  // Unidad 01: `client` es prisma o el cliente de la transacción del upload.
+  constructor(private readonly client: any = prisma) {}
+
+  withTransaction(tx: SyncTransactionContext): PrismaMonedaRepository {
+    return new PrismaMonedaRepository(tx);
+  }
+
+  // Unidad 01: usa una transacción propia cuando `client` es el prisma raíz;
+  // si ya es el cliente de una transacción (upload), la reutiliza en vez de
+  // anidar otra —Prisma no soporta transacciones anidadas y un TransactionClient
+  // no expone `$transaction`.
+  private runInClient<T>(work: (c: any) => Promise<T>): Promise<T> {
+    return typeof this.client.$transaction === "function"
+      ? this.runInClient(work)
+      : work(this.client);
+  }
+
     async upsertMoneda(data: Moneda): Promise<void> {
-        await prisma.moneda.upsert({
+        await this.client.moneda.upsert({
             where: { moneda_id: data.moneda_id },
             create: {
                 moneda_id: data.moneda_id,
@@ -33,17 +51,17 @@ export class PrismaMonedaRepository implements MonedaRepository {
     }
 
     async findAll(): Promise<Moneda[]> {
-        const result = await prisma.moneda.findMany({
+        const result = await this.client.moneda.findMany({
             where: { is_deleted: false }
         });
-        return result.map(m => ({
+        return result.map((m: any) => ({
             ...m,
             imagen: m.imagen ? new Uint8Array(m.imagen) : null
         }));
     }
 
     async findById(id: string): Promise<Moneda | null> {
-        const result = await prisma.moneda.findUnique({
+        const result = await this.client.moneda.findUnique({
             where: { moneda_id: id }
         });
         if (!result || result.is_deleted) return null;
@@ -54,7 +72,7 @@ export class PrismaMonedaRepository implements MonedaRepository {
     }
 
     async create(data: Moneda): Promise<void> {
-        await prisma.$transaction(async (tx) => {
+        await this.runInClient(async (tx) => {
             await tx.moneda.create({
                 data: {
                     moneda_id: data.moneda_id,
@@ -85,7 +103,7 @@ export class PrismaMonedaRepository implements MonedaRepository {
     }
 
     async update(id: string, data: Partial<Moneda>): Promise<void> {
-        await prisma.$transaction(async (tx) => {
+        await this.runInClient(async (tx) => {
             const updated = await tx.moneda.update({
                 where: { moneda_id: id },
                 data: {
@@ -113,7 +131,7 @@ export class PrismaMonedaRepository implements MonedaRepository {
     }
 
     async softDelete(id: string): Promise<void> {
-        await prisma.$transaction(async (tx) => {
+        await this.runInClient(async (tx) => {
             const deleted = await tx.moneda.update({
                 where: { moneda_id: id },
                 data: {

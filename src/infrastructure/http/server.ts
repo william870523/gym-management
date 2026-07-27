@@ -14,7 +14,13 @@ import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 import { securityHeaders } from "../../config/security";
 import { corsMiddleware } from "../../config/cors";
-import { authAdmin, authDevice, authAny } from "./middleware/auth.middleware";
+import {
+  authAdmin,
+  authDevice,
+  authUser,
+  requireAdminForWrites,
+  requireStaff,
+} from "./middleware/auth.middleware";
 import { rateLimit, getClientIp } from "./middleware/rate-limit.middleware";
 import { authRoutes } from "./routes/auth.routes";
 import { syncRoutes } from "./routes/sync.routes";
@@ -40,11 +46,12 @@ import { pagoClienteRoutes } from "./routes/pago_cliente.routes";
 import { detallePagoRoutes } from "./routes/detalle_pago.routes";
 import { configuracionRoutes } from "./routes/configuracion.routes";
 import { accountingRoutes } from "./routes/accounting.routes";
+import { planCuotaRoutes } from "./routes/plan_cuota.routes";
 import membershipRequestRoutes from "./routes/membership-request.routes";
 import retentionRoutes from "./routes/retention.routes";
 import { getRemoteTimeStatus } from "../time/time.service";
 
-const app = new Hono();
+export const app = new Hono();
 
 // Rate Limiters Configuration
 const authLimiter = rateLimit({
@@ -110,123 +117,178 @@ syncProtected.use("*", syncLimiter);
 syncProtected.route("/", syncRoutes());
 app.route("/sync", syncProtected);
 
-const adminProtected = new Hono();
-adminProtected.use("*", authAdmin());
-adminProtected.use("*", adminLimiter);
-adminProtected.route("/", catalogsRoutes());
-app.route("/catalogs", adminProtected);
+// Política de acceso de la web (docs/REMOTE_ROLE_SCOPE.md).
+//
+// La web es la aplicación completa: si a una sede se le rompe el escritorio,
+// su recepcionista abre el navegador, entra con SU cuenta y sigue trabajando.
+// Por eso el ámbito ya no se decide en la puerta del edificio —"o eres admin o
+// no entras"— sino en cada puerta:
+//
+//   authUser()               sesión revalidada contra la base; el rol que manda
+//                            es el persistido, nunca el claim del token.
+//   requireStaff()           administración o recepción. Un rol desconocido no
+//                            pasa: se mantiene el fallo cerrado.
+//   requireAdminForWrites()  catálogos y maestros: recepción consulta, solo
+//                            administración modifica.
+//   authAdmin()              lo que sigue siendo exclusivo de administración.
+//
+// Las acciones que recepción no debe hacer dentro de un grupo abierto (anular
+// un cobro, borrar) llevan `requireAdmin()` en su propia ruta.
+const catalogsProtected = new Hono();
+catalogsProtected.use("*", authUser());
+catalogsProtected.use("*", requireAdminForWrites());
+catalogsProtected.use("*", adminLimiter);
+catalogsProtected.route("/", catalogsRoutes());
+app.route("/catalogs", catalogsProtected);
 
+// Sedes: la lectura la hace cualquier miembro del personal —necesita saber en
+// qué sede está—, y crear o dar de baja es del **Dueño de la cadena**, que lo
+// comprueba el propio controlador. No va con `authAdmin` porque el Dueño no
+// tiene por qué ser administración de una sede concreta.
 const gymsProtected = new Hono();
-gymsProtected.use("*", authAdmin());
+gymsProtected.use("*", authUser());
+gymsProtected.use("*", requireStaff());
 gymsProtected.use("*", adminLimiter);
 gymsProtected.route("/", gymsRoutes());
 app.route("/gyms", gymsProtected);
 
 const clientsProtected = new Hono();
-clientsProtected.use("*", authAdmin());
+clientsProtected.use("*", authUser());
+clientsProtected.use("*", requireStaff());
 clientsProtected.use("*", adminLimiter);
 clientsProtected.route("/", clientsRoutes());
 app.route("/clients", clientsProtected);
 
 const trainersProtected = new Hono();
-trainersProtected.use("*", authAdmin());
+trainersProtected.use("*", authUser());
+trainersProtected.use("*", requireAdminForWrites());
 trainersProtected.use("*", adminLimiter);
 trainersProtected.route("/", trainersRoutes());
 app.route("/trainers", trainersProtected);
 
 const paymentsProtected = new Hono();
-paymentsProtected.use("*", authAdmin());
+paymentsProtected.use("*", authUser());
+paymentsProtected.use("*", requireAdminForWrites());
 paymentsProtected.use("*", adminLimiter);
 paymentsProtected.route("/", paymentsRoutes());
 app.route("/payments", paymentsProtected);
 
 const usersProtected = new Hono();
-usersProtected.use("*", authAny());
+usersProtected.use("*", authAdmin());
 usersProtected.use("*", adminLimiter);
 usersProtected.route("/", usersRoutes());
 app.route("/users", usersProtected);
 
 const nacionalidadesProtected = new Hono();
-nacionalidadesProtected.use("*", authAdmin());
+nacionalidadesProtected.use("*", authUser());
+nacionalidadesProtected.use("*", requireAdminForWrites());
 nacionalidadesProtected.use("*", adminLimiter);
 nacionalidadesProtected.route("/", nacionalidadRoutes);
 app.route("/nacionalidades", nacionalidadesProtected);
 
 const monedasProtected = new Hono();
-monedasProtected.use("*", authAdmin());
+monedasProtected.use("*", authUser());
+monedasProtected.use("*", requireAdminForWrites());
 monedasProtected.use("*", adminLimiter);
 monedasProtected.route("/", monedaRoutes);
 app.route("/monedas", monedasProtected);
 
 const tiposPagoProtected = new Hono();
-tiposPagoProtected.use("*", authAdmin());
+tiposPagoProtected.use("*", authUser());
+tiposPagoProtected.use("*", requireAdminForWrites());
 tiposPagoProtected.use("*", adminLimiter);
 tiposPagoProtected.route("/", tipoPagoRoutes);
 app.route("/tipos-pago", tiposPagoProtected);
 
 const tiposCambioProtected = new Hono();
-tiposCambioProtected.use("*", authAdmin());
+tiposCambioProtected.use("*", authUser());
+tiposCambioProtected.use("*", requireAdminForWrites());
 tiposCambioProtected.use("*", adminLimiter);
 tiposCambioProtected.route("/", tipoCambioRoutes);
 app.route("/tipos-cambio", tiposCambioProtected);
 
 const referenciasProtected = new Hono();
-referenciasProtected.use("*", authAdmin());
+referenciasProtected.use("*", authUser());
+referenciasProtected.use("*", requireAdminForWrites());
 referenciasProtected.use("*", adminLimiter);
 referenciasProtected.route("/", referenciaRoutes);
 app.route("/referencias", referenciasProtected);
 
 const horariosProtected = new Hono();
-horariosProtected.use("*", authAdmin());
+horariosProtected.use("*", authUser());
+horariosProtected.use("*", requireAdminForWrites());
 horariosProtected.use("*", adminLimiter);
 horariosProtected.route("/", horarioRoutes);
 app.route("/horarios", horariosProtected);
 
+// R5.2 — cuotas del cliente. Va montado en la raíz porque sus rutas cuelgan de
+// dos prefijos (`/planes-pago/...` y `/membresias/...`), igual que en local.
+//
+// Se registra ANTES que `/planes-pago`, que exige admin para todo su prefijo:
+// si fuera después, recepción recibiría 403 al leer el esquema de cuotas de un
+// plan y la ventana de cobro se quedaría sin poder ofrecer el pago por cuotas.
+// Aquí la lectura es para recepción y definir el esquema exige admin, que se
+// comprueba dentro del handler.
+const planCuotaProtected = new Hono();
+planCuotaProtected.use("*", authUser());
+planCuotaProtected.use("*", requireStaff());
+planCuotaProtected.use("*", adminLimiter);
+planCuotaProtected.route("/", planCuotaRoutes);
+app.route("/", planCuotaProtected);
+
 const planesPagoProtected = new Hono();
-planesPagoProtected.use("*", authAdmin());
+planesPagoProtected.use("*", authUser());
+planesPagoProtected.use("*", requireAdminForWrites());
 planesPagoProtected.use("*", adminLimiter);
 planesPagoProtected.route("/", planesPagoRoutes);
 app.route("/planes-pago", planesPagoProtected);
 
 const cuentasProtected = new Hono();
-cuentasProtected.use("*", authAdmin());
+cuentasProtected.use("*", authUser());
+cuentasProtected.use("*", requireAdminForWrites());
 cuentasProtected.use("*", adminLimiter);
 cuentasProtected.route("/", cuentaRoutes);
 app.route("/cuentas", cuentasProtected);
 
 const entrenadoresProtected = new Hono();
-entrenadoresProtected.use("*", authAdmin());
+entrenadoresProtected.use("*", authUser());
+entrenadoresProtected.use("*", requireAdminForWrites());
 entrenadoresProtected.use("*", adminLimiter);
 entrenadoresProtected.route("/", entrenadorRoutes);
 app.route("/entrenadores", entrenadoresProtected);
 
 const clientesProtectedRoutes = new Hono();
-clientesProtectedRoutes.use("*", authAdmin());
+clientesProtectedRoutes.use("*", authUser());
+clientesProtectedRoutes.use("*", requireStaff());
 clientesProtectedRoutes.use("*", adminLimiter);
 clientesProtectedRoutes.route("/", clienteRoutes);
 app.route("/clientes", clientesProtectedRoutes);
 
 const clientesPesoProtected = new Hono();
-clientesPesoProtected.use("*", authAdmin());
+clientesPesoProtected.use("*", authUser());
+clientesPesoProtected.use("*", requireStaff());
 clientesPesoProtected.use("*", adminLimiter);
 clientesPesoProtected.route("/", clientePesoRoutes);
 app.route("/cliente-pesos", clientesPesoProtected);
 
 const asistenciasProtected = new Hono();
-asistenciasProtected.use("*", authAdmin());
+asistenciasProtected.use("*", authUser());
+asistenciasProtected.use("*", requireStaff());
 asistenciasProtected.use("*", adminLimiter);
 asistenciasProtected.route("/", asistenciaRoutes);
 app.route("/asistencias", asistenciasProtected);
 
 const pagosClienteProtected = new Hono();
-pagosClienteProtected.use("*", authAdmin());
+pagosClienteProtected.use("*", authUser());
+pagosClienteProtected.use("*", requireStaff());
 pagosClienteProtected.use("*", adminLimiter);
 pagosClienteProtected.route("/", pagoClienteRoutes);
 app.route("/pagos-cliente", pagosClienteProtected);
 app.route("/pagos", pagosClienteProtected);
 
 const detallesPagoProtected = new Hono();
-detallesPagoProtected.use("*", authAdmin());
+detallesPagoProtected.use("*", authUser());
+detallesPagoProtected.use("*", requireAdminForWrites());
 detallesPagoProtected.use("*", adminLimiter);
 detallesPagoProtected.route("/", detallePagoRoutes);
 app.route("/detalles-pago", detallesPagoProtected);
@@ -237,23 +299,29 @@ configuracionProtected.use("*", adminLimiter);
 configuracionProtected.route("/", configuracionRoutes);
 app.route("/configuracion", configuracionProtected);
 
+// Contabilidad ya distingue por dentro: `gymIdentity` exige administración para
+// firmar, cerrar y liquidar, y `accountingIdentity` deja consultar al resto.
 const accountingProtected = new Hono();
-accountingProtected.use("*", authAny());
+accountingProtected.use("*", authUser());
+accountingProtected.use("*", requireStaff());
 accountingProtected.use("*", adminLimiter);
 accountingProtected.route("/", accountingRoutes);
 app.route("/contabilidad", accountingProtected);
 
 const membershipRequestsProtected = new Hono();
-membershipRequestsProtected.use("*", authAny());
+membershipRequestsProtected.use("*", authUser());
+membershipRequestsProtected.use("*", requireStaff());
 membershipRequestsProtected.use("*", adminLimiter);
 membershipRequestsProtected.route("/", membershipRequestRoutes);
 app.route("/membresias/solicitudes", membershipRequestsProtected);
 
 const retentionProtected = new Hono();
-retentionProtected.use("*", authAny());
+retentionProtected.use("*", authUser());
+retentionProtected.use("*", requireStaff());
 retentionProtected.use("*", adminLimiter);
 retentionProtected.route("/", retentionRoutes);
 app.route("/retencion", retentionProtected);
+
 
 logger.info(`Starting REMOTE API on port ${env.port}...`);
 

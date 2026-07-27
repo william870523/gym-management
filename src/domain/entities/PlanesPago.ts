@@ -14,6 +14,12 @@ export interface PlanesPago {
     codigo?: string | null;
     // R5.3: precio fijo cliente VIEJO; null = aplicar % global.
     precio_viejo_excepcion?: number | null;
+    // Recargo por mora (docs/RECARGO_MORA.md). El administrador elige un modo
+    // por plan; importes como string decimal. null/activo=false = sin recargo.
+    recargo_mora_modo?: string | null;
+    recargo_mora_valor?: string | null;
+    recargo_mora_tope?: string | null;
+    recargo_mora_activo?: boolean;
     gym_id: string | null;
     source_device?: string | null;
     version: number;

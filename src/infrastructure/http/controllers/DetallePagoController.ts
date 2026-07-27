@@ -6,6 +6,7 @@ import { DeleteDetallePagoUseCase } from "../../../application/use-cases/detalle
 import { GetDetallePagoUseCase } from "../../../application/use-cases/detalle_pago/GetDetallePagoUseCase";
 import { ListDetallePagosUseCase } from "../../../application/use-cases/detalle_pago/ListDetallePagosUseCase";
 import { CreateDetallePagoSchema, UpdateDetallePagoSchema } from "../../../application/dtos/DetallePagoDTO";
+import { getUserGymActor } from "../middleware/auth.middleware";
 
 export class DetallePagoController {
     private createUseCase: CreateDetallePagoUseCase;
@@ -25,7 +26,9 @@ export class DetallePagoController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.listUseCase.execute(actor.gymId);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -35,7 +38,9 @@ export class DetallePagoController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, actor.gymId);
             if (!result) {
                 return c.json({ error: "DetallePago not found" }, 404);
             }
@@ -48,8 +53,10 @@ export class DetallePagoController {
     async create(c: Context) {
         try {
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = CreateDetallePagoSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const result = await this.createUseCase.execute(validated, actor.gymId);
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -63,8 +70,10 @@ export class DetallePagoController {
         try {
             const id = c.req.param("id");
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdateDetallePagoSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            await this.updateUseCase.execute(id, validated, actor.gymId);
             return c.json({ message: "DetallePago updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -80,7 +89,9 @@ export class DetallePagoController {
     async delete(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, actor.gymId);
             return c.json({ message: "DetallePago deleted successfully" });
         } catch (error: any) {
             if (error.message === "DetallePago not found") {

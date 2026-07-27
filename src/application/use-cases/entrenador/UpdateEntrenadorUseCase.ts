@@ -3,6 +3,7 @@ import type { UpdateEntrenadorDTO } from "../../dtos/EntrenadorDTO";
 import type { Entrenador } from "../../../domain/entities/Entrenador";
 import type { EntrenadorRepository } from "../../../domain/repositories/EntrenadorRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export class UpdateEntrenadorUseCase {
     constructor(
@@ -10,8 +11,8 @@ export class UpdateEntrenadorUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string, dto: UpdateEntrenadorDTO): Promise<void> {
-        const existing = await this.entrenadorRepository.findById(id);
+    async execute(id: string, dto: UpdateEntrenadorDTO, gymId: string): Promise<void> {
+        const existing = await this.entrenadorRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Entrenador not found");
         }
@@ -20,13 +21,13 @@ export class UpdateEntrenadorUseCase {
             ...dto,
             foto_entrenador: dto.foto_entrenador ? Buffer.from(dto.foto_entrenador, 'base64') : undefined,
             fecha_incio_entrenador: dto.fecha_incio_entrenador ? new Date(dto.fecha_incio_entrenador) : undefined,
-            updated_at: new Date(),
+            updated_at: trustedClock.nowUtc(),
             version: (existing.version ?? 0) + 1
         };
 
-        await this.entrenadorRepository.update(id, updateData);
+        await this.entrenadorRepository.update(id, gymId, updateData);
 
-        const updated = await this.entrenadorRepository.findById(id);
+        const updated = await this.entrenadorRepository.findById(id, gymId);
         if (updated) {
             await this.syncLogRepository.register({
                 eventId: randomUUID(),

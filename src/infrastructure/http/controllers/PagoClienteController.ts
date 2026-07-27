@@ -9,16 +9,45 @@ import { ListPagoClientesUseCase as ListUseCase } from "../../../application/use
 import { CreatePagoClienteSchema, UpdatePagoClienteSchema } from "../../../application/dtos/PagoClienteDTO";
 import { ProcessPaymentUseCase } from "../../../application/use-cases/pago_cliente/ProcessPaymentUseCase";
 import { PrismaPlanesPagoRepository } from "../../repositories/PrismaPlanesPagoRepository";
+import { PrismaClienteRepository } from "../../repositories/PrismaClienteRepository";
+import { RecargoMoraQuoteService } from "../../../application/payment/recargo-mora-quote.service";
 import { CreateDetallePagoSchema } from "../../../application/dtos/DetallePagoDTO";
 import { z } from "zod";
 import {
     PaymentReversalError,
     PaymentReversalService,
 } from "../../../application/payment/payment-reversal.service";
+import { getUserGymActor } from "../middleware/auth.middleware";
+import { PaymentRuleError } from "../../../domain/payment-rule-error";
+import { PaymentActorError } from "../../../application/payment/payment-actor";
 
 const ProcessPaymentSchema = CreatePagoClienteSchema.extend({
     detalles: z.array(CreateDetallePagoSchema.omit({ pago_cliente_id: true })),
     membresia_id: z.string().uuid().optional().nullable(),
+    // Recargo por mora: se aplica siempre que corresponda. Condonarlo exige
+    // motivo y deja rastro (docs/RECARGO_MORA.md §6-bis).
+    condonar_recargo_mora: z.boolean().optional(),
+    motivo_condonacion_recargo: z.string().trim().min(5).max(500).optional(),
+    // R5.2 — cobro por cuotas (docs/PLAN_INSTALLMENTS.md).
+    modo_cuotas: z.boolean().optional(),
+    numero_cuota: z.number().int().positive().optional().nullable(),
+}).superRefine((value, ctx) => {
+    // Reglas discriminadas: el modo completo no admite número de cuota, y
+    // pagar una cuota distinta de la 1 exige decir de qué membresía es.
+    if (!value.modo_cuotas && value.numero_cuota != null) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["numero_cuota"],
+            message: "El cobro completo no admite número de cuota.",
+        });
+    }
+    if (value.modo_cuotas && (value.numero_cuota ?? 1) > 1 && !value.membresia_id) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["membresia_id"],
+            message: "Pagar una cuota siguiente exige indicar la membresía.",
+        });
+    }
 });
 
 export class PagoClienteController {
@@ -27,6 +56,7 @@ export class PagoClienteController {
     private getUseCase: GetPagoClienteUseCase;
     private listUseCase: ListUseCase;
     private processUseCase: ProcessPaymentUseCase;
+    private recargoMoraQuotes: RecargoMoraQuoteService;
     private reversalService: PaymentReversalService;
 
     constructor() {
@@ -36,8 +66,15 @@ export class PagoClienteController {
         this.updateUseCase = new UpdatePagoClienteUseCase(repository);
         this.getUseCase = new GetPagoClienteUseCase(repository);
         this.listUseCase = new ListUseCase(repository);
-        this.processUseCase = new ProcessPaymentUseCase(repository, planRepo);
+        // El repositorio de clientes permite medir el atraso para el recargo
+        // por mora (docs/RECARGO_MORA.md).
+        this.processUseCase = new ProcessPaymentUseCase(
+            repository,
+            planRepo,
+            new PrismaClienteRepository(),
+        );
         this.reversalService = new PaymentReversalService();
+        this.recargoMoraQuotes = new RecargoMoraQuoteService();
     }
 
     // ... existing methods ...
@@ -46,8 +83,10 @@ export class PagoClienteController {
         // ... existing create implementation ...
         try {
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = CreatePagoClienteSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const result = await this.createUseCase.execute(validated, actor.gymId);
 
             await prisma.syncLog.create({
                 data: {
@@ -70,6 +109,32 @@ export class PagoClienteController {
         }
     }
 
+    /**
+     * Cotización autoritativa del recargo por mora (docs/RECARGO_MORA.md).
+     * Solo lectura; el gimnasio sale del token.
+     */
+    async recargoMoraQuote(c: Context) {
+        try {
+            const auth = c.get("auth");
+            const gymId = auth?.gymId;
+            if (!gymId) {
+                return c.json({ error: "El token no identifica un gimnasio." }, 403);
+            }
+            const quote = await this.recargoMoraQuotes.quote({
+                ci: c.req.query("ci") ?? "",
+                planId: c.req.query("plan_id") ?? "",
+                membresiaId: c.req.query("membresia_id") ?? null,
+                numeroCuota: c.req.query("numero_cuota")
+                    ? Number(c.req.query("numero_cuota"))
+                    : null,
+                aplicar: c.req.query("aplicar") !== "false",
+            }, gymId);
+            return c.json(quote);
+        } catch (error: any) {
+            return c.json({ error: error.message }, 400);
+        }
+    }
+
     async process(c: Context) {
         try {
             const body = await c.req.json();
@@ -78,20 +143,37 @@ export class PagoClienteController {
             if (!gymId) {
                 return c.json({ error: "El token no identifica un gimnasio." }, 403);
             }
-            const validated = ProcessPaymentSchema.parse({
-                ...body,
-                gym_id: gymId,
-            });
-            const result = await this.processUseCase.execute(validated);
+            const validated = ProcessPaymentSchema.parse(body);
+            // El actor sale del token, nunca del cuerpo.
+            const actor = getUserGymActor(c);
+            const result = await this.processUseCase.execute(
+                validated, gymId, actor?.userId ?? null,
+            );
 
             // SyncLog omitted for complexity.
 
             return c.json(result, 201);
         } catch (error: any) {
             if (error.name === 'ZodError') {
-                return c.json({ error: error.errors }, 400);
+                // Zod 4 expone `issues`; con `errors` la respuesta salía como
+                // `{}` y la web solo podía decir «el servidor rechazó el pago».
+                const issues = (error.issues ?? []) as Array<{ path: unknown[]; message: string }>;
+                const detalle = issues
+                    .map((i) => `${i.path.join(".") || "(cuerpo)"}: ${i.message}`)
+                    .join("; ");
+                return c.json({ error: detalle || "Datos del cobro inválidos.", issues }, 400);
             }
-            if (error.message.includes("not found")) {
+            // R5.6: sin cobrador válido no se cobra, y el motivo importa:
+            // 401 sesión ausente, 403 cuenta ajena o inactiva, 503 identidad
+            // no comprobable. Nunca se completa con datos del cuerpo.
+            if (error instanceof PaymentActorError) {
+                return c.json({ error: error.message }, error.status as any);
+            }
+            // Regla de negocio incumplida: el operador debe leer el motivo.
+            if (error instanceof PaymentRuleError) {
+                return c.json({ error: error.message }, 400);
+            }
+            if (error.message?.includes("not found")) {
                 return c.json({ error: error.message }, 404);
             }
             console.error(error);
@@ -101,7 +183,9 @@ export class PagoClienteController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.listUseCase.execute(actor.gymId);
             return c.json(result);
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
@@ -111,12 +195,14 @@ export class PagoClienteController {
     async listByClient(c: Context) {
         try {
             const ci = c.req.param("ci");
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const page = Number(c.req.query("page")) || 1;
             const limit = Number(c.req.query("limit")) || 25;
             const pagos = await prisma.pagoCliente.findMany({
                 skip: (page - 1) * limit,
                 take: limit,
-                where: { ci, is_deleted: false },
+                where: { ci, gym_id: actor.gymId, is_deleted: false },
                 orderBy: { fecha: "desc" },
                 include: {
                     cliente: {
@@ -126,7 +212,7 @@ export class PagoClienteController {
                         },
                     },
                     detalles: {
-                        where: { is_deleted: false },
+                        where: { gym_id: actor.gymId, is_deleted: false },
                     },
                 },
             });
@@ -143,7 +229,9 @@ export class PagoClienteController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, actor.gymId);
             if (!result) {
                 return c.json({ error: "PagoCliente not found" }, 404);
             }
@@ -159,8 +247,10 @@ export class PagoClienteController {
         try {
             const id = c.req.param("id");
             const body = await c.req.json();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdatePagoClienteSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            await this.updateUseCase.execute(id, validated, actor.gymId);
             return c.json({ message: "PagoCliente updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {

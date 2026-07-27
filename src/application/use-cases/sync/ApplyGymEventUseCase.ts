@@ -1,14 +1,18 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Gym } from "../../../domain/entities/Gym";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { PrismaGymRepository } from "../../../infrastructure/repositories/PrismaGymRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export interface ApplyGymEventInput {
     eventId: string;
     entidadId: string;
     operacion: SyncOperacion;
-    gymId: string; // usually null for Gym entity
+    gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyGymEventUseCase {
@@ -17,15 +21,25 @@ export class ApplyGymEventUseCase {
     ) { }
 
     async execute(input: ApplyGymEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.gymRepository.withTransaction(input.tx)
+            : this.gymRepository;
         const { operacion } = input;
 
+        if (!input.gymId || input.entidadId !== input.gymId) {
+            throw new Error(
+                `No se puede sincronizar el gimnasio ${input.entidadId}: ` +
+                "el JWT pertenece a otro gimnasio."
+            );
+        }
+
         if (operacion === "DELETE") {
-            await this.gymRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId);
             return;
         }
 
         const gym = this.mapPayloadToGym(input);
-        await this.gymRepository.upsertGym(gym);
+        await repo.upsertGym(gym);
     }
 
     private mapPayloadToGym(input: ApplyGymEventInput): Gym {
@@ -44,7 +58,7 @@ export class ApplyGymEventUseCase {
             timezone: payload.timezone ? String(payload.timezone) : null,
             activo: payload.activo === true || payload.activo === 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : null,
-            updated_at: new Date(), // Always fresh on sync? Or prefer payload.updated_at
+            updated_at: trustedClock.nowUtc(),
             deleted_at: payload.deleted_at ? new Date(String(payload.deleted_at)) : null
         };
     }

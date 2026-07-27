@@ -1,6 +1,7 @@
 export interface Entrenador {
     id_entrenador: string;
     ci_entrenador: string;
+    tipo_documento: string;
     nombres_entrenador: string;
     apellidos_entrenador: string;
     sexo_entrenador: string;

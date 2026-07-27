@@ -4,7 +4,7 @@ import type { DetallePagoRepository } from "../../../domain/repositories/Detalle
 export class ListDetallePagosUseCase {
     constructor(private readonly detallePagoRepository: DetallePagoRepository) { }
 
-    async execute(): Promise<DetallePago[]> {
-        return this.detallePagoRepository.findAll();
+    async execute(gymId: string): Promise<DetallePago[]> {
+        return this.detallePagoRepository.findAll(gymId);
     }
 }

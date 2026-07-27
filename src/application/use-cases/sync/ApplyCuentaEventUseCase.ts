@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Cuenta } from "../../../domain/entities/Cuenta";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { CuentaRepository } from "../../../domain/repositories/CuentaRepository";
@@ -9,6 +10,8 @@ export interface ApplyCuentaEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyCuentaEventUseCase {
@@ -17,15 +20,18 @@ export class ApplyCuentaEventUseCase {
     ) { }
 
     async execute(input: ApplyCuentaEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.cuentaRepository.withTransaction(input.tx)
+            : this.cuentaRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.cuentaRepository.softDelete(input.entidadId, input.gymId);
+            await repo.softDelete(input.entidadId, input.gymId);
             return;
         }
 
         const cuenta = this.mapPayloadToCuenta(input);
-        await this.cuentaRepository.upsertCuenta(cuenta);
+        await repo.upsertCuenta(cuenta);
     }
 
     private mapPayloadToCuenta(input: ApplyCuentaEventInput): Cuenta {
@@ -37,7 +43,7 @@ export class ApplyCuentaEventUseCase {
             moneda_id: String(payload.moneda_id),
             tipo_pago_id: payload.tipo_pago_id ? String(payload.tipo_pago_id) : null,
             gym_id: input.gymId,
-            source_device: (payload.source_device as string | null) ?? input.deviceId,
+            source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),

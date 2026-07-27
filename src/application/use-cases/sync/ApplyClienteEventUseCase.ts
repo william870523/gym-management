@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 // src/application/use-cases/sync/ApplyClienteEventUseCase.ts
 import type { Cliente } from "../../../domain/entities/Cliente";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
@@ -12,6 +13,8 @@ export interface ApplyClienteEventInput {
   gymId: string;
   deviceId: string;
   payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyClienteEventUseCase {
@@ -21,13 +24,16 @@ export class ApplyClienteEventUseCase {
 
   // Aplica y registra un evento de cliente proveniente de la sincronizacion.
   async execute(input: ApplyClienteEventInput): Promise<{ processed: boolean }> {
+      const repo = input.tx
+          ? this.clienteRepository.withTransaction(input.tx)
+          : this.clienteRepository;
     const { operacion } = input;
 
     if (operacion === "DELETE") {
-      await this.clienteRepository.softDelete(input.entidadId);
+      await repo.softDelete(input.entidadId, input.gymId);
     } else {
       const cliente = this.mapPayloadToCliente(input);
-      await this.clienteRepository.upsertFromSync(cliente);
+      await repo.upsertFromSync(cliente);
     }
 
     return { processed: true };
@@ -42,6 +48,7 @@ export class ApplyClienteEventUseCase {
 
     return {
       ci: input.entidadId,
+      tipo_documento: String(payload.tipo_documento ?? "DESCONOCIDO"),
       nombres: String(payload.nombres),
       apellidos: String(payload.apellidos),
       sexo: String(payload.sexo),
@@ -63,7 +70,7 @@ export class ApplyClienteEventUseCase {
       // R5.3: categoría del cliente; default NUEVO si no viene en el payload.
       categoria: String(payload.categoria ?? "NUEVO"),
       gym_id: input.gymId,
-      source_device: (payload.source_device as string | null) ?? input.deviceId,
+      source_device: input.deviceId,
       version: (payload.version as number) ?? 1,
       created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date()
     };

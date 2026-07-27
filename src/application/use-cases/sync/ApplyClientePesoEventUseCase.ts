@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { ClientePeso } from "../../../domain/entities/ClientePeso";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { ClientePesoRepository } from "../../../domain/repositories/ClientePesoRepository";
@@ -9,6 +10,8 @@ export interface ApplyClientePesoEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyClientePesoEventUseCase {
@@ -17,15 +20,18 @@ export class ApplyClientePesoEventUseCase {
     ) { }
 
     async execute(input: ApplyClientePesoEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.clientePesoRepository.withTransaction(input.tx)
+            : this.clientePesoRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.clientePesoRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId, input.gymId);
             return;
         }
 
         const clientePeso = this.mapPayloadToClientePeso(input);
-        await this.clientePesoRepository.upsertClientePeso(clientePeso);
+        await repo.upsertClientePeso(clientePeso);
     }
 
     private mapPayloadToClientePeso(input: ApplyClientePesoEventInput): ClientePeso {
@@ -37,7 +43,7 @@ export class ApplyClientePesoEventUseCase {
             fecha: new Date(String(payload.fecha)),
             peso: Number(payload.peso),
             gym_id: input.gymId,
-            source_device: (payload.source_device as string | null) ?? input.deviceId,
+            source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),

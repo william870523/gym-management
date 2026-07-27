@@ -3,6 +3,7 @@ import { z } from "zod";
 // --- Cliente ---
 export const ClienteSchema = z.object({
     ci: z.string().min(1, "CI es requerido"),
+    tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).default("DESCONOCIDO"),
     nombres: z.string().min(1, "Nombres son requeridos"),
     apellidos: z.string().min(1, "Apellidos son requeridos"),
     sexo: z.string().min(1, "Sexo es requerido"),
@@ -23,7 +24,6 @@ export const ClienteSchema = z.object({
     referencia_id: z.string().optional().nullable(),
     is_deleted: z.boolean().optional(),
     created_at: z.date().optional(),
-    gym_id: z.string().optional().nullable(),
     version: z.number().optional(),
     updated_at: z.date().optional(),
     deleted_at: z.date().optional().nullable(),
@@ -40,7 +40,6 @@ export const ClientePesoSchema = z.object({
     peso: z.number().min(0),
     is_deleted: z.boolean().optional(),
     created_at: z.date().optional(),
-    gym_id: z.string().optional().nullable(),
     version: z.number().optional(),
     updated_at: z.date().optional(),
     deleted_at: z.date().optional().nullable(),
@@ -55,7 +54,6 @@ export const AsistenciaSchema = z.object({
     ci: z.string().min(1, "CI es requerido"),
     is_deleted: z.boolean().optional(),
     created_at: z.date().optional(),
-    gym_id: z.string().optional().nullable(),
     version: z.number().optional(),
     updated_at: z.date().optional(),
     deleted_at: z.date().optional().nullable(),

@@ -8,13 +8,13 @@ export class DeleteUserUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string): Promise<void> {
-        const existing = await this.userRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<void> {
+        const existing = await this.userRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("User not found");
         }
 
-        await this.userRepository.softDelete(id);
+        await this.userRepository.softDelete(id, gymId);
 
         // Record for sync
         await this.syncLogRepository.register({
@@ -22,7 +22,7 @@ export class DeleteUserUseCase {
             entidad: "user",
             operacion: "DELETE",
             entidadId: id,
-            gymId: existing.gym_id ?? null,
+            gymId,
             deviceId: "WEB_ADMIN",
             payload: { user_id: id }
         });

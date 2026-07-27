@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Asistencia } from "../../../domain/entities/Asistencia";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { AsistenciaRepository } from "../../../domain/repositories/AsistenciaRepository";
@@ -10,6 +11,8 @@ export interface ApplyAsistenciaEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyAsistenciaEventUseCase {
@@ -18,15 +21,18 @@ export class ApplyAsistenciaEventUseCase {
     ) { }
 
     async execute(input: ApplyAsistenciaEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.asistenciaRepository.withTransaction(input.tx)
+            : this.asistenciaRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.asistenciaRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId, input.gymId);
             return;
         }
 
         const asistencia = this.mapPayloadToAsistencia(input);
-        await this.asistenciaRepository.upsertAsistencia(asistencia);
+        await repo.upsertAsistencia(asistencia);
     }
 
     private mapPayloadToAsistencia(input: ApplyAsistenciaEventInput): Asistencia {
@@ -37,7 +43,7 @@ export class ApplyAsistenciaEventUseCase {
             ci: String(payload.ci),
             fecha_salida: payload.fecha_salida ? new Date(String(payload.fecha_salida)) : null,
             gym_id: input.gymId,
-            source_device: (payload.source_device as string | null) ?? input.deviceId,
+            source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at
                 ? new Date(String(payload.created_at))

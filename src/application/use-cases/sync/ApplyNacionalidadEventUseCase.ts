@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Nacionalidad } from "../../../domain/entities/Nacionalidad";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { NacionalidadRepository } from "../../../domain/repositories/NacionalidadRepository";
@@ -10,6 +11,8 @@ export interface ApplyNacionalidadEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyNacionalidadEventUseCase {
@@ -18,15 +21,18 @@ export class ApplyNacionalidadEventUseCase {
     ) { }
 
     async execute(input: ApplyNacionalidadEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.nacionalidadRepository.withTransaction(input.tx)
+            : this.nacionalidadRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.nacionalidadRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId);
             return;
         }
 
         const nacionalidad = this.mapPayloadToNacionalidad(input);
-        await this.nacionalidadRepository.upsertNacionalidad(nacionalidad);
+        await repo.upsertNacionalidad(nacionalidad);
     }
 
     private mapPayloadToNacionalidad(input: ApplyNacionalidadEventInput): Nacionalidad {

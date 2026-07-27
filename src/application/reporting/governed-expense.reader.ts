@@ -9,3 +9,11 @@ export interface GovernedExpenseReader {
   currentBusinessDate(gymId: string): Promise<Date>;
   readExpenses(gymId: string): Promise<GovernedExpenseSnapshot[]>;
 }
+
+/**
+ * R4.6: contrato mínimo que el cierre mensual necesita para congelar el gasto
+ * devengado dentro del snapshot firmado.
+ */
+export interface GovernedExpenseSnapshotProvider {
+  get(input: { gymId: string; month?: unknown }): Promise<Record<string, any>>;
+}

@@ -13,6 +13,12 @@ import { UpdateCuentaUseCase } from "./UpdateCuentaUseCase";
 class MemoryAccounts implements CuentaRepository {
   constructor(readonly rows: Cuenta[]) {}
 
+  // Doble en memoria: no hay transacción, así que la variante transaccional
+  // es el mismo repositorio.
+  withTransaction(): this {
+    return this;
+  }
+
   async upsertCuenta(data: Cuenta) {
     const index = this.rows.findIndex((row) => row.cuenta_id === data.cuenta_id);
     if (index >= 0) this.rows[index] = data;
@@ -29,8 +35,8 @@ class MemoryAccounts implements CuentaRepository {
     ) ?? null;
   }
 
-  async create(data: Cuenta) {
-    this.rows.push(data);
+  async create(data: Cuenta, gymId: string) {
+    this.rows.push({ ...data, gym_id: gymId });
   }
 
   async update(id: string, gymId: string, data: Partial<Cuenta>) {

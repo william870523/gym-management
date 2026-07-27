@@ -8,20 +8,20 @@ export class DeleteHorarioUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string): Promise<void> {
-        const existing = await this.horarioRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<void> {
+        const existing = await this.horarioRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Horario not found");
         }
 
-        await this.horarioRepository.softDelete(id);
+        await this.horarioRepository.softDelete(id, gymId);
 
         await this.syncLogRepository.register({
             eventId: randomUUID(),
             entidad: "horario",
             operacion: "DELETE",
             entidadId: id,
-            gymId: existing.gym_id,
+            gymId,
             deviceId: "WEB_ADMIN",
             payload: { horario_id: id }
         });

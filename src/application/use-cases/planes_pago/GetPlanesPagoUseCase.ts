@@ -4,7 +4,7 @@ import type { PlanesPagoRepository } from "../../../domain/repositories/PlanesPa
 export class GetPlanesPagoUseCase {
     constructor(private readonly planesPagoRepository: PlanesPagoRepository) { }
 
-    async execute(id: string): Promise<PlanesPago | null> {
-        return this.planesPagoRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<PlanesPago | null> {
+        return this.planesPagoRepository.findById(id, gymId);
     }
 }

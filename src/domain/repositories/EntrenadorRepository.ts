@@ -1,10 +1,11 @@
+import type { SyncTransactionalRepository } from "../../application/use-cases/sync/sync-transaction";
 import type { Entrenador } from "../entities/Entrenador";
 
-export interface EntrenadorRepository {
+export interface EntrenadorRepository extends SyncTransactionalRepository<EntrenadorRepository> {
     upsertEntrenador(data: Entrenador): Promise<void>;
-    findAll(): Promise<Entrenador[]>;
-    findById(id: string): Promise<Entrenador | null>;
+    findAll(gymId: string): Promise<Entrenador[]>;
+    findById(id: string, gymId: string): Promise<Entrenador | null>;
     create(data: Entrenador): Promise<void>;
-    update(id: string, data: Partial<Entrenador>): Promise<void>;
-    softDelete(id: string): Promise<void>;
+    update(id: string, gymId: string, data: Partial<Entrenador>): Promise<void>;
+    softDelete(id: string, gymId: string): Promise<void>;
 }

@@ -1,6 +1,7 @@
+import type { SyncTransactionalRepository } from "../../application/use-cases/sync/sync-transaction";
 import type { Moneda } from "../entities/Moneda";
 
-export interface MonedaRepository {
+export interface MonedaRepository extends SyncTransactionalRepository<MonedaRepository> {
     upsertMoneda(data: Moneda): Promise<void>;
     findAll(): Promise<Moneda[]>;
     findById(id: string): Promise<Moneda | null>;

@@ -1,53 +1,111 @@
-import { PrismaClient, User } from "@prisma/client";
-import { UserRepository } from "../../domain/repositories/UserRepository";
-
-const prisma = new PrismaClient();
+import type { User } from "@prisma/client";
+import type { UserRepository } from "../../domain/repositories/UserRepository";
+import { trustedClock } from "../../config/trusted-clock";
+import { prisma } from "../db/prismaClient";
+import { delegateFor, type SyncTransactionContext } from "../../application/use-cases/sync/sync-transaction";
+import {
+    softDeleteGymScopedSyncRecord,
+    upsertGymScopedSyncRecord,
+} from "./gym-scoped-sync-write";
 
 export class PrismaUserRepository implements UserRepository {
-    async findAll(): Promise<User[]> {
-        return prisma.user.findMany({
-            where: { is_deleted: false }
+    constructor(private readonly userDelegate: any = prisma.user) {}
+
+    withTransaction(tx: SyncTransactionContext): PrismaUserRepository {
+        return new PrismaUserRepository(delegateFor(tx, "user", this.userDelegate));
+    }
+
+    async findAll(gymId: string): Promise<User[]> {
+        return this.userDelegate.findMany({
+            where: {
+                gym_id: this.requireGymId(gymId),
+                is_deleted: false,
+            }
         });
     }
 
     async findByEmail(email: string): Promise<User | null> {
-        return prisma.user.findUnique({
+        return this.userDelegate.findUnique({
             where: { user_email: email }
         });
     }
 
-    async findById(id: string): Promise<User | null> {
-        return prisma.user.findUnique({
-            where: { user_id: id }
+    async findById(id: string, gymId: string): Promise<User | null> {
+        return this.userDelegate.findFirst({
+            where: {
+                user_id: id,
+                gym_id: this.requireGymId(gymId),
+                is_deleted: false,
+            }
         });
     }
 
-    async create(data: Partial<User>): Promise<User> {
-        return prisma.user.create({
-            data: data as any
+    async create(data: Partial<User>, gymId: string): Promise<User> {
+        const now = trustedClock.nowUtc();
+        return this.userDelegate.create({
+            data: {
+                ...data,
+                gym_id: this.requireGymId(gymId),
+                source_device: "WEB_ADMIN",
+                created_at: data.created_at ?? now,
+                updated_at: data.updated_at ?? now,
+            }
         });
     }
 
-    async update(id: string, data: Partial<User>): Promise<User> {
-        return prisma.user.update({
-            where: { user_id: id },
-            data: data as any
+    async update(id: string, gymId: string, data: Partial<User>): Promise<User> {
+        const authenticatedGymId = this.requireGymId(gymId);
+        const updateData: Record<string, unknown> = {
+            ...data,
+            source_device: "WEB_ADMIN",
+            updated_at: data.updated_at ?? trustedClock.nowUtc(),
+        };
+        delete updateData.user_id;
+        delete updateData.gym_id;
+        const updated = await this.userDelegate.updateMany({
+            where: {
+                user_id: id,
+                gym_id: authenticatedGymId,
+                is_deleted: false,
+            },
+            data: updateData,
         });
+        if (updated.count !== 1) throw new Error("User not found");
+        const result = await this.userDelegate.findFirst({
+            where: { user_id: id, gym_id: authenticatedGymId, is_deleted: false },
+        });
+        if (!result) throw new Error("User not found");
+        return result;
     }
 
     async upsertFromSync(data: User): Promise<User> {
-        return prisma.user.upsert({
-            where: { user_id: data.user_id },
+        await upsertGymScopedSyncRecord({
+            delegate: this.userDelegate,
+            entity: "user",
+            pk: "user_id",
+            id: data.user_id,
+            gymId: data.gym_id,
             create: data,
-            update: data
+            update: data,
+        });
+        return data;
+    }
+
+    async softDelete(id: string, gymId: string): Promise<void> {
+        await softDeleteGymScopedSyncRecord({
+            delegate: this.userDelegate,
+            entity: "user",
+            pk: "user_id",
+            id,
+            gymId: this.requireGymId(gymId),
+            now: trustedClock.nowUtc(),
         });
     }
 
-    async softDelete(id: string): Promise<void> {
-        await prisma.user.update({
-            where: { user_id: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
+    private requireGymId(gymId: string) {
+        const normalized = gymId.trim();
+        if (!normalized) throw new Error("Gym scope required");
+        return normalized;
     }
 
 }

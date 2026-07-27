@@ -26,6 +26,7 @@ import {
     TrainerSettlementService,
     asTrainerSettlementError,
 } from "../../../application/accounting/trainer-settlement.service";
+import { getUserGymActor } from "../middleware/auth.middleware";
 
 export class EntrenadorController {
     private createUseCase: CreateEntrenadorUseCase;
@@ -58,7 +59,9 @@ export class EntrenadorController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.listUseCase.execute(actor.gymId);
             const response = result.map(e => ({
                 ...e,
                 foto_entrenador: e.foto_entrenador ? Buffer.from(e.foto_entrenador).toString('base64') : null
@@ -72,7 +75,9 @@ export class EntrenadorController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, actor.gymId);
             if (!result) {
                 return c.json({ error: "Entrenador not found" }, 404);
             }
@@ -350,8 +355,10 @@ export class EntrenadorController {
                 body = await c.req.json();
             }
 
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = CreateEntrenadorSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const result = await this.createUseCase.execute(validated, actor.gymId);
 
             return c.json(serialize({
                 ...result,
@@ -360,6 +367,9 @@ export class EntrenadorController {
         } catch (error: any) {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
+            }
+            if (error.code === "P2002") {
+                return c.json({ error: "Entrenador already exists" }, 409);
             }
             logger.error("Error creating entrenador:", error);
             return c.json({ error: "Internal Server Error" }, 500);
@@ -384,8 +394,10 @@ export class EntrenadorController {
                 body = await c.req.json();
             }
 
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdateEntrenadorSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            await this.updateUseCase.execute(id, validated, actor.gymId);
             return c.json({ message: "Entrenador updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -407,7 +419,7 @@ export class EntrenadorController {
                 return c.json({ error: "El token no identifica un gimnasio." }, 403);
             }
             await this.offboardingService.assertDirectDeletionAllowed(auth.gymId, id);
-            await this.deleteUseCase.execute(id);
+            await this.deleteUseCase.execute(id, auth.gymId);
             return c.json({ message: "Entrenador deleted successfully" });
         } catch (error: any) {
             const known = asTrainerOffboardingError(error);

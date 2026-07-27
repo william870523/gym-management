@@ -1,6 +1,7 @@
+import type { SyncTransactionalRepository } from "../../application/use-cases/sync/sync-transaction";
 import type { Referencia } from "../entities/Referencia";
 
-export interface ReferenciaRepository {
+export interface ReferenciaRepository extends SyncTransactionalRepository<ReferenciaRepository> {
     upsertReferencia(data: Referencia): Promise<void>;
     findAll(): Promise<Referencia[]>;
     findById(id: string): Promise<Referencia | null>;

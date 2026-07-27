@@ -7,14 +7,14 @@ import { trustedClock } from "../../../config/trusted-clock";
 export class CreateClientePesoUseCase {
     constructor(private readonly clientePesoRepository: ClientePesoRepository) { }
 
-    async execute(dto: CreateClientePesoDTO): Promise<ClientePeso> {
+    async execute(dto: CreateClientePesoDTO, gymId: string): Promise<ClientePeso> {
         const occurredAt = trustedClock.nowUtc();
         const newClientePeso: ClientePeso = {
             cliente_peso_id: dto.cliente_peso_id ?? randomUUID(),
             ci: dto.ci,
             fecha: occurredAt,
             peso: dto.peso,
-            gym_id: dto.gym_id ?? null,
+            gym_id: gymId,
             source_device: null,
             version: 1,
             created_at: occurredAt,

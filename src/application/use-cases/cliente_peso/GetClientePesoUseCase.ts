@@ -4,7 +4,7 @@ import type { ClientePesoRepository } from "../../../domain/repositories/Cliente
 export class GetClientePesoUseCase {
     constructor(private readonly clientePesoRepository: ClientePesoRepository) { }
 
-    async execute(id: string): Promise<ClientePeso | null> {
-        return this.clientePesoRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<ClientePeso | null> {
+        return this.clientePesoRepository.findById(id, gymId);
     }
 }

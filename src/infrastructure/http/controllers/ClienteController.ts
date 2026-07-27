@@ -16,6 +16,7 @@ import {
     MembershipPauseError,
     MembershipPauseService,
 } from "../../../application/membership/membership-pause.service";
+import { getUserGymActor } from "../middleware/auth.middleware";
 
 export class ClienteController {
     private createUseCase: CreateClienteUseCase;
@@ -105,7 +106,9 @@ export class ClienteController {
 
     async list(c: Context) {
         try {
-            const result = await this.listUseCase.execute();
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.listUseCase.execute(actor.gymId);
             const response = result.map(cl => ({
                 ...cl,
                 foto_cliente: cl.foto_cliente ? Buffer.from(cl.foto_cliente).toString('base64') : null
@@ -119,7 +122,9 @@ export class ClienteController {
     async getById(c: Context) {
         try {
             const id = c.req.param("id");
-            const result = await this.getUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.getUseCase.execute(id, actor.gymId);
             if (!result) {
                 return c.json({ error: "Cliente not found" }, 404);
             }
@@ -152,14 +157,13 @@ export class ClienteController {
                 body = await c.req.json();
             }
 
-            const gymId = c.get("auth")?.gymId;
-            if (!gymId) {
+            const actor = getUserGymActor(c);
+            if (!actor) {
                 return c.json({ error: "El token no identifica un gimnasio." }, 403);
             }
-            body.gym_id = gymId;
 
             const validated = CreateClienteSchema.parse(body);
-            const result = await this.createUseCase.execute(validated);
+            const result = await this.createUseCase.execute(validated, actor.gymId);
 
             return c.json(serialize({
                 ...result,
@@ -168,6 +172,12 @@ export class ClienteController {
         } catch (error: any) {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
+            }
+            if (error.code === "P2002") {
+                return c.json({ error: "Cliente already exists" }, 409);
+            }
+            if (String(error.message).includes("no pertenece al gimnasio")) {
+                return c.json({ error: error.message }, 400);
             }
             logger.error("Error creating cliente:", error);
             return c.json({ error: "Internal Server Error" }, 500);
@@ -195,8 +205,10 @@ export class ClienteController {
                 body = await c.req.json();
             }
 
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdateClienteSchema.parse(body);
-            await this.updateUseCase.execute(id, validated);
+            await this.updateUseCase.execute(id, validated, actor.gymId);
             return c.json({ message: "Cliente updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -204,6 +216,9 @@ export class ClienteController {
             }
             if (error.message === "Cliente not found") {
                 return c.json({ error: "Cliente not found" }, 404);
+            }
+            if (String(error.message).includes("no pertenece al gimnasio")) {
+                return c.json({ error: error.message }, 400);
             }
             logger.error("Error updating cliente:", error);
             return c.json({ error: "Internal Server Error" }, 500);
@@ -213,7 +228,9 @@ export class ClienteController {
     async delete(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, actor.gymId);
             return c.json({ message: "Cliente deleted successfully" });
         } catch (error: any) {
             if (error.message === "Cliente not found") {

@@ -14,6 +14,10 @@ import {
 } from "../../domain/treasury-ledger-policy";
 import { prisma } from "../../infrastructure/db/prismaClient";
 import { serialize } from "../../shared/utils/serialize";
+import {
+  type CollectorSnapshot,
+  collectorFromRow,
+} from "../payment/payment-actor";
 import { CompensationProfileService } from "./compensation-profile.service";
 import { assertTreasuryMonthOpen } from "./treasury-month-lock.service";
 
@@ -35,7 +39,71 @@ type MovementDraft = {
   counterMovementId?: string | null;
   review?: boolean;
   reviewReason?: string | null;
+  // R5.6: copia del cobrador del pago que origina el movimiento; el
+  // contramovimiento de un reverso hereda el del original.
+  collector?: CollectorSnapshot | null;
 };
+
+/**
+ * Une los grupos del día (persona × cuenta × moneda) en filas de mes
+ * (persona × moneda).
+ *
+ * Las cuentas se funden a propósito: en un mes la misma recepcionista puede
+ * haber cobrado en varias cajas y lo que se quiere leer es su total por
+ * moneda. Lo que **no** se funde nunca son las monedas: sumar CUP con USD
+ * daría un número que no existe.
+ */
+function mergeCollectorsByCurrency(
+  grupos: Array<Record<string, any>>,
+): Array<Record<string, any>> {
+  const merged = new Map<string, Record<string, any>>();
+  for (const grupo of grupos) {
+    const key = `${grupo.moneda_id}|${grupo.cobrado_por_user_id ?? "SIN_ATRIBUIR"}`;
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, {
+        moneda_id: grupo.moneda_id,
+        moneda_codigo: grupo.moneda_codigo,
+        cobrado_por_user_id: grupo.cobrado_por_user_id,
+        cobrado_por_nombre_snapshot: grupo.cobrado_por_nombre_snapshot,
+        cobrado_por_rol_snapshot: grupo.cobrado_por_rol_snapshot,
+        cobrado_por_origen: grupo.cobrado_por_origen,
+        historico_sin_atribuir: grupo.historico_sin_atribuir,
+        cuentas: 1,
+        pagos: grupo.pagos,
+        clientes: grupo.clientes,
+        bruto: grupo.bruto,
+        cambio: grupo.cambio,
+        anulado: grupo.anulado,
+        neto: grupo.neto,
+      });
+      continue;
+    }
+    const add = (a: string, b: string) =>
+      treasuryMinorToMoney(
+        treasuryMoneyToMinor(a) + treasuryMoneyToMinor(b),
+      );
+    current.cuentas += 1;
+    // Pagos y clientes se suman entre cuentas distintas: un mismo pago no
+    // aparece en dos cuentas a la vez, así que no hay doble conteo.
+    current.pagos += grupo.pagos;
+    current.clientes += grupo.clientes;
+    current.bruto = add(current.bruto, grupo.bruto);
+    current.cambio = add(current.cambio, grupo.cambio);
+    current.anulado = add(current.anulado, grupo.anulado);
+    current.neto = add(current.neto, grupo.neto);
+  }
+  return [...merged.values()].sort((a, b) => {
+    const currency = String(a.moneda_codigo).localeCompare(String(b.moneda_codigo));
+    if (currency !== 0) return currency;
+    if (a.historico_sin_atribuir !== b.historico_sin_atribuir) {
+      return a.historico_sin_atribuir ? 1 : -1;
+    }
+    return String(a.cobrado_por_nombre_snapshot ?? "").localeCompare(
+      String(b.cobrado_por_nombre_snapshot ?? ""),
+    );
+  });
+}
 
 export class TreasuryLedgerError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -718,8 +786,12 @@ export class TreasuryLedgerService {
       },
       orderBy: [{ created_at: "asc" }, { detalle_pago_id: "asc" }],
     });
+    // R5.6: el movimiento hereda el cobrador del pago; un cobro histórico sin
+    // atribución deja los cuatro campos nulos y no se inventa responsable.
+    const collector = collectorFromRow(payment);
     if (!rows.length) {
       return this.createMovement(tx, gymId, {
+        collector,
         key: `PAGO:${payment.pago_cliente_id}:SIN_DETALLE`,
         sourceType: "PAGO_CLIENTE",
         sourceId: payment.pago_cliente_id,
@@ -782,6 +854,7 @@ export class TreasuryLedgerService {
         description: `Cobro de plan al socio ${payment.ci}.`,
         review: reasons.length > 0,
         reviewReason: reasons.join(", ") || null,
+        collector,
       });
       if (changeBaseMinor > 0n && conversion.valid) {
         detectedChange = true;
@@ -795,6 +868,7 @@ export class TreasuryLedgerService {
           sourceDetailId: detail.detalle_pago_id,
           direction: "SALIDA",
           concept: "CAMBIO_CLIENTE",
+          collector,
           accountId: detail.cuenta_id,
           currencyId: detail.moneda_id,
           paymentTypeId: detail.tipo_pago_id,
@@ -866,6 +940,9 @@ export class TreasuryLedgerService {
         counterMovementId: original.movimiento_id,
         review: original.requiere_revision,
         reviewReason: original.revision_motivo,
+        // El contramovimiento netea el cobro de quien lo recibió; quién anula
+        // vive en PagoReversion.registrada_por_* y no lo sustituye.
+        collector: collectorFromRow(original),
       });
     }
     return created;
@@ -1491,6 +1568,15 @@ export class TreasuryLedgerService {
         };
       })
       .sort((left, right) => left.moneda_codigo.localeCompare(right.moneda_codigo));
+    // R5.6 — el mismo resumen del día, agregado al mes. Se agrupa por moneda y
+    // persona (no por cuenta): en un mes una recepcionista puede haber cobrado
+    // en varias cajas y lo que interesa es su total dentro de cada moneda.
+    const collectors = await this.collectorsSummary(
+      movements,
+      currencyById,
+      new Map(accounts.map((row: any) => [row.cuenta_id, row])),
+      gymId,
+    );
     return {
       mes: period.month,
       fecha_desde: period.start.toISOString().slice(0, 10),
@@ -1498,6 +1584,7 @@ export class TreasuryLedgerService {
         .toISOString()
         .slice(0, 10),
       monedas: currencyRows,
+      cobros_por_recepcionista: mergeCollectorsByCurrency(collectors.grupos),
     };
   }
 
@@ -1565,6 +1652,13 @@ export class TreasuryLedgerService {
       current.count++;
       summaryByCurrency.set(row.moneda_id, current);
     }
+    const waivedLateFees = await this.waivedLateFees(gymId, movements, currencyById);
+    const collectors = await this.collectorsSummary(
+      movements,
+      currencyById,
+      accountById,
+      gymId,
+    );
     const accountRows = await Promise.all(accounts.map(async (account) => {
       const rows = movements.filter((row) => row.cuenta_id === account.cuenta_id);
       const entries = this.sumDirection(rows, "ENTRADA");
@@ -1664,12 +1758,306 @@ export class TreasuryLedgerService {
             : null,
         es_tardio: lateMovementIds.has(row.movimiento_id),
         es_conciliado: reconciledMovementIds.has(row.movimiento_id),
+        // R5.6: el cobrador ya viaja en la fila; aquí se añade quién anuló,
+        // que vive en el reverso y no en el movimiento.
+        ...(row.origen_tipo === "PAGO_REVERSION"
+          ? collectors.anuladorPorReverso.get(String(row.origen_id)) ?? {}
+          : {}),
       })),
+      recargos_condonados: waivedLateFees,
+      // R5.6 — quién recibió el dinero, por cuenta y moneda.
+      cobros_por_recepcionista: collectors.grupos,
+      cobros_sin_atribuir: collectors.sin_atribuir,
       incidencias: {
         sin_cuenta: movements.filter((row) => !row.cuenta_id).length,
         requieren_revision: movements.filter((row) => row.requiere_revision).length,
         movimientos_tardios: accountRows.reduce((sum, row) => sum + row.movimientos_tardios, 0),
       },
+    };
+  }
+
+  /**
+   * Recargos por mora condonados del día (docs/RECARGO_MORA.md §6-bis).
+   *
+   * Es información de control, NO un movimiento de caja: no entró ni salió
+   * dinero, así que esto no toca `resumen_monedas`, ni el arqueo, ni el saldo.
+   *
+   * La fecha de negocio no se recalcula desde `pago_cliente.fecha`: se parte de
+   * los cobros que YA tienen movimiento en este día, para que la línea use
+   * exactamente la misma autoridad de fecha que el resto del cierre. Un cobro
+   * revertido queda `is_deleted` y por eso desaparece de la línea.
+   */
+
+  /**
+   * R5.6 — cobros del día agrupados por quien recibió el dinero
+   * (docs/PAYMENT_COLLECTOR_ATTRIBUTION.md §6).
+   *
+   * Se agrupa por **cuenta y moneda**, nunca entre monedas: sumar CUP con USD
+   * daría un número que no existe. Los pagos se cuentan por
+   * `pago_cliente_id` distinto, no por movimiento: un pago mixto genera varios
+   * movimientos y seguiría siendo un solo cobro.
+   *
+   * Los cobros anteriores al corte no tienen actor y salen juntos en su propio
+   * grupo, «Sin atribuir · histórico»: inventarles un responsable sería peor
+   * que admitir que no se sabe.
+   */
+  private async collectorsSummary(
+    movements: any[],
+    currencyById: Map<string, any>,
+    accountById: Map<string, any>,
+    gymId: string,
+  ) {
+    const relevant = movements.filter((row) =>
+      ["PAGO_CLIENTE", "PAGO_CAMBIO", "PAGO_REVERSION"].includes(row.origen_tipo)
+    );
+    if (!relevant.length) {
+      return {
+        grupos: [],
+        sin_atribuir: 0,
+        anuladorPorReverso: new Map<
+          string,
+          {
+            anulado_por_user_id: string | null;
+            anulado_por_nombre_snapshot: string | null;
+          }
+        >(),
+      };
+    }
+
+    // Los contramovimientos apuntan al reverso, no al pago: hay que resolver a
+    // qué cobro pertenecen para no contar el reverso como un pago más.
+    const reversalIds = [
+      ...new Set(
+        relevant
+          .filter((row) => row.origen_tipo === "PAGO_REVERSION" && row.origen_id)
+          .map((row) => String(row.origen_id)),
+      ),
+    ];
+    const reversals = reversalIds.length
+      ? await prisma.pagoReversion.findMany({
+          where: { gym_id: gymId, reversion_id: { in: reversalIds } },
+          select: {
+            reversion_id: true,
+            pago_cliente_id: true,
+            registrada_por_user_id: true,
+            registrada_por_nombre_snapshot: true,
+          },
+        })
+      : [];
+    const reversalById = new Map(reversals.map((row) => [row.reversion_id, row]));
+
+    const paymentIds = [
+      ...new Set([
+        ...relevant
+          .filter((row) => row.origen_tipo !== "PAGO_REVERSION" && row.origen_id)
+          .map((row) => String(row.origen_id)),
+        ...reversals.map((row) => row.pago_cliente_id),
+      ]),
+    ];
+    const payments = paymentIds.length
+      ? await prisma.pagoCliente.findMany({
+          where: { gym_id: gymId, pago_cliente_id: { in: paymentIds } },
+          select: { pago_cliente_id: true, ci: true },
+        })
+      : [];
+    const clientByPayment = new Map(
+      payments.map((row) => [row.pago_cliente_id, row.ci]),
+    );
+
+    type Group = {
+      cuenta_id: string | null;
+      moneda_id: string;
+      cobrado_por_user_id: string | null;
+      cobrado_por_nombre_snapshot: string | null;
+      cobrado_por_rol_snapshot: string | null;
+      cobrado_por_origen: string | null;
+      pagos: Set<string>;
+      clientes: Set<string>;
+      bruto: bigint;
+      cambio: bigint;
+      anulado: bigint;
+    };
+    const groups = new Map<string, Group>();
+
+    for (const row of relevant) {
+      const key = [
+        row.cuenta_id ?? "SIN_CUENTA",
+        row.moneda_id,
+        row.cobrado_por_user_id ?? "SIN_ATRIBUIR",
+      ].join("|");
+      const group = groups.get(key) ?? {
+        cuenta_id: row.cuenta_id ?? null,
+        moneda_id: row.moneda_id,
+        cobrado_por_user_id: row.cobrado_por_user_id ?? null,
+        cobrado_por_nombre_snapshot: row.cobrado_por_nombre_snapshot ?? null,
+        cobrado_por_rol_snapshot: row.cobrado_por_rol_snapshot ?? null,
+        cobrado_por_origen: row.cobrado_por_origen ?? null,
+        pagos: new Set<string>(),
+        clientes: new Set<string>(),
+        bruto: 0n,
+        cambio: 0n,
+        anulado: 0n,
+      };
+      const amount = treasuryMoneyToMinor(this.money(row.monto));
+      const paymentId = row.origen_tipo === "PAGO_REVERSION"
+        ? reversalById.get(String(row.origen_id))?.pago_cliente_id ?? null
+        : String(row.origen_id);
+      if (paymentId) {
+        group.pagos.add(paymentId);
+        const ci = clientByPayment.get(paymentId);
+        if (ci) group.clientes.add(ci);
+      }
+      if (row.origen_tipo === "PAGO_CLIENTE") group.bruto += amount;
+      else if (row.origen_tipo === "PAGO_CAMBIO") group.cambio += amount;
+      else group.anulado += row.direccion === "SALIDA" ? amount : -amount;
+      groups.set(key, group);
+    }
+
+    const grupos = [...groups.values()]
+      .map((group) => ({
+        cuenta_id: group.cuenta_id,
+        cuenta_nombre: group.cuenta_id
+          ? accountById.get(group.cuenta_id)?.nombre_cuenta ?? group.cuenta_id
+          : "Sin cuenta",
+        moneda_id: group.moneda_id,
+        moneda_codigo:
+          currencyById.get(group.moneda_id)?.codigo ?? group.moneda_id,
+        cobrado_por_user_id: group.cobrado_por_user_id,
+        cobrado_por_nombre_snapshot: group.cobrado_por_nombre_snapshot,
+        cobrado_por_rol_snapshot: group.cobrado_por_rol_snapshot,
+        cobrado_por_origen: group.cobrado_por_origen,
+        // La vista lo rotula así cuando no hay actor; el nombre no se inventa.
+        historico_sin_atribuir: !group.cobrado_por_user_id,
+        pagos: group.pagos.size,
+        clientes: group.clientes.size,
+        bruto: treasuryMinorToMoney(group.bruto),
+        cambio: treasuryMinorToMoney(group.cambio),
+        anulado: treasuryMinorToMoney(group.anulado),
+        neto: treasuryMinorToMoney(group.bruto - group.cambio - group.anulado),
+      }))
+      .sort((a, b) => {
+        const account = (a.cuenta_nombre ?? "").localeCompare(b.cuenta_nombre ?? "");
+        if (account !== 0) return account;
+        const currency = a.moneda_codigo.localeCompare(b.moneda_codigo);
+        if (currency !== 0) return currency;
+        // El grupo histórico va al final: no compite con las personas.
+        if (a.historico_sin_atribuir !== b.historico_sin_atribuir) {
+          return a.historico_sin_atribuir ? 1 : -1;
+        }
+        return (a.cobrado_por_nombre_snapshot ?? "").localeCompare(
+          b.cobrado_por_nombre_snapshot ?? "",
+        );
+      });
+
+    return {
+      grupos,
+      sin_atribuir: grupos.filter((row) => row.historico_sin_atribuir).length,
+      // Quién anuló, por reverso: el detalle del cierre muestra «Cobrado por A
+      // / Anulado por B» sin confundir las dos responsabilidades (§3).
+      anuladorPorReverso: new Map(
+        [...reversalById.values()].map((row) => [
+          row.reversion_id,
+          {
+            anulado_por_user_id: row.registrada_por_user_id ?? null,
+            anulado_por_nombre_snapshot: row.registrada_por_nombre_snapshot ?? null,
+          },
+        ]),
+      ),
+    };
+  }
+
+  private async waivedLateFees(
+    gymId: string,
+    movements: any[],
+    currencyById: Map<string, any>,
+  ) {
+    const empty = { por_moneda: [], detalle: [], condonaciones: 0 };
+    const paymentIds = [
+      ...new Set(
+        movements
+          .filter((row) => row.origen_tipo === "PAGO_CLIENTE" && row.origen_id)
+          .map((row) => String(row.origen_id)),
+      ),
+    ];
+    if (!paymentIds.length) return empty;
+
+    const payments = await prisma.pagoCliente.findMany({
+      where: {
+        gym_id: gymId,
+        pago_cliente_id: { in: paymentIds },
+        is_deleted: false,
+        NOT: { recargo_mora_condonado_importe: null },
+      },
+      orderBy: [{ fecha: "asc" }, { pago_cliente_id: "asc" }],
+    });
+    if (!payments.length) return empty;
+
+    const [clients, operators] = await Promise.all([
+      prisma.cliente.findMany({
+        where: {
+          gym_id: gymId,
+          ci: { in: [...new Set(payments.map((row) => row.ci))] },
+        },
+        select: { ci: true, nombres: true, apellidos: true },
+      }),
+      prisma.user.findMany({
+        where: {
+          gym_id: gymId,
+          user_id: {
+            in: [
+              ...new Set(
+                payments
+                  .map((row) => row.recargo_mora_condonado_por)
+                  .filter((value): value is string => Boolean(value)),
+              ),
+            ],
+          },
+        },
+        select: { user_id: true, user_nombre: true },
+      }),
+    ]);
+    const clientByCi = new Map(clients.map((row) => [row.ci, row]));
+    // Deliberadamente tolerante: un dato histórico cuyo autor ya no existe no
+    // puede tumbar el cierre (por eso no se usa `identityName`, que lanza 403).
+    const operatorById = new Map(
+      operators.map((row) => [row.user_id, row.user_nombre]),
+    );
+
+    const totalByCurrency = new Map<string, bigint>();
+    const detalle = payments.map((payment) => {
+      const amountMinor = treasuryMoneyToMinor(
+        String(payment.recargo_mora_condonado_importe),
+      );
+      totalByCurrency.set(
+        payment.moneda_id,
+        (totalByCurrency.get(payment.moneda_id) ?? 0n) + amountMinor,
+      );
+      const client = clientByCi.get(payment.ci);
+      const operatorId = payment.recargo_mora_condonado_por;
+      return {
+        pago_cliente_id: payment.pago_cliente_id,
+        ci: payment.ci,
+        socio: client ? `${client.nombres} ${client.apellidos}`.trim() : payment.ci,
+        importe: treasuryMinorToMoney(amountMinor),
+        moneda_id: payment.moneda_id,
+        moneda_codigo: currencyById.get(payment.moneda_id)?.codigo ?? payment.moneda_id,
+        motivo: payment.recargo_mora_condonado_motivo,
+        condonado_por_user_id: operatorId,
+        condonado_por: operatorId ? operatorById.get(operatorId) ?? operatorId : null,
+        ocurrido_at: payment.fecha,
+      };
+    });
+
+    return {
+      // Una fila por moneda: nunca se suman monedas distintas.
+      por_moneda: [...totalByCurrency.entries()].map(([currencyId, minor]) => ({
+        moneda_id: currencyId,
+        moneda_codigo: currencyById.get(currencyId)?.codigo ?? currencyId,
+        importe: treasuryMinorToMoney(minor),
+        condonaciones: detalle.filter((row) => row.moneda_id === currencyId).length,
+      })),
+      detalle,
+      condonaciones: detalle.length,
     };
   }
 
@@ -1705,6 +2093,11 @@ export class TreasuryLedgerService {
         contramovimiento_de_id: draft.counterMovementId ?? null,
         requiere_revision: draft.review ?? false,
         revision_motivo: draft.reviewReason ?? null,
+        cobrado_por_user_id: draft.collector?.cobrado_por_user_id ?? null,
+        cobrado_por_nombre_snapshot:
+          draft.collector?.cobrado_por_nombre_snapshot ?? null,
+        cobrado_por_rol_snapshot: draft.collector?.cobrado_por_rol_snapshot ?? null,
+        cobrado_por_origen: draft.collector?.cobrado_por_origen ?? null,
         is_deleted: false,
         created_at: now,
         gym_id: gymId,

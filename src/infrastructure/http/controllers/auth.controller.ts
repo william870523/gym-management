@@ -3,49 +3,15 @@ import type { Context } from "hono";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../../db/prismaClient";
-import { RegisterSchema, LoginSchema } from "../../../application/validation/auth.schemas";
+import { LoginSchema } from "../../../application/validation/auth.schemas";
 import { env } from "../../../config/env";
-import { logger } from "../../../config/logger";
 import { JwtService } from "../../auth/jwt.service";
 
 export async function registerController(c: Context) {
-  const body = await c.req.json().catch(() => null);
-  const parsed = RegisterSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return c.json(
-      { error: "Invalid payload", details: parsed.error.format() },
-      400
-    );
-  }
-
-  const { nombre, email, password } = parsed.data;
-
-  const exists = await prisma.user.findUnique({
-    where: { user_email: email }
-  });
-
-  if (exists) {
-    return c.json({ error: "Email already in use" }, 409);
-  }
-
-  const hashed = await bcrypt.hash(password, 10);
-  const userId = crypto.randomUUID();
-
-  await prisma.user.create({
-    data: {
-      user_id: userId,
-      user_nombre: nombre,
-      user_email: email,
-      password: hashed,
-      role: "admin",
-      created_at: new Date()
-    }
-  });
-
-  logger.info("User registered", { userId, email });
-
-  return c.json({ ok: true });
+  return c.json({
+    error: "El registro público está deshabilitado.",
+    error_code: "PUBLIC_REGISTRATION_DISABLED",
+  }, 403);
 }
 
 export async function loginController(c: Context) {

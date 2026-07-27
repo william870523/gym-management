@@ -25,7 +25,7 @@ export class PrismaGovernedExpenseReader implements GovernedExpenseReader {
   }
 
   async readExpenses(gymId: string): Promise<GovernedExpenseSnapshot[]> {
-    const [expenses, applications, categories, suppliers, currencies] = await Promise.all([
+    const [expenses, applications, categories, suppliers, currencies, movements] = await Promise.all([
       prisma.gastoGobernado.findMany({
         where: { gym_id: gymId, is_deleted: false },
         orderBy: [{ periodo_pertenencia_mes: "asc" }, { gasto_id: "asc" }],
@@ -41,6 +41,18 @@ export class PrismaGovernedExpenseReader implements GovernedExpenseReader {
         where: { gym_id: gymId, is_deleted: false },
       }),
       prisma.moneda.findMany(),
+      prisma.tesoreriaMovimiento.findMany({
+        where: {
+          gym_id: gymId,
+          origen_tipo: "GASTO_GOBERNADO",
+          is_deleted: false,
+        },
+        select: {
+          movimiento_id: true,
+          fecha_negocio: true,
+          moneda_id: true,
+        },
+      }),
     ]);
 
     const categoryById = new Map(categories.map((c) => [c.categoria_id, c]));
@@ -48,13 +60,26 @@ export class PrismaGovernedExpenseReader implements GovernedExpenseReader {
     const currencyById = new Map(
       currencies.map((c) => [c.moneda_id, c.codigo]),
     );
+    const movementById = new Map(
+      movements.map((movement) => [movement.movimiento_id, movement]),
+    );
     const applicationsByExpense = new Map<string, GovernedExpenseApplicationSnapshot[]>();
     for (const app of applications) {
+      const movement = movementById.get(app.movimiento_id);
+      if (!movement) {
+        throw new Error(
+          `La aplicación ${app.aplicacion_id} no conserva su movimiento de Tesorería.`,
+        );
+      }
       const list = applicationsByExpense.get(app.gasto_id) ?? [];
       list.push({
+        applicationId: app.aplicacion_id,
+        expenseId: app.gasto_id,
+        movementId: app.movimiento_id,
         amount: app.monto_aplicado.toString(),
         state: app.estado === "REVERSADA" ? "REVERSADA" : "APLICADA",
-        paidAt: toCanonicalUtcDate(app.aplicada_at),
+        paidAt: toCanonicalUtcDate(movement.fecha_negocio),
+        appliedAt: app.aplicada_at,
         createdAt: app.created_at,
         updatedAt: app.updated_at,
       });

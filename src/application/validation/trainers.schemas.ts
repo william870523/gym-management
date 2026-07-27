@@ -4,6 +4,7 @@ import { z } from "zod";
 export const EntrenadorSchema = z.object({
     id_entrenador: z.string().optional(),
     ci_entrenador: z.string().min(1, "CI es requerido"),
+    tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).default("DESCONOCIDO"),
     nombres_entrenador: z.string().min(1, "Nombres son requeridos"),
     apellidos_entrenador: z.string().min(1, "Apellidos son requeridos"),
     sexo_entrenador: z.string().min(1, "Sexo es requerido"),
@@ -15,7 +16,6 @@ export const EntrenadorSchema = z.object({
     fecha_incio_entrenador: z.string().or(z.date()).transform((val) => new Date(val)),
     is_deleted: z.boolean().optional(),
     created_at: z.date().optional(),
-    gym_id: z.string().optional().nullable(),
     version: z.number().optional(),
     updated_at: z.date().optional(),
     deleted_at: z.date().optional().nullable(),

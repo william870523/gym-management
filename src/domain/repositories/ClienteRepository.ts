@@ -1,3 +1,4 @@
+import type { SyncTransactionalRepository } from "../../application/use-cases/sync/sync-transaction";
 import type { Cliente } from "../entities/Cliente";
 import type {
   MembresiaCliente,
@@ -11,12 +12,12 @@ export interface ClienteCreationResult {
   nationalityCode: string;
 }
 
-export interface ClienteRepository {
+export interface ClienteRepository extends SyncTransactionalRepository<ClienteRepository> {
   upsertFromSync(data: Cliente): Promise<void>;
-  findAll(): Promise<Cliente[]>;
-  findById(id: string): Promise<Cliente | null>;
+  findAll(gymId: string): Promise<Cliente[]>;
+  findById(id: string, gymId: string): Promise<Cliente | null>;
   findNationalityCode(nacionalidadId: string): Promise<string | null>;
   create(data: Cliente): Promise<ClienteCreationResult>;
-  update(id: string, data: Partial<Cliente>): Promise<void>;
-  softDelete(id: string): Promise<void>;
+  update(id: string, gymId: string, data: Partial<Cliente>): Promise<void>;
+  softDelete(id: string, gymId: string): Promise<void>;
 }

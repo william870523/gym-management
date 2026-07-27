@@ -11,6 +11,17 @@ export interface PagoCliente {
     precio_lista_snapshot?: number | null;
     descuento_pct_snapshot?: string | null;
     descuento_monto_snapshot?: number | null;
+    // Condonación del recargo por mora (docs/RECARGO_MORA.md §6-bis).
+    recargo_mora_condonado_importe?: string | null;
+    recargo_mora_condonado_motivo?: string | null;
+    recargo_mora_condonado_por?: string | null;
+    // R5.6: quién recibió el dinero. Un cobro que llega por sincronización
+    // conserva el actor congelado por la instalación que cobró; el dispositivo
+    // que sube el evento no se convierte en recepcionista.
+    cobrado_por_user_id?: string | null;
+    cobrado_por_nombre_snapshot?: string | null;
+    cobrado_por_rol_snapshot?: string | null;
+    cobrado_por_origen?: string | null;
     gym_id: string | null;
     source_device?: string | null;
     version: number;

@@ -20,7 +20,15 @@ model User {
   active        Boolean   @default(true)
   is_deleted    Boolean   @default(false)
   created_at    DateTime? @default(now())
+  // Con multi-sede M1, `gym_id` pasa a significar «sede por defecto al entrar»;
+  // el permiso real de trabajar en una sede vive en `usuario_sede`.
   gym_id        String?
+  /// Dueño de la cadena: el nivel por encima de administración. Puede entrar a
+  /// cualquier sede y crear o dar de baja gimnasios, desde escritorio y desde
+  /// web. Es global y viaja a TODAS las bases por sincronización, para que se
+  /// le reconozca desde la instalación de cualquier sede (decisión del dueño,
+  /// 26-07-2026; docs/MULTI_SEDE.md §3).
+  es_plataforma Boolean   @default(false)
   source_device String?
   version       Int       @default(1)
   updated_at    DateTime  @default(now())
@@ -29,6 +37,33 @@ model User {
   roles Role[] // Many-to-many implicit relation
 
   @@map("User")
+}
+
+/// Quién puede trabajar en qué sede y con qué puesto (docs/MULTI_SEDE.md §3.2).
+///
+/// Una fila por persona y sede: la misma recepcionista puede estar en Centro
+/// por la mañana y en Norte por la tarde, con un puesto distinto en cada una.
+/// El identificador se deriva de `user_id|gym_id`, así que las dos bases
+/// calculan el mismo valor para el mismo par y la fila puede sincronizarse sin
+/// duplicarse.
+model UsuarioSede {
+  usuario_sede_id String  @id
+  user_id         String
+  gym_id          String
+  rol             String
+  activo          Boolean @default(true)
+
+  // Sync Fields
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@unique([user_id, gym_id])
+  @@index([gym_id, activo])
+  @@map("usuario_sede")
 }
 
 model Role {
@@ -261,6 +296,13 @@ model PlanesPago {
   // R5.3: precio fijo para cliente VIEJO. Si es null, se aplica el % global
   // (DESCUENTO_CLIENTE_VIEJO_PCT); si está seteado, anula el % para este plan.
   precio_viejo_excepcion    Float?
+  // Recargo por mora (docs/RECARGO_MORA.md). El administrador define, por plan,
+  // uno de tres modos que se cobra al pagar con atraso. null/activo=false = sin
+  // recargo. Importes como string decimal, no Float.
+  recargo_mora_modo         String?   // null | PORCENTAJE | MONTO_FIJO | POR_DIA
+  recargo_mora_valor        String?   // pct (0-100) o monto diario/fijo
+  recargo_mora_tope         String?   // solo POR_DIA; null = sin tope
+  recargo_mora_activo       Boolean   @default(false)
   is_deleted                Boolean   @default(false)
   created_at                DateTime? @default(now())
   gym_id                    String?
@@ -1019,6 +1061,13 @@ model TesoreriaMovimiento {
   contramovimiento_de_id String?
   requiere_revision      Boolean   @default(false)
   revision_motivo        String?
+  // R5.6: copia auditable del cobrador del pago que originó el movimiento
+  // (y de su contramovimiento, que netea ese mismo cobro). Nulo en
+  // movimientos que no nacen de un cobro y en la historia previa al corte.
+  cobrado_por_user_id         String?
+  cobrado_por_nombre_snapshot String?
+  cobrado_por_rol_snapshot    String?
+  cobrado_por_origen          String?
   is_deleted             Boolean   @default(false)
   created_at             DateTime  @default(now())
   gym_id                 String
@@ -1031,6 +1080,7 @@ model TesoreriaMovimiento {
   @@index([gym_id, fecha_negocio, cuenta_id], map: "idx_tes_mov_gym_dia_cuenta")
   @@index([gym_id, moneda_id, ocurrido_at], map: "idx_tes_mov_gym_moneda_fecha")
   @@index([gym_id, origen_tipo, origen_id], map: "idx_tes_mov_gym_origen")
+  @@index([gym_id, fecha_negocio, cobrado_por_user_id], map: "idx_tes_mov_gym_dia_cobrador")
   @@map("tesoreria_movimiento")
 }
 
@@ -1216,6 +1266,7 @@ model Cuenta {
 model Entrenador {
   id_entrenador          String    @id
   ci_entrenador          String    @unique
+  tipo_documento         String    @default("DESCONOCIDO") // CI_CUBANO, PASAPORTE, OTRO, DESCONOCIDO
   nombres_entrenador     String
   apellidos_entrenador   String
   sexo_entrenador        String
@@ -1263,6 +1314,7 @@ model ClientePeso {
 
 model Cliente {
   ci               String    @id
+  tipo_documento   String    @default("DESCONOCIDO") // CI_CUBANO, PASAPORTE, OTRO, DESCONOCIDO
   nombres          String
   apellidos        String
   sexo             String
@@ -1341,6 +1393,22 @@ model PagoCliente {
   precio_lista_snapshot    Float?
   descuento_pct_snapshot   String?
   descuento_monto_snapshot Float?
+  // Condonación del recargo por mora (docs/RECARGO_MORA.md §6-bis). El recargo
+  // se aplica siempre que corresponda; perdonarlo exige motivo y deja rastro.
+  // El importe es el que se HABRÍA cobrado, calculado por el servidor.
+  recargo_mora_condonado_importe String?
+  recargo_mora_condonado_motivo  String?
+  recargo_mora_condonado_por     String?
+  // R5.6: quién recibió el dinero (docs/PAYMENT_COLLECTOR_ATTRIBUTION.md §5).
+  // Nulos solo para historia anterior al corte, que se muestra como
+  // «Sin atribuir · histórico»; todo cobro nuevo exige actor revalidado en
+  // servidor. `cobrado_por_origen`: LOCAL_USER | SYNCED_USER | REMOTE_USER.
+  // No confundir con quien anula (PagoReversion) ni con quien cierra la caja
+  // (TesoreriaCierre.cerrado_por_*).
+  cobrado_por_user_id         String?
+  cobrado_por_nombre_snapshot String?
+  cobrado_por_rol_snapshot    String?
+  cobrado_por_origen          String?
   is_deleted      Boolean   @default(false)
   created_at      DateTime? @default(now())
   gym_id          String?
@@ -1356,6 +1424,7 @@ model PagoCliente {
   detalles   DetallePago[]
   gym        Gym?          @relation(fields: [gym_id], references: [gym_id])
 
+  @@index([gym_id, cobrado_por_user_id, fecha], map: "idx_pago_cliente_gym_cobrador_fecha")
   @@map("pago_cliente")
 }
 
@@ -1367,6 +1436,14 @@ model DetallePago {
   cuenta_id       String?
   cantidad        Float
   tipo_cambio_id  String?
+  // Recargo por mora congelado (docs/RECARGO_MORA.md). Históricos = null
+  // (pre-recargo-mora); sin backfill. Importes como string decimal.
+  recargo_mora_modo_snapshot  String?
+  recargo_mora_dias_atraso    Int?
+  recargo_mora_base           String?
+  recargo_mora_importe        String?
+  recargo_mora_plan_valor     String?
+  recargo_mora_plan_tope      String?
   is_deleted      Boolean   @default(false)
   created_at      DateTime? @default(now())
   gym_id          String?
@@ -1480,6 +1557,7 @@ model GastoGobernado {
   periodo_pertenencia_mes String // AAAA-MM, mes al que pertenece el gasto
   fecha_pago              DateTime? // cuándo salió el dinero (nullable hasta pagar)
   fecha_programada        DateTime // cuándo se espera pagar
+  recurrente_id           String? // plantilla que lo generó (null si es manual)
   metodo_devengo          String    @default("MES_PERTENENCIA")
   estado                  String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
   pagado_acumulado        Decimal   @default(0)
@@ -1493,10 +1571,43 @@ model GastoGobernado {
   updated_at              DateTime  @default(now())
   deleted_at              DateTime?
 
+  // Una plantilla genera como mucho un gasto por mes de pertenencia: es lo que
+  // hace idempotente la generación aunque se pulse dos veces.
+  @@unique([recurrente_id, periodo_pertenencia_mes], map: "uq_gasto_recurrente_mes")
   @@index([gym_id, periodo_pertenencia_mes, estado], map: "idx_gasto_mes_estado")
   @@index([gym_id, categoria_id], map: "idx_gasto_categoria")
   @@index([gym_id, proveedor_id], map: "idx_gasto_proveedor")
   @@map("gasto_gobernado")
+}
+
+// R4.7 — Plantilla de gasto recurrente. No es un gasto: es la instrucción de
+// crear uno cada mes (alquiler, electricidad, limpieza). El gasto real solo
+// existe cuando se genera, para que nadie devengue un mes que aún no ocurrió.
+model GastoRecurrente {
+  recurrente_id  String    @id
+  gym_id         String
+  categoria_id   String
+  proveedor_id   String?
+  moneda_id      String
+  descripcion    String
+  monto          Decimal
+  // Día del mes de la fecha programada de pago. Se limita a 1-28 para que
+  // exista en todos los meses; febrero no debe cambiar el comportamiento.
+  dia_programado Int       @default(1)
+  mes_inicio     String // AAAA-MM, primer mes que genera
+  mes_fin        String? // AAAA-MM inclusive; null = sin fecha de término
+  activo         Boolean   @default(true)
+  notas          String?
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime  @default(now())
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@index([gym_id, activo], map: "idx_gasto_recurrente_activo")
+  @@index([gym_id, categoria_id], map: "idx_gasto_recurrente_categoria")
+  @@map("gasto_recurrente")
 }
 
 model GastoGobernadoAplicacion {

@@ -1,10 +1,18 @@
 import type { TipoCambio } from "../../domain/entities/TipoCambio";
 import type { TipoCambioRepository } from "../../domain/repositories/TipoCambioRepository";
 import { prisma } from "../db/prismaClient";
+import { type SyncTransactionContext } from "../../application/use-cases/sync/sync-transaction";
 
 export class PrismaTipoCambioRepository implements TipoCambioRepository {
+  // Unidad 01: `client` es prisma o el cliente de la transacción del upload.
+  constructor(private readonly client: any = prisma) {}
+
+  withTransaction(tx: SyncTransactionContext): PrismaTipoCambioRepository {
+    return new PrismaTipoCambioRepository(tx);
+  }
+
     async upsertTipoCambio(data: TipoCambio): Promise<void> {
-        await prisma.tipoCambio.upsert({
+        await this.client.tipoCambio.upsert({
             where: { tipo_cambio_id: data.tipo_cambio_id },
             create: {
                 tipo_cambio_id: data.tipo_cambio_id,
@@ -38,7 +46,7 @@ export class PrismaTipoCambioRepository implements TipoCambioRepository {
     }
 
     async findAll(): Promise<TipoCambio[]> {
-        return (prisma.tipoCambio.findMany({
+        return (this.client.tipoCambio.findMany({
             where: { is_deleted: false },
             include: {
                 moneda_base: true,
@@ -48,7 +56,7 @@ export class PrismaTipoCambioRepository implements TipoCambioRepository {
     }
 
     async findById(id: string): Promise<TipoCambio | null> {
-        return (prisma.tipoCambio.findUnique({
+        return (this.client.tipoCambio.findUnique({
             where: { tipo_cambio_id: id, is_deleted: false },
             include: {
                 moneda_base: true,
@@ -58,7 +66,7 @@ export class PrismaTipoCambioRepository implements TipoCambioRepository {
     }
 
     async create(data: TipoCambio): Promise<void> {
-        await prisma.tipoCambio.create({
+        await this.client.tipoCambio.create({
             data: {
                 tipo_cambio_id: data.tipo_cambio_id,
                 moneda_id_base: data.moneda_id_base,
@@ -77,7 +85,7 @@ export class PrismaTipoCambioRepository implements TipoCambioRepository {
     }
 
     async update(id: string, data: Partial<TipoCambio>): Promise<void> {
-        await prisma.tipoCambio.update({
+        await this.client.tipoCambio.update({
             where: { tipo_cambio_id: id },
             data: {
                 moneda_id_base: data.moneda_id_base,
@@ -93,7 +101,7 @@ export class PrismaTipoCambioRepository implements TipoCambioRepository {
     }
 
     async softDelete(id: string): Promise<void> {
-        await prisma.tipoCambio.update({
+        await this.client.tipoCambio.update({
             where: { tipo_cambio_id: id },
             data: {
                 is_deleted: true,

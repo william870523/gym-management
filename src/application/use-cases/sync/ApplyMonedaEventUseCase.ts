@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { Moneda } from "../../../domain/entities/Moneda";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { MonedaRepository } from "../../../domain/repositories/MonedaRepository";
@@ -10,6 +11,8 @@ export interface ApplyMonedaEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyMonedaEventUseCase {
@@ -18,15 +21,18 @@ export class ApplyMonedaEventUseCase {
     ) { }
 
     async execute(input: ApplyMonedaEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.monedaRepository.withTransaction(input.tx)
+            : this.monedaRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.monedaRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId);
             return;
         }
 
         const moneda = this.mapPayloadToMoneda(input);
-        await this.monedaRepository.upsertMoneda(moneda);
+        await repo.upsertMoneda(moneda);
     }
 
     private mapPayloadToMoneda(input: ApplyMonedaEventInput): Moneda {

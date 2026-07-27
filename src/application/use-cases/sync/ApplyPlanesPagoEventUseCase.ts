@@ -1,3 +1,4 @@
+import type { SyncTransactionContext } from "./sync-transaction";
 import type { PlanesPago } from "../../../domain/entities/PlanesPago";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { PlanesPagoRepository } from "../../../domain/repositories/PlanesPagoRepository";
@@ -9,6 +10,8 @@ export interface ApplyPlanesPagoEventInput {
     gymId: string;
     deviceId: string;
     payload: SyncEventPayload;
+    /** Contexto transaccional del upload (Unidad 01). */
+    tx?: SyncTransactionContext;
 }
 
 export class ApplyPlanesPagoEventUseCase {
@@ -17,15 +20,18 @@ export class ApplyPlanesPagoEventUseCase {
     ) { }
 
     async execute(input: ApplyPlanesPagoEventInput): Promise<void> {
+        const repo = input.tx
+            ? this.planesPagoRepository.withTransaction(input.tx)
+            : this.planesPagoRepository;
         const { operacion } = input;
 
         if (operacion === "DELETE") {
-            await this.planesPagoRepository.softDelete(input.entidadId);
+            await repo.softDelete(input.entidadId, input.gymId);
             return;
         }
 
         const planesPago = this.mapPayloadToPlanesPago(input);
-        await this.planesPagoRepository.upsertPlanesPago(planesPago);
+        await repo.upsertPlanesPago(planesPago);
     }
 
     private mapPayloadToPlanesPago(input: ApplyPlanesPagoEventInput): PlanesPago {
@@ -52,8 +58,20 @@ export class ApplyPlanesPagoEventUseCase {
             precio_viejo_excepcion: payload.precio_viejo_excepcion === null || payload.precio_viejo_excepcion === undefined
                 ? null
                 : Number(payload.precio_viejo_excepcion),
+            // Recargo por mora (docs/RECARGO_MORA.md). Importes como string
+            // decimal; sin modo el plan queda sin recargo.
+            recargo_mora_modo: payload.recargo_mora_modo == null
+                ? null
+                : String(payload.recargo_mora_modo),
+            recargo_mora_valor: payload.recargo_mora_valor == null
+                ? null
+                : String(payload.recargo_mora_valor),
+            recargo_mora_tope: payload.recargo_mora_tope == null
+                ? null
+                : String(payload.recargo_mora_tope),
+            recargo_mora_activo: Boolean(payload.recargo_mora_activo ?? false),
             gym_id: input.gymId,
-            source_device: (payload.source_device as string | null) ?? input.deviceId,
+            source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),
             updated_at: new Date(),

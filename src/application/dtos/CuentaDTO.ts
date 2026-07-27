@@ -5,8 +5,6 @@ export const CreateCuentaSchema = z.object({
     nombre_cuenta: z.string().min(1),
     moneda_id: z.string().uuid(),
     tipo_pago_id: z.string().optional().nullable(),
-    gym_id: z.string().optional().nullable(),
-    source_device: z.string().optional().nullable(),
     version: z.number().optional()
 });
 

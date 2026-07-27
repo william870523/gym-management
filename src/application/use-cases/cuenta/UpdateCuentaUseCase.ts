@@ -3,6 +3,7 @@ import type { UpdateCuentaDTO } from "../../dtos/CuentaDTO";
 import type { Cuenta } from "../../../domain/entities/Cuenta";
 import type { CuentaRepository } from "../../../domain/repositories/CuentaRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export class UpdateCuentaUseCase {
     constructor(
@@ -18,7 +19,7 @@ export class UpdateCuentaUseCase {
 
         const updateData: Partial<Cuenta> = {
             ...dto,
-            updated_at: new Date(),
+            updated_at: trustedClock.nowUtc(),
             version: (existing.version ?? 0) + 1
         };
 

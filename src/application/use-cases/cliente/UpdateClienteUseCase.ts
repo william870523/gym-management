@@ -11,8 +11,8 @@ export class UpdateClienteUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(id: string, dto: UpdateClienteDTO): Promise<void> {
-        const existing = await this.clienteRepository.findById(id);
+    async execute(id: string, dto: UpdateClienteDTO, gymId: string): Promise<void> {
+        const existing = await this.clienteRepository.findById(id, gymId);
         if (!existing) {
             throw new Error("Cliente not found");
         }
@@ -26,9 +26,9 @@ export class UpdateClienteUseCase {
             version: (existing.version ?? 0) + 1
         };
 
-        await this.clienteRepository.update(id, updateData);
+        await this.clienteRepository.update(id, gymId, updateData);
 
-        const updated = await this.clienteRepository.findById(id);
+        const updated = await this.clienteRepository.findById(id, gymId);
         if (updated) {
             const nationalityCode = await this.clienteRepository.findNationalityCode(
                 updated.nacionalidad_id,

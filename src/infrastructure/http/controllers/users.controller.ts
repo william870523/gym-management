@@ -9,6 +9,8 @@ import { GetUserUseCase } from "../../../application/use-cases/user/GetUserUseCa
 import {
     CreateUserSchema, UpdateUserSchema
 } from "../../../application/validation/users.schemas";
+import type { UserRepository } from "../../../domain/repositories/UserRepository";
+import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 
 export class UserController {
     private listUseCase: ListUsersUseCase;
@@ -17,10 +19,10 @@ export class UserController {
     private updateUseCase: UpdateUserUseCase;
     private deleteUseCase: DeleteUserUseCase;
 
-    constructor() {
-        const repository = new PrismaUserRepository();
-        const syncLogRepository = new PrismaSyncLogRepository();
-
+    constructor(
+        repository: UserRepository = new PrismaUserRepository(),
+        syncLogRepository: SyncLogRepository = new PrismaSyncLogRepository(),
+    ) {
         this.listUseCase = new ListUsersUseCase(repository);
         this.getUseCase = new GetUserUseCase(repository);
         this.createUseCase = new CreateUserUseCase(repository, syncLogRepository);
@@ -30,7 +32,9 @@ export class UserController {
 
     async getUsers(c: Context) {
         try {
-            const items = await this.listUseCase.execute();
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const items = await this.listUseCase.execute(gymId);
             // Exclude password from result
             const sanitized = items.map(({ password, ...rest }) => rest);
             return c.json(sanitized);
@@ -42,7 +46,9 @@ export class UserController {
     async getUserById(c: Context) {
         try {
             const id = c.req.param("id");
-            const item = await this.getUseCase.execute(id);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const item = await this.getUseCase.execute(id, gymId);
             if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
             const { password, ...sanitized } = item;
             return c.json(sanitized);
@@ -55,7 +61,9 @@ export class UserController {
         try {
             const body = await c.req.json().catch(() => null);
             const parsed = CreateUserSchema.parse(body);
-            const result = await this.createUseCase.execute(parsed);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.createUseCase.execute(parsed, gymId);
             const { password, ...sanitized } = result;
             return c.json(sanitized, 201);
         } catch (error: any) {
@@ -74,7 +82,9 @@ export class UserController {
             const id = c.req.param("id");
             const body = await c.req.json().catch(() => null);
             const parsed = UpdateUserSchema.parse(body);
-            const result = await this.updateUseCase.execute(id, parsed);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.updateUseCase.execute(id, parsed, gymId);
             const { password, ...sanitized } = result;
             return c.json(sanitized);
         } catch (error: any) {
@@ -91,7 +101,9 @@ export class UserController {
     async deleteUser(c: Context) {
         try {
             const id = c.req.param("id");
-            await this.deleteUseCase.execute(id);
+            const gymId = this.gymId(c);
+            if (!gymId) return c.json({ error: "Gym scope required" }, 403);
+            await this.deleteUseCase.execute(id, gymId);
             return c.json({ ok: true });
         } catch (error: any) {
             if (error.message === "User not found") {
@@ -99,6 +111,11 @@ export class UserController {
             }
             return c.json({ error: "Internal Server Error" }, 500);
         }
+    }
+
+    private gymId(c: Context): string | null {
+        const auth = c.get("auth");
+        return auth?.gymId?.trim() || null;
     }
 }
 

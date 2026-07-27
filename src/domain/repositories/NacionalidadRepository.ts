@@ -1,6 +1,7 @@
+import type { SyncTransactionalRepository } from "../../application/use-cases/sync/sync-transaction";
 import type { Nacionalidad } from "../entities/Nacionalidad";
 
-export interface NacionalidadRepository {
+export interface NacionalidadRepository extends SyncTransactionalRepository<NacionalidadRepository> {
     upsertNacionalidad(data: Nacionalidad): Promise<void>;
     findAll(): Promise<Nacionalidad[]>;
     findById(id: string): Promise<Nacionalidad | null>;

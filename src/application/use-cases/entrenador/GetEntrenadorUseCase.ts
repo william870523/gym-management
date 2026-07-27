@@ -4,7 +4,7 @@ import type { EntrenadorRepository } from "../../../domain/repositories/Entrenad
 export class GetEntrenadorUseCase {
     constructor(private readonly entrenadorRepository: EntrenadorRepository) { }
 
-    async execute(id: string): Promise<Entrenador | null> {
-        return this.entrenadorRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<Entrenador | null> {
+        return this.entrenadorRepository.findById(id, gymId);
     }
 }

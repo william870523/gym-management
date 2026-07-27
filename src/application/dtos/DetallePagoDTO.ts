@@ -7,7 +7,6 @@ export const CreateDetallePagoSchema = z.object({
     cuenta_id: z.string().uuid().optional().nullable(),
     cantidad: z.number().nonnegative(),
     tipo_cambio_id: z.string().uuid().optional().nullable(),
-    gym_id: z.string().optional().nullable(),
 });
 
 export type CreateDetallePagoDTO = z.infer<typeof CreateDetallePagoSchema>;
@@ -19,7 +18,6 @@ export const UpdateDetallePagoSchema = z.object({
     cuenta_id: z.string().uuid().optional().nullable(),
     cantidad: z.number().nonnegative().optional(),
     tipo_cambio_id: z.string().uuid().optional().nullable(),
-    gym_id: z.string().optional().nullable(),
 });
 
 export type UpdateDetallePagoDTO = z.infer<typeof UpdateDetallePagoSchema>;

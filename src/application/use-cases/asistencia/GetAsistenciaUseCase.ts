@@ -4,7 +4,7 @@ import type { AsistenciaRepository } from "../../../domain/repositories/Asistenc
 export class GetAsistenciaUseCase {
     constructor(private readonly asistenciaRepository: AsistenciaRepository) { }
 
-    async execute(id: string): Promise<Asistencia | null> {
-        return this.asistenciaRepository.findById(id);
+    async execute(id: string, gymId: string): Promise<Asistencia | null> {
+        return this.asistenciaRepository.findById(id, gymId);
     }
 }

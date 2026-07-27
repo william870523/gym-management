@@ -10,9 +10,19 @@ export interface SyncLogRecord {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Contexto transaccional opcional (Unidad 01). Cuando llega, la comprobación de
+ * idempotencia y el registro del evento ocurren dentro de la misma transacción
+ * que aplicó la entidad.
+ */
+export type SyncLogTransactionContext = Record<string, any>;
+
 export interface SyncLogRepository {
-  exists(eventId: string): Promise<boolean>;
-  register(record: SyncLogRecord): Promise<void>;
+  exists(eventId: string, tx?: SyncLogTransactionContext): Promise<boolean>;
+  register(
+    record: SyncLogRecord,
+    tx?: SyncLogTransactionContext,
+  ): Promise<void>;
   findChanges(
     cursor: { afterId?: number; since?: Date },
     untilId: number,

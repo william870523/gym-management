@@ -17,9 +17,15 @@ import {
  */
 
 export type GovernedExpenseApplicationSnapshot = {
+  applicationId?: string;
+  expenseId?: string;
+  movementId?: string;
   amount: string;
   state: "APLICADA" | "REVERSADA";
+  /** Día comercial del movimiento de Tesorería, ya resuelto con Gym.timezone. */
   paidAt: Date;
+  /** Instante UTC en que se registró la aplicación. */
+  appliedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -143,7 +149,6 @@ export function buildGovernedExpenseReport(input: {
       );
       const { paidInMonth, paidAdvance, paidLate, paidToCutoff } = classifyPayments(
         paidApplications,
-        row.paidAt,
         period,
         cutoffExclusive,
       );
@@ -255,14 +260,21 @@ function presentCurrency(currency: CurrencyProjection) {
       fecha_pago: expense.row.paidAt?.toISOString() ?? null,
       estado: expense.row.state,
       importe: treasuryMinorToMoney(expense.amount),
-      pagado_acumulado: treasuryMinorToMoney(
-        sumApplied(effectiveApplications(expense.row.applications, true, new Date(0))),
-      ),
+      pagado_acumulado: treasuryMinorToMoney(expense.paidToCutoff),
       pagado_mes: treasuryMinorToMoney(expense.paidInMonth),
       pendiente_pago: treasuryMinorToMoney(expense.pendingPayment),
       comprobante_referencia: expense.row.receiptReference,
       requiere_revision: expense.requiresReview,
       explicacion: expense.explanation,
+      aplicaciones: expense.row.applications.map((application) => ({
+        aplicacion_id: application.applicationId ?? "",
+        gasto_id: application.expenseId ?? expense.row.expenseId,
+        movimiento_id: application.movementId ?? null,
+        monto_aplicado: application.amount,
+        estado: application.state,
+        fecha_negocio: application.paidAt.toISOString(),
+        aplicada_at: (application.appliedAt ?? application.createdAt).toISOString(),
+      })),
     })),
   };
 }
@@ -304,7 +316,6 @@ function effectiveApplications(
 
 function classifyPayments(
   applications: GovernedExpenseApplicationSnapshot[],
-  paidAt: Date | null,
   period: { start: Date; endExclusive: Date; month: string },
   cutoffExclusive: Date,
 ) {
@@ -315,8 +326,7 @@ function classifyPayments(
   for (const app of applications) {
     const amount = money(app.amount, "monto aplicado");
     paidToCutoff += amount;
-    const refDate = paidAt ?? app.paidAt;
-    const day = calendarDate(refDate, "La fecha del pago aplicado");
+    const day = calendarDate(app.paidAt, "La fecha del pago aplicado");
     if (day.getTime() < period.start.getTime()) {
       paidAdvance += amount;
     } else if (day.getTime() >= period.endExclusive.getTime()) {

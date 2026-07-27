@@ -6,10 +6,10 @@ import {
     CreateTipoPagoSchema, UpdateTipoPagoSchema,
     CreateTipoCambioSchema, UpdateTipoCambioSchema,
     CreateReferenciaSchema, UpdateReferenciaSchema,
-    CreateHorarioSchema, UpdateHorarioSchema,
-    CreatePlanesPagoSchema, UpdatePlanesPagoSchema,
-    CreateCuentaSchema, UpdateCuentaSchema
 } from "../../../application/validation/catalogs.schemas";
+import { PlanesPagoController } from "./PlanesPagoController";
+import { HorarioController } from "./HorarioController";
+import { CuentaController } from "./CuentaController";
 
 // Helper for standard CRUD responses
 const handleCrud = async (c: Context, model: any, schema: any, updateSchema: any, idField: string) => {
@@ -289,163 +289,25 @@ export const deleteReferencia = async (c: Context) => {
 };
 
 // --- Horario ---
-export const getHorarios = async (c: Context) => {
-    const items = await prisma.horario.findMany({ where: { is_deleted: false } });
-    return c.json(items);
-};
-
-export const getHorarioById = async (c: Context) => {
-    const id = c.req.param("id");
-    const item = await prisma.horario.findUnique({ where: { horario_id: id } });
-    if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
-    return c.json(item);
-};
-
-export const createHorario = async (c: Context) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreateHorarioSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const newItem = await prisma.horario.create({
-        data: { ...parsed.data, horario_id: crypto.randomUUID() }
-    });
-    return c.json(newItem, 201);
-};
-
-export const updateHorario = async (c: Context) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => null);
-    const parsed = UpdateHorarioSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    try {
-        const updated = await prisma.horario.update({
-            where: { horario_id: id },
-            data: parsed.data
-        });
-        return c.json(updated);
-    } catch (e) {
-        return c.json({ error: "Update failed or not found" }, 404);
-    }
-};
-
-export const deleteHorario = async (c: Context) => {
-    const id = c.req.param("id");
-    try {
-        await prisma.horario.update({
-            where: { horario_id: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
-        return c.json({ ok: true });
-    } catch (e) {
-        return c.json({ error: "Delete failed or not found" }, 404);
-    }
-};
+const horarioController = new HorarioController();
+export const getHorarios = (c: Context) => horarioController.list(c);
+export const getHorarioById = (c: Context) => horarioController.getById(c);
+export const createHorario = (c: Context) => horarioController.create(c);
+export const updateHorario = (c: Context) => horarioController.update(c);
+export const deleteHorario = (c: Context) => horarioController.delete(c);
 
 // --- PlanesPago ---
-export const getPlanesPago = async (c: Context) => {
-    const items = await prisma.planesPago.findMany({ where: { is_deleted: false } });
-    return c.json(items);
-};
-
-export const getPlanPagoById = async (c: Context) => {
-    const id = c.req.param("id");
-    const item = await prisma.planesPago.findUnique({ where: { id_planes_pago: id } });
-    if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
-    return c.json(item);
-};
-
-export const createPlanPago = async (c: Context) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreatePlanesPagoSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const newItem = await prisma.planesPago.create({
-        data: { ...parsed.data, id_planes_pago: crypto.randomUUID() }
-    });
-    return c.json(newItem, 201);
-};
-
-export const updatePlanPago = async (c: Context) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => null);
-    const parsed = UpdatePlanesPagoSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    try {
-        const updated = await prisma.planesPago.update({
-            where: { id_planes_pago: id },
-            data: parsed.data
-        });
-        return c.json(updated);
-    } catch (e) {
-        return c.json({ error: "Update failed or not found" }, 404);
-    }
-};
-
-export const deletePlanPago = async (c: Context) => {
-    const id = c.req.param("id");
-    try {
-        await prisma.planesPago.update({
-            where: { id_planes_pago: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
-        return c.json({ ok: true });
-    } catch (e) {
-        return c.json({ error: "Delete failed or not found" }, 404);
-    }
-};
+const planesPagoController = new PlanesPagoController();
+export const getPlanesPago = (c: Context) => planesPagoController.list(c);
+export const getPlanPagoById = (c: Context) => planesPagoController.getById(c);
+export const createPlanPago = (c: Context) => planesPagoController.create(c);
+export const updatePlanPago = (c: Context) => planesPagoController.update(c);
+export const deletePlanPago = (c: Context) => planesPagoController.delete(c);
 
 // --- Cuenta ---
-export const getCuentas = async (c: Context) => {
-    const items = await prisma.cuenta.findMany({ where: { is_deleted: false } });
-    return c.json(items);
-};
-
-export const getCuentaById = async (c: Context) => {
-    const id = c.req.param("id");
-    const item = await prisma.cuenta.findUnique({ where: { cuenta_id: id } });
-    if (!item || item.is_deleted) return c.json({ error: "Not found" }, 404);
-    return c.json(item);
-};
-
-export const createCuenta = async (c: Context) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = CreateCuentaSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    const newItem = await prisma.cuenta.create({
-        data: { ...parsed.data, cuenta_id: crypto.randomUUID() }
-    });
-    return c.json(newItem, 201);
-};
-
-export const updateCuenta = async (c: Context) => {
-    const id = c.req.param("id");
-    const body = await c.req.json().catch(() => null);
-    const parsed = UpdateCuentaSchema.safeParse(body);
-    if (!parsed.success) return c.json({ error: "Invalid data", details: parsed.error.format() }, 400);
-
-    try {
-        const updated = await prisma.cuenta.update({
-            where: { cuenta_id: id },
-            data: parsed.data
-        });
-        return c.json(updated);
-    } catch (e) {
-        return c.json({ error: "Update failed or not found" }, 404);
-    }
-};
-
-export const deleteCuenta = async (c: Context) => {
-    const id = c.req.param("id");
-    try {
-        await prisma.cuenta.update({
-            where: { cuenta_id: id },
-            data: { is_deleted: true, deleted_at: new Date() }
-        });
-        return c.json({ ok: true });
-    } catch (e) {
-        return c.json({ error: "Delete failed or not found" }, 404);
-    }
-};
+const cuentaController = new CuentaController();
+export const getCuentas = (c: Context) => cuentaController.list(c);
+export const getCuentaById = (c: Context) => cuentaController.getById(c);
+export const createCuenta = (c: Context) => cuentaController.create(c);
+export const updateCuenta = (c: Context) => cuentaController.update(c);
+export const deleteCuenta = (c: Context) => cuentaController.delete(c);

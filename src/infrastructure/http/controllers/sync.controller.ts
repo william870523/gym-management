@@ -55,7 +55,15 @@ export async function uploadEventsController(c: Context) {
 
   try {
     const result = await syncService.uploadEvents(parsed.data);
-    return c.json({ ok: true, processed: result.processed });
+    // Unidad 01: el cliente local solo puede marcar como enviados los IDs que
+    // aquí se nombran. `processed` viaja como dato derivado, no como autoridad.
+    return c.json({
+      ok: true,
+      accepted_event_ids: result.accepted_event_ids,
+      duplicate_event_ids: result.duplicate_event_ids,
+      failed_event_id: result.failed_event_id,
+      processed: result.processed,
+    });
   } catch (err) {
     console.error("Error in uploadEventsController", err);
     logger.error("Error in uploadEventsController", { err });
@@ -67,7 +75,17 @@ export async function uploadEventsController(c: Context) {
         (err.meta?.target as string[]).includes("sync_log_event_id_key")) ||
         err.meta?.target === "sync_log_event_id_key")
     ) {
-      return c.json({ ok: true, processed: 0, warning: "duplicate event_id, ignored" }, 200);
+      return c.json(
+        {
+          ok: true,
+          accepted_event_ids: [],
+          duplicate_event_ids: [],
+          failed_event_id: null,
+          processed: 0,
+          warning: "duplicate event_id, ignored",
+        },
+        200,
+      );
     }
 
     return c.json(

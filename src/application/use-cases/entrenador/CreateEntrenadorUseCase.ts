@@ -3,6 +3,7 @@ import type { CreateEntrenadorDTO } from "../../dtos/EntrenadorDTO";
 import type { Entrenador } from "../../../domain/entities/Entrenador";
 import type { EntrenadorRepository } from "../../../domain/repositories/EntrenadorRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import { trustedClock } from "../../../config/trusted-clock";
 
 export class CreateEntrenadorUseCase {
     constructor(
@@ -10,10 +11,12 @@ export class CreateEntrenadorUseCase {
         private readonly syncLogRepository: SyncLogRepository
     ) { }
 
-    async execute(dto: CreateEntrenadorDTO): Promise<Entrenador> {
+    async execute(dto: CreateEntrenadorDTO, gymId: string): Promise<Entrenador> {
+        const now = trustedClock.nowUtc();
         const newEntrenador: Entrenador = {
             id_entrenador: randomUUID(),
             ci_entrenador: dto.ci_entrenador,
+            tipo_documento: dto.tipo_documento,
             nombres_entrenador: dto.nombres_entrenador,
             apellidos_entrenador: dto.apellidos_entrenador,
             sexo_entrenador: dto.sexo_entrenador,
@@ -23,11 +26,11 @@ export class CreateEntrenadorUseCase {
             correo_entrenador: dto.correo_entrenador ?? null,
             activo_entrenador: dto.activo_entrenador,
             fecha_incio_entrenador: new Date(dto.fecha_incio_entrenador),
-            gym_id: dto.gym_id ?? null,
+            gym_id: gymId,
             source_device: null,
             version: 1,
-            created_at: new Date(),
-            updated_at: new Date(),
+            created_at: now,
+            updated_at: now,
             deleted_at: null,
             is_deleted: false
         };

@@ -1,13 +1,14 @@
+import type { SyncTransactionalRepository } from "../../application/use-cases/sync/sync-transaction";
 import type { Asistencia } from "../entities/Asistencia";
 
-export interface AsistenciaRepository {
+export interface AsistenciaRepository extends SyncTransactionalRepository<AsistenciaRepository> {
     upsertAsistencia(data: Asistencia): Promise<void>;
-    findAll(skip?: number, take?: number): Promise<Asistencia[]>;
-    findActive(skip?: number, take?: number): Promise<Asistencia[]>;
-    findToday(gymId?: string | null): Promise<Asistencia[]>;
-    findById(id: string): Promise<Asistencia | null>;
+    findAll(gymId: string, skip?: number, take?: number, ci?: string): Promise<Asistencia[]>;
+    findActive(gymId: string, skip?: number, take?: number): Promise<Asistencia[]>;
+    findToday(gymId: string): Promise<Asistencia[]>;
+    findById(id: string, gymId: string): Promise<Asistencia | null>;
     create(data: Asistencia): Promise<void>;
-    update(id: string, data: Partial<Asistencia>): Promise<void>;
-    finalize(id: string, fechaSalida: Date): Promise<Asistencia>;
-    softDelete(id: string): Promise<void>;
+    update(id: string, gymId: string, data: Partial<Asistencia>): Promise<void>;
+    finalize(id: string, gymId: string, fechaSalida: Date): Promise<Asistencia>;
+    softDelete(id: string, gymId: string): Promise<void>;
 }

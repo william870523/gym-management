@@ -22,6 +22,13 @@ describe("superficie pública de autenticación", () => {
     });
   });
 
+  it("no entrega la sesión resuelta sin token", async () => {
+    // `GET /auth/session` dice en qué sede se está y si la cuenta es Dueño de
+    // la cadena: sin sesión no hay nada que resolver (docs/MULTI_SEDE.md §3).
+    const response = await authRoutes().request("/session");
+    expect(response.status).toBe(401);
+  });
+
   it("un token válido sin role admin no satisface la política de /users", () => {
     const token = JwtService.signAdminToken({
       userId: "user-1",

@@ -46,6 +46,8 @@
     "verify:payment-collector-sync": "bun --preload ./src/config/tz-preload.ts scripts/verify-payment-collector-sync.ts",
     "audit:orphan-sync-log": "bun --preload ./src/config/tz-preload.ts scripts/audit-orphan-sync-log.ts",
     "demo:payment-collector": "bun --preload ./src/config/tz-preload.ts scripts/demo-payment-collector.ts",
+    "demo:multi-sede": "bun --preload ./src/config/tz-preload.ts scripts/demo-multi-sede.ts",
+    "verify:multi-sede": "bun --preload ./src/config/tz-preload.ts scripts/verify-multi-sede.ts",
     "demo:plan-installments": "bun --preload ./src/config/tz-preload.ts scripts/demo-plan-installments.ts",
     "migrate:plan-installments": "bun --preload ./src/config/tz-preload.ts scripts/migrate-plan-installments.ts",
     "migrate:r5-3-client-plan-attrs": "bun --preload ./src/config/tz-preload.ts scripts/migrate-r5-3-client-plan-attrs.ts",

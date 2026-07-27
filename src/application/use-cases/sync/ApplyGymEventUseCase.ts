@@ -26,10 +26,47 @@ export class ApplyGymEventUseCase {
             : this.gymRepository;
         const { operacion } = input;
 
-        if (!input.gymId || input.entidadId !== input.gymId) {
+        if (!input.gymId) {
             throw new Error(
                 `No se puede sincronizar el gimnasio ${input.entidadId}: ` +
-                "el JWT pertenece a otro gimnasio."
+                "el JWT no declara gimnasio."
+            );
+        }
+
+        // Una instalación manda eventos de sede en dos casos legítimos, y solo
+        // dos (docs/MULTI_SEDE.md §3):
+        //
+        //  1. mantiene **su propia** sede: nombre, dirección, zona horaria;
+        //  2. el **Dueño de la cadena** da de alta una sede NUEVA desde el
+        //     escritorio (decisión del dueño del 26-07-2026: se hace desde los
+        //     dos destinos).
+        //
+        // El segundo caso es el que faltaba: hasta el 27-07 se exigía
+        // `entidadId === gymId` y una sede nueva, por definición, tiene otro
+        // identificador. El alta se creaba en local y el remoto la rechazaba.
+        //
+        // Lo que **sigue prohibido** es tocar una sede ajena que ya existe: eso
+        // permitiría a un dispositivo renombrar o dar de baja el gimnasio de
+        // otra sede de la cadena. Crear una que no existe es aditivo y no puede
+        // pisar datos de nadie.
+        const esPropia = input.entidadId === input.gymId;
+
+        // La baja de una sede ajena se comprueba antes que nada para que el
+        // motivo del rechazo sea el suyo y no el genérico: exige demostrar la
+        // autoridad de Dueño, y este canal autentica al DISPOSITIVO, no a la
+        // persona. Se hace desde la web, donde el token sí prueba quién la
+        // pide, y llega al escritorio por descarga.
+        if (operacion === "DELETE" && !esPropia) {
+            throw new Error(
+                `No se puede dar de baja el gimnasio ${input.entidadId} por sincronización: ` +
+                "la baja de una sede ajena se hace desde la web."
+            );
+        }
+
+        if (!esPropia && await repo.exists(input.entidadId)) {
+            throw new Error(
+                `No se puede sincronizar el gimnasio ${input.entidadId}: ` +
+                "una instalación solo modifica su propia sede."
             );
         }
 

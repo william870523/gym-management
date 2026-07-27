@@ -153,8 +153,13 @@ describe("identidad autoritativa en handlers dedicados", () => {
   });
 
   it("impide que un dispositivo modifique otro gimnasio", async () => {
+    // Desde multi-sede M1 un dispositivo SÍ puede dar de alta una sede que no
+    // existe —es el Dueño creando una sede desde el escritorio—, pero sigue sin
+    // poder tocar una sede ajena que ya existe, que es lo que esta prueba
+    // protege. El caso permitido vive en `apply-gym-event.test.ts`.
     let touched = false;
     const useCase = new ApplyGymEventUseCase({
+      exists: async () => true,
       upsertGym: async () => {
         touched = true;
       },
@@ -166,7 +171,28 @@ describe("identidad autoritativa en handlers dedicados", () => {
       ...authenticatedInput,
       entidadId: "gym-atacante",
       operacion: "UPDATE",
-    } as any)).rejects.toThrow("otro gimnasio");
+    } as any)).rejects.toThrow("solo modifica su propia sede");
+    expect(touched).toBe(false);
+  });
+
+  it("impide que un dispositivo dé de baja el gimnasio de otra sede", async () => {
+    // La baja ajena exige autoridad de Dueño y este canal autentica al
+    // dispositivo, no a la persona: se hace desde la web.
+    let touched = false;
+    const useCase = new ApplyGymEventUseCase({
+      exists: async () => true,
+      upsertGym: async () => {
+        touched = true;
+      },
+      softDelete: async () => {
+        touched = true;
+      },
+    } as any);
+    await expect(useCase.execute({
+      ...authenticatedInput,
+      entidadId: "gym-atacante",
+      operacion: "DELETE",
+    } as any)).rejects.toThrow("se hace desde la web");
     expect(touched).toBe(false);
   });
 });

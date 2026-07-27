@@ -11,6 +11,15 @@ export class PrismaGymRepository {
     return new PrismaGymRepository(tx);
   }
 
+    /** `true` si la sede ya existe, aunque esté dada de baja. */
+    async exists(gymId: string): Promise<boolean> {
+        const fila = await this.client.gym.findUnique({
+            where: { gym_id: gymId },
+            select: { gym_id: true },
+        });
+        return fila !== null;
+    }
+
     async upsertGym(gym: Gym): Promise<void> {
         await this.client.gym.upsert({
             where: { gym_id: gym.gym_id },

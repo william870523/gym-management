@@ -3,10 +3,12 @@
  * (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
  *
  * El problema que resuelve: `membresia_cliente.estado` admite `VENCIDA`, pero
- * **nadie lo escribe nunca**. El estado se pone `ACTIVA` al activar y ahí se
- * queda; una membresía cuya cobertura terminó hace una semana sigue diciendo
- * `ACTIVA`. Eso convierte «vigente» en una palabra que cada consumidor
- * interpretaba por su cuenta.
+ * **ningún camino de la aplicación lo escribe**. El estado se pone `ACTIVA` al
+ * activar y ahí se queda; una membresía cuya cobertura terminó hace una semana
+ * sigue diciendo `ACTIVA`. (Sí hay filas con `VENCIDA`: las dejó
+ * `migrate-memberships-phase1.ts` al reconstruir el historial. Una sola vez, y
+ * congeladas desde entonces.) Eso convierte «vigente» en una palabra que cada
+ * consumidor interpretaba por su cuenta.
  *
  * **Se deriva, no se persiste, y es a propósito.** El estado guardado registra
  * *actos* —se activó, se pausó, se canceló—; la cobertura es una *función de
@@ -63,7 +65,17 @@ function calendarDay(value: Date): Date {
 export interface MembershipVigenciaInput {
   /** Estado persistido: el acto, no la cobertura. */
   estado: string | null | undefined;
-  /** Fin de cobertura. Inclusivo: el último día cubierto todavía cubre. */
+  /**
+   * Fin de cobertura, **EXCLUSIVO**: es el primer día que ya NO cubre.
+   *
+   * No es una elección de este módulo, es la del sistema:
+   * `resolveServicePeriod` devuelve `endExclusive` y eso es lo que se guarda en
+   * `membresia_cliente.fecha_fin`, y el servidor decide si hay membresía activa
+   * con `fecha_fin > fechaNegocio` —estrictamente mayor—.
+   *
+   * Un plan Diario contratado el 27 guarda `fecha_fin = 28`: cubre el 27 y nada
+   * más. Tratarlo como inclusivo regala un día de gimnasio por membresía.
+   */
   fechaFin: Date | string | null | undefined;
   /** Fecha de negocio del gimnasio, no la del dispositivo. */
   fechaNegocio: Date;
@@ -72,8 +84,8 @@ export interface MembershipVigenciaInput {
 export interface MembershipVigenciaResult {
   vigencia: MembershipVigencia;
   /**
-   * Días desde que terminó la cobertura. Negativo si aún cubre —y entonces es
-   * «cuántos días quedan», que es lo que necesita un aviso de «por vencer»—.
+   * Días desde que dejó de cubrir. `0` es «venció hoy»; negativo es «cuántos
+   * días de cobertura quedan», que es lo que necesita un aviso de «por vencer».
    * `null` cuando la fecha no aplica o no se conoce.
    */
   diasDesdeVencimiento: number | null;
@@ -125,8 +137,9 @@ export function resolveMembershipVigencia(
   const hoy = calendarDay(input.fechaNegocio);
   const dias = Math.round((hoy.getTime() - calendarDay(fin).getTime()) / DAY_MS);
 
-  // El último día de cobertura todavía cubre: `dias <= 0`.
-  if (dias <= 0) {
+  // `fecha_fin` es exclusiva, así que cubre mientras hoy sea ANTERIOR a ella:
+  // `dias < 0`. Con `dias === 0` la cobertura terminó justo hoy.
+  if (dias < 0) {
     return { vigencia: "VIGENTE", diasDesdeVencimiento: dias, cubreHoy: true };
   }
   return {

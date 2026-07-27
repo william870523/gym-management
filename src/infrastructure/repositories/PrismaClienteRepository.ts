@@ -22,7 +22,7 @@ const proyectarVigencia = (
   fechaNegocio: Date,
 ) => {
   // `estado` dice qué acto ocurrió; la vigencia se deriva de la cobertura.
-  // Nadie escribe nunca VENCIDA, así que una ACTIVA con la fecha pasada
+  // Ningún camino de la aplicación escribe VENCIDA, así que una ACTIVA
   // seguiría diciendo que cubre (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
   const resultado = resolveMembershipVigencia({
     estado: membership?.estado,

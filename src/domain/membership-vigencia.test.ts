@@ -13,13 +13,23 @@ const vigencia = (estado: string | null, fechaFin: Date | null) =>
   resolveMembershipVigencia({ estado, fechaFin, fechaNegocio: HOY });
 
 describe("vigencia derivada de una membresía", () => {
-  it("el último día de cobertura todavía cubre", () => {
-    // Si `fecha_fin` es hoy, el socio pagó por hoy: echarlo sería cobrarle un
-    // día menos del que contrató.
+  it("`fecha_fin` es EXCLUSIVA: el día que marca ya no cubre", () => {
+    // No es una elección de este módulo: `resolveServicePeriod` devuelve
+    // `endExclusive` y eso es lo que se guarda, y el servidor decide si hay
+    // membresía activa con `fecha_fin > hoy`, estrictamente mayor. Un plan
+    // Diario contratado el 27 guarda fin = 28 y cubre solo el 27.
     expect(vigencia("ACTIVA", HOY)).toMatchObject({
+      vigencia: "VENCIDA_RECIENTE",
+      cubreHoy: false,
+      diasDesdeVencimiento: 0,
+    });
+  });
+
+  it("el día anterior al fin sí cubre, y avisa que queda un día", () => {
+    expect(vigencia("ACTIVA", dia(1))).toMatchObject({
       vigencia: "VIGENTE",
       cubreHoy: true,
-      diasDesdeVencimiento: 0,
+      diasDesdeVencimiento: -1,
     });
   });
 
@@ -29,6 +39,10 @@ describe("vigencia derivada de una membresía", () => {
     expect(resultado.vigencia).toBe("VENCIDA_RECIENTE");
     expect(resultado.cubreHoy).toBe(false);
     expect(resultado.diasDesdeVencimiento).toBe(8);
+  });
+
+  it("no regala un día: el borde de la cortesía se mide desde el fin exclusivo", () => {
+    expect(vigencia("ACTIVA", dia(-1)).diasDesdeVencimiento).toBe(1);
   });
 
   it("distingue la ventana de cortesía de la caducidad definitiva", () => {
@@ -41,6 +55,7 @@ describe("vigencia derivada de una membresía", () => {
   it("informa los días que faltan como número negativo", () => {
     // Sirve para el aviso de «por vencer» sin repetir la resta en cada vista.
     expect(vigencia("ACTIVA", dia(3)).diasDesdeVencimiento).toBe(-3);
+    expect(vigencia("ACTIVA", dia(3)).cubreHoy).toBe(true);
   });
 
   it("la baja manda sobre la fecha", () => {

@@ -136,6 +136,29 @@ export function resolveMembershipVigencia(
   };
 }
 
+/**
+ * ¿Esta membresía cuenta como **socio vivo** del gimnasio?
+ *
+ * Es el mismo conjunto que la regla de asociados de un plan
+ * (docs/PLAN_ASOCIADOS.md §5, decisión del dueño del 25-07-2026): cuentan quien
+ * está vigente, quien venció hace poco, quien está en pausa y quien contrató y
+ * aún no pagó. `CANCELADA` no: quien se dio de baja dejó de ser socio.
+ *
+ * Vive aquí y no repetida en cada consumidor porque decide cosas distintas que
+ * tienen que coincidir: cuántos asociados tiene un plan, y **si se puede cerrar
+ * una sede sin dejar a nadie tirado** (docs/BAJA_DE_SEDE.md §6). Si dos sitios
+ * respondieran distinto, el contador diría que no hay nadie y la baja diría que
+ * sí.
+ */
+export function esMembresiaViva(vigencia: MembershipVigencia): boolean {
+  return (
+    vigencia === "VIGENTE" ||
+    vigencia === "VENCIDA_RECIENTE" ||
+    vigencia === "PAUSADA" ||
+    vigencia === "PENDIENTE_PAGO"
+  );
+}
+
 /** Fecha de negocio del gimnasio a partir de las partes de su zona horaria. */
 export function fechaNegocioDesdePartes(parts: {
   year: number;

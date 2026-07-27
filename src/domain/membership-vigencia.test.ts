@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   DIAS_VENCIMIENTO_RECIENTE,
+  esMembresiaViva,
   resolveMembershipVigencia,
 } from "./membership-vigencia";
 
@@ -102,5 +103,24 @@ describe("vigencia derivada de una membresía", () => {
     });
     expect(resultado.vigencia).toBe("VENCIDA_RECIENTE");
     expect(resultado.diasDesdeVencimiento).toBe(8);
+  });
+});
+
+describe("quien cuenta como socio vivo del gimnasio", () => {
+  it("cuenta a quien está vigente, venció hace poco, está en pausa o debe", () => {
+    // Mismo conjunto que los asociados de un plan: si no coincidieran, el
+    // contador de un plan y la baja de una sede se contradirían.
+    expect(esMembresiaViva("VIGENTE")).toBe(true);
+    expect(esMembresiaViva("VENCIDA_RECIENTE")).toBe(true);
+    expect(esMembresiaViva("PAUSADA")).toBe(true);
+    expect(esMembresiaViva("PENDIENTE_PAGO")).toBe(true);
+  });
+
+  it("no cuenta a quien caducó hace tiempo, se dio de baja o no tiene", () => {
+    // Una sede cuyos socios vencieron hace medio año no deja a nadie tirado al
+    // cerrarse, y bloquear su baja sería un estorbo sin motivo.
+    expect(esMembresiaViva("VENCIDA")).toBe(false);
+    expect(esMembresiaViva("CANCELADA")).toBe(false);
+    expect(esMembresiaViva("SIN_MEMBRESIA")).toBe(false);
   });
 });

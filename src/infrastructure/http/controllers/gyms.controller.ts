@@ -2,7 +2,12 @@
 import type { Context } from "hono";
 import { prisma } from "../../db/prismaClient";
 import { v4 as uuidv4 } from 'uuid';
-import { isValidTimeZone } from "../../../config/tz";
+import { datePartsInZone, isValidTimeZone, nowUtc } from "../../../config/tz";
+import {
+    esMembresiaViva,
+    fechaNegocioDesdePartes,
+    resolveMembershipVigencia,
+} from "../../../domain/membership-vigencia";
 import { trustedClock } from "../../../config/trusted-clock";
 import { getUserGymActor } from "../middleware/auth.middleware";
 import { listSedesPermitidas } from "../../../application/auth/gym-context";
@@ -134,6 +139,48 @@ export const createGym = async (c: Context) => {
     }
 };
 
+/**
+ * Socios que se quedarían incomunicados si se cierra esta sede
+ * (docs/BAJA_DE_SEDE.md §2).
+ *
+ * Cerrar una sede la marca inactiva y nada más: sus socios siguen apuntando a
+ * ella, y como el contexto de sede exige `gym.activo`, **ni el Dueño puede
+ * volver a entrar a mirarlos**. Hasta que exista el expediente de baja con sus
+ * decisiones por socio, la baja se rechaza si queda alguien dentro.
+ *
+ * «Dentro» se mide con la **vigencia derivada**, no con el estado guardado: una
+ * sede cuyos socios vencieron hace medio año no tiene a nadie a quien dejar
+ * tirado, y bloquearla sería un estorbo sin motivo.
+ *
+ * Gemela de la de `gym-local-api`.
+ */
+const sociosVivos = async (gymId: string) => {
+    const [sede, membresias] = await Promise.all([
+        prisma.gym.findUnique({ where: { gym_id: gymId }, select: { timezone: true } }),
+        prisma.membresiaCliente.findMany({
+            where: {
+                gym_id: gymId,
+                is_deleted: false,
+                estado: { in: ["ACTIVA", "PENDIENTE_PAGO", "PAUSADA"] },
+            },
+            select: { ci: true, estado: true, fecha_fin: true },
+        }),
+    ]);
+    const hoy = fechaNegocioDesdePartes(
+        datePartsInZone(sede?.timezone?.trim() || "Etc/UTC", nowUtc()),
+    );
+    const socios = new Set<string>();
+    for (const membresia of membresias) {
+        const { vigencia } = resolveMembershipVigencia({
+            estado: membresia.estado,
+            fechaFin: membresia.fecha_fin,
+            fechaNegocio: hoy,
+        });
+        if (esMembresiaViva(vigencia)) socios.add(membresia.ci);
+    }
+    return socios.size;
+};
+
 const puedeVerSede = async (c: Context, userId: string, gymId: string) => {
     if (esDuenoDeCadena(c)) return true;
     const permitidas = await listSedesPermitidas(userId);
@@ -229,6 +276,17 @@ export const deleteGym = async (c: Context) => {
         return c.json({
             error: "No se puede dar de baja la sede en la que estás trabajando",
             error_code: "ACTIVE_GYM_CANNOT_BE_DELETED",
+        }, 409);
+    }
+
+    const socios = await sociosVivos(id);
+    if (socios > 0) {
+        return c.json({
+            error: `Esta sede todavía tiene ${socios} socio(s) con membresía viva. ` +
+                "Resuelve a dónde van antes de cerrarla: al cerrarla dejarían de " +
+                "ser alcanzables, incluso para el dueño de la cadena.",
+            error_code: "SEDE_CON_SOCIOS_ACTIVOS",
+            socios_activos: socios,
         }, 409);
     }
 

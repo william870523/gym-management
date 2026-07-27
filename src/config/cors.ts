@@ -1,5 +1,6 @@
 import { cors } from "hono/cors";
 import { env } from "./env";
+import { GYM_CONTEXT_HEADER } from "../infrastructure/http/middleware/auth.middleware";
 
 /**
  * Middleware de CORS estricto
@@ -27,7 +28,22 @@ export const corsMiddleware = () => {
             return allowedOrigins[0]; // Retornar el primero como fallback seguro o null
         },
         allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allowHeaders: ["Authorization", "Content-Type", "X-Requested-With"],
+        // OJO: esta lista se declara explícita, así que **una cabecera que no
+        // esté aquí bloquea la petición entera en el navegador**, no la
+        // cabecera sola. Y como cualquier cabecera propia dispara un preflight
+        // `OPTIONS`, olvidarse de una deja la web sin poder llamar a NADA,
+        // incluido `/health`. El escritorio no lo nota: fuera del navegador no
+        // hay CORS.
+        //
+        // `X-Gym-Id` es la sede activa (docs/MULTI_SEDE.md §3.3). Se añadió al
+        // cliente el 27-07-2026 y esta lista se quedó sin actualizar: la web
+        // dejó de cargar en cuanto la sesión resolvía una sede.
+        allowHeaders: [
+            "Authorization",
+            "Content-Type",
+            "X-Requested-With",
+            GYM_CONTEXT_HEADER,
+        ],
         exposeHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],
         credentials: false, // Desactivado por defecto para mayor seguridad (stateless API)
         maxAge: 86400, // Cache preflight por 24 horas

@@ -175,9 +175,10 @@ describe("identidad autoritativa en handlers dedicados", () => {
     expect(touched).toBe(false);
   });
 
-  it("impide que un dispositivo dé de baja el gimnasio de otra sede", async () => {
-    // La baja ajena exige autoridad de Dueño y este canal autentica al
-    // dispositivo, no a la persona: se hace desde la web.
+  it("impide que un dispositivo dé de baja el gimnasio de otra sede sin autoridad", async () => {
+    // La baja ajena exige autoridad de Dueño, y este canal autentica al
+    // dispositivo. El evento dice quién la pidió y el remoto lo comprueba en su
+    // propia base; sin actor no se borra nada.
     let touched = false;
     const useCase = new ApplyGymEventUseCase({
       exists: async () => true,
@@ -192,7 +193,7 @@ describe("identidad autoritativa en handlers dedicados", () => {
       ...authenticatedInput,
       entidadId: "gym-atacante",
       operacion: "DELETE",
-    } as any)).rejects.toThrow("se hace desde la web");
+    } as any)).rejects.toThrow("no dice quién la pidió");
     expect(touched).toBe(false);
   });
 });

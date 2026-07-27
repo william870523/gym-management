@@ -83,7 +83,18 @@ export class SyncService {
     const applyCuentaEventUseCase = new ApplyCuentaEventUseCase(cuentaRepository);
     const applyEntrenadorEventUseCase = new ApplyEntrenadorEventUseCase(entrenadorRepository);
     const applyUserEventUseCase = new ApplyUserEventUseCase(userRepository);
-    const applyGymEventUseCase = new ApplyGymEventUseCase(gymRepository);
+    // La autoridad de Dueño se resuelve contra la base del remoto, no contra el
+    // payload del evento (docs/MULTI_SEDE.md §3).
+    const applyGymEventUseCase = new ApplyGymEventUseCase(
+      gymRepository,
+      async (userId) => {
+        const cuenta = await prisma.user.findFirst({
+          where: { user_id: userId, active: true, is_deleted: false },
+          select: { es_plataforma: true },
+        });
+        return cuenta?.es_plataforma === true;
+      },
+    );
 
     this.uploadEventsUseCase = new UploadEventsUseCase(
       syncLogRepository,

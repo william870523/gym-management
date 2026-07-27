@@ -18,14 +18,21 @@ function repo(existentes: string[]) {
     } as any;
 }
 
-const evento = (entidadId: string, operacion: any = "INSERT") => ({
+const evento = (
+    entidadId: string,
+    operacion: any = "INSERT",
+    extra: Record<string, unknown> = {},
+) => ({
     eventId: "ev-1",
     entidadId,
     operacion,
     gymId: SEDE_PROPIA,
     deviceId: "dev-1",
-    payload: { codigo: "NUE", nombre: "Sede nueva", activo: true },
+    payload: { codigo: "NUE", nombre: "Sede nueva", activo: true, ...extra },
 });
+
+/** Comprobación de autoridad: solo `u-dueno` es Dueño de la cadena. */
+const autoridad = async (userId: string) => userId === "u-dueno";
 
 describe("sedes que llegan por sincronización", () => {
     it("acepta el alta de una sede NUEVA hecha desde el escritorio", async () => {
@@ -56,13 +63,45 @@ describe("sedes que llegan por sincronización", () => {
         expect(destino.upserts).toHaveLength(0);
     });
 
-    it("rechaza dar de baja una sede ajena por sincronización", async () => {
-        // El canal autentica al DISPOSITIVO, no a la persona, así que no puede
-        // demostrar la autoridad de Dueño. La baja ajena se hace desde la web.
+    it("acepta la baja de una sede ajena si la pidió el Dueño de la cadena", async () => {
+        // El canal autentica al DISPOSITIVO, así que el evento dice QUIÉN la
+        // pidió y la autoridad se busca en la base del remoto.
+        const destino = repo([SEDE_PROPIA, SEDE_AJENA]);
+        await new ApplyGymEventUseCase(destino, autoridad).execute(
+            evento(SEDE_AJENA, "DELETE", { dado_de_baja_por_user_id: "u-dueno" }),
+        );
+        expect(destino.borradas).toEqual([SEDE_AJENA]);
+    });
+
+    it("rechaza la baja ajena si quien la pidió NO es Dueño", async () => {
         const destino = repo([SEDE_PROPIA, SEDE_AJENA]);
         await expect(
-            new ApplyGymEventUseCase(destino).execute(evento(SEDE_AJENA, "DELETE")),
-        ).rejects.toThrow(/se hace desde la web/);
+            new ApplyGymEventUseCase(destino, autoridad).execute(
+                evento(SEDE_AJENA, "DELETE", { dado_de_baja_por_user_id: "u-ana" }),
+            ),
+        ).rejects.toThrow(/no es dueña de la cadena/);
+        expect(destino.borradas).toHaveLength(0);
+    });
+
+    it("rechaza la baja ajena si el evento no dice quién la pidió", async () => {
+        // Un evento viejo, anterior a que el actor viajara, no puede colarse.
+        const destino = repo([SEDE_PROPIA, SEDE_AJENA]);
+        await expect(
+            new ApplyGymEventUseCase(destino, autoridad).execute(
+                evento(SEDE_AJENA, "DELETE"),
+            ),
+        ).rejects.toThrow(/no dice quién la pidió/);
+        expect(destino.borradas).toHaveLength(0);
+    });
+
+    it("no se fía del payload: sin comprobación de autoridad, no borra", async () => {
+        // El constructor por defecto responde que nadie es Dueño: falla cerrado.
+        const destino = repo([SEDE_PROPIA, SEDE_AJENA]);
+        await expect(
+            new ApplyGymEventUseCase(destino).execute(
+                evento(SEDE_AJENA, "DELETE", { dado_de_baja_por_user_id: "u-dueno" }),
+            ),
+        ).rejects.toThrow(/no es dueña de la cadena/);
         expect(destino.borradas).toHaveLength(0);
     });
 

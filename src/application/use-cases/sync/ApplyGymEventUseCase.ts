@@ -15,9 +15,19 @@ export interface ApplyGymEventInput {
     tx?: SyncTransactionContext;
 }
 
+/**
+ * Comprueba, **en la base del remoto**, si una cuenta es Dueño de la cadena.
+ *
+ * El evento dice *quién* pidió la baja; la autoridad no se la cree: se busca.
+ * El nivel de Dueño viaja por sincronización a todas las bases, así que el
+ * remoto siempre tiene con qué contestar (docs/MULTI_SEDE.md §3).
+ */
+export type PlatformAuthorityCheck = (userId: string) => Promise<boolean>;
+
 export class ApplyGymEventUseCase {
     constructor(
-        private readonly gymRepository: PrismaGymRepository
+        private readonly gymRepository: PrismaGymRepository,
+        private readonly esDuenoDeCadena: PlatformAuthorityCheck = async () => false,
     ) { }
 
     async execute(input: ApplyGymEventInput): Promise<void> {
@@ -51,16 +61,33 @@ export class ApplyGymEventUseCase {
         // pisar datos de nadie.
         const esPropia = input.entidadId === input.gymId;
 
-        // La baja de una sede ajena se comprueba antes que nada para que el
-        // motivo del rechazo sea el suyo y no el genérico: exige demostrar la
-        // autoridad de Dueño, y este canal autentica al DISPOSITIVO, no a la
-        // persona. Se hace desde la web, donde el token sí prueba quién la
-        // pide, y llega al escritorio por descarga.
+        // Dar de baja una sede ajena es del **Dueño de la cadena**, y se hace
+        // desde los dos destinos (decisión del dueño, 26-07-2026). Como este
+        // canal autentica al DISPOSITIVO y no a la persona, el evento trae
+        // quién la pidió y aquí se comprueba su nivel **contra la base del
+        // remoto**: el payload dice el nombre, no otorga el permiso.
+        //
+        // Riesgo residual asumido y anotado: un dispositivo comprometido podría
+        // nombrar a un Dueño real. Se acepta porque el token de dispositivo ya
+        // otorga control sobre los datos de su propia sede, y la alternativa
+        // —no poder cerrar una sede desde el escritorio— incumple la decisión
+        // del dueño. Modificar una sede ajena sigue prohibido en todo caso.
         if (operacion === "DELETE" && !esPropia) {
-            throw new Error(
-                `No se puede dar de baja el gimnasio ${input.entidadId} por sincronización: ` +
-                "la baja de una sede ajena se hace desde la web."
-            );
+            const actor = this.actorDeLaBaja(input.payload);
+            if (!actor) {
+                throw new Error(
+                    `No se puede dar de baja el gimnasio ${input.entidadId} por sincronización: ` +
+                    "el evento no dice quién la pidió."
+                );
+            }
+            if (!(await this.esDuenoDeCadena(actor))) {
+                throw new Error(
+                    `No se puede dar de baja el gimnasio ${input.entidadId}: ` +
+                    `la cuenta ${actor} no es dueña de la cadena.`
+                );
+            }
+            await repo.softDelete(input.entidadId);
+            return;
         }
 
         if (!esPropia && await repo.exists(input.entidadId)) {
@@ -77,6 +104,14 @@ export class ApplyGymEventUseCase {
 
         const gym = this.mapPayloadToGym(input);
         await repo.upsertGym(gym);
+    }
+
+    /** Quién pidió la baja, según el evento. No otorga permiso: se comprueba. */
+    private actorDeLaBaja(payload: unknown): string | null {
+        const valor = (payload as Record<string, unknown> | null)
+            ?.dado_de_baja_por_user_id;
+        const texto = typeof valor === "string" ? valor.trim() : "";
+        return texto.length > 0 ? texto : null;
     }
 
     private mapPayloadToGym(input: ApplyGymEventInput): Gym {

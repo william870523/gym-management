@@ -39,6 +39,13 @@ export function catalogsRoutes() {
     app.put("/referencias/:id", catalogs.updateReferencia);
     app.delete("/referencias/:id", catalogs.deleteReferencia);
 
+    // MotivoBaja (E0-b) — acotado por sede desde el token.
+    app.get("/motivos-baja", catalogs.getMotivosBaja);
+    app.get("/motivos-baja/:id", catalogs.getMotivoBajaById);
+    app.post("/motivos-baja", catalogs.createMotivoBaja);
+    app.put("/motivos-baja/:id", catalogs.updateMotivoBaja);
+    app.delete("/motivos-baja/:id", catalogs.deleteMotivoBaja);
+
     // Horario
     app.get("/horarios", catalogs.getHorarios);
     app.get("/horarios/:id", catalogs.getHorarioById);

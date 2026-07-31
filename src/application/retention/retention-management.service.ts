@@ -30,6 +30,7 @@ export class RetentionManagementService {
     note?: string | null;
     promiseDate?: string | null;
     nextManagementDate?: string | null;
+    reasonId?: string | null;
     userId: string;
   }) {
     this.validateUuid(input.operationId, "operation_id");
@@ -40,6 +41,7 @@ export class RetentionManagementService {
         result: input.result,
         channel: input.channel,
         note: input.note,
+        reasonId: input.reasonId,
         promiseDate: this.parseDateOnly(input.promiseDate, "promesa_fecha"),
         nextManagementDate: this.parseDateOnly(
           input.nextManagementDate,
@@ -76,6 +78,33 @@ export class RetentionManagementService {
         throw new RetentionManagementError("Membresía no encontrada.", 404);
       }
       const operatorName = await this.identityName(tx, input.gymId, input.userId);
+      // E0-b: el motivo tiene que ser del catálogo de ESTA sede y estar activo.
+      // Se congela el nombre para que renombrarlo después no reescriba la
+      // historia, igual que `plan_nombre_snapshot` en las membresías.
+      let reasonName: string | null = null;
+      if (normalized.reasonId) {
+        const reason = await tx.motivoBaja.findFirst({
+          where: {
+            motivo_baja_id: normalized.reasonId,
+            gym_id: input.gymId,
+            is_deleted: false,
+          },
+          select: { nombre: true, activo: true },
+        });
+        if (!reason) {
+          throw new RetentionManagementError(
+            "El motivo seleccionado no existe en este gimnasio.",
+            400,
+          );
+        }
+        if (!reason.activo) {
+          throw new RetentionManagementError(
+            "El motivo seleccionado está desactivado.",
+            400,
+          );
+        }
+        reasonName = reason.nombre;
+      }
       const management = await tx.retencionGestion.create({
         data: {
           gestion_id: input.operationId,
@@ -83,6 +112,8 @@ export class RetentionManagementService {
           ci: membership.ci,
           resultado: normalized.result,
           canal: normalized.channel,
+          motivo_baja_id: normalized.reasonId,
+          motivo_nombre_snapshot: reasonName,
           nota: normalized.note,
           promesa_fecha: normalized.promiseDate,
           proxima_gestion_fecha: normalized.nextManagementDate,
@@ -129,6 +160,7 @@ export class RetentionManagementService {
       && row.registrada_por_user_id === input.userId
       && row.resultado === normalized.result
       && row.canal === normalized.channel
+      && row.motivo_baja_id === normalized.reasonId
       && row.nota === normalized.note
       && this.sameDate(row.promesa_fecha, normalized.promiseDate)
       && this.sameDate(row.proxima_gestion_fecha, normalized.nextManagementDate);
@@ -145,6 +177,8 @@ export class RetentionManagementService {
       ci: row.ci,
       result: row.resultado,
       channel: row.canal,
+      reason_id: row.motivo_baja_id,
+      reason_name: row.motivo_nombre_snapshot,
       note: row.nota,
       promise_date: row.promesa_fecha ? formatDateOnly(row.promesa_fecha) : null,
       next_management_date: row.proxima_gestion_fecha

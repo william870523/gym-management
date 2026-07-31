@@ -5,6 +5,7 @@ import { ProcessPaymentUseCase } from "../../application/use-cases/pago_cliente/
 import { PrismaPagoClienteRepository } from "./PrismaPagoClienteRepository";
 import { PrismaPlanesPagoRepository } from "./PrismaPlanesPagoRepository";
 import { PrismaClienteRepository } from "./PrismaClienteRepository";
+import { prismaWithoutSyncLog } from "./test-support/prisma-without-sync-log";
 
 /**
  * Cobro remoto CON recargo por mora (docs/RECARGO_MORA.md).
@@ -110,7 +111,7 @@ describe("processPayment (Remote) · recargo por mora cobrado", () => {
 
     // Cobro completo sin condonar: base 30.00 + recargo 10 % = 33.00.
     const result = await new ProcessPaymentUseCase(
-      new PrismaPagoClienteRepository(),
+      new PrismaPagoClienteRepository(prismaWithoutSyncLog(prisma)),
       new PrismaPlanesPagoRepository(),
       new PrismaClienteRepository(),
     ).execute(

@@ -7,6 +7,7 @@ import { PrismaPagoClienteRepository } from "./PrismaPagoClienteRepository";
 import { PrismaPlanesPagoRepository } from "./PrismaPlanesPagoRepository";
 import { PrismaClienteRepository } from "./PrismaClienteRepository";
 import { PaymentActorError } from "../../application/payment/payment-actor";
+import { prismaWithoutSyncLog } from "./test-support/prisma-without-sync-log";
 
 /**
  * R5.6 — cobrador autenticado por pago, lado remoto/web
@@ -32,7 +33,7 @@ describe("processPayment (Remote) · cobrador autenticado", () => {
   let accountId = "";
 
   const useCase = () => new ProcessPaymentUseCase(
-    new PrismaPagoClienteRepository(),
+    new PrismaPagoClienteRepository(prismaWithoutSyncLog(prisma)),
     new PrismaPlanesPagoRepository(),
     new PrismaClienteRepository(),
   );

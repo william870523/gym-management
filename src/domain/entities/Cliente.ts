@@ -2,6 +2,12 @@
 export interface Cliente {
   ci: string;
   tipo_documento: string;
+  /**
+   * E0 (docs/PLAN_ESTADISTICAS.md §7-bis). Día de calendario UTC que fija el
+   * servidor: derivado del CI cuando el documento es cubano, capturado cuando
+   * no lo es. Nunca se toma tal cual del cuerpo de la petición.
+   */
+  fecha_nacimiento?: Date | null;
   nombres: string;
   apellidos: string;
   sexo: string;

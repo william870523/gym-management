@@ -44,6 +44,7 @@ routes.post("/gestiones", async (c) => {
       result: String(body.resultado ?? ""),
       channel: String(body.canal ?? ""),
       note: body.nota == null ? null : String(body.nota),
+      reasonId: body.motivo_baja_id == null ? null : String(body.motivo_baja_id),
       promiseDate: body.promesa_fecha == null ? null : String(body.promesa_fecha),
       nextManagementDate: body.proxima_gestion_fecha == null
         ? null

@@ -24,6 +24,8 @@ export interface RetentionManagementPolicyInput {
   note?: string | null;
   promiseDate?: Date | null;
   nextManagementDate?: Date | null;
+  /** E0-b: motivo codificado del catálogo `motivo_baja` (§7-ter del plan). */
+  reasonId?: string | null;
   businessToday: Date;
 }
 
@@ -33,6 +35,7 @@ export interface NormalizedRetentionManagement {
   note: string | null;
   promiseDate: Date | null;
   nextManagementDate: Date | null;
+  reasonId: string | null;
 }
 
 export function normalizeRetentionManagement(
@@ -65,6 +68,26 @@ export function normalizeRetentionManagement(
     throw new Error("Registre una nota breve cuando el socio no desea renovar.");
   }
 
+  // E0-b (docs/PLAN_ESTADISTICAS.md §7-ter). El motivo codificado es lo que
+  // permite agrupar y graficar; la nota libre se conserva para el matiz.
+  //
+  //  NO_DESEA_RENOVAR → obligatorio: es la baja, y sin motivo no se puede
+  //                     responder «por qué se van», solo «cuántos».
+  //  CONTACTADO       → opcional. Aquí el socio TODAVÍA no se ha ido: recoge el
+  //  PROMESA_PAGO       aviso temprano («este mes está caro»).
+  //  NO_LOCALIZADO    → no aplica. Que no se le pudiera hablar ya es una
+  //                     categoría de baja por sí misma; pedir un motivo sería
+  //                     inventarlo.
+  const reasonId = input.reasonId?.trim() || null;
+  if (result === "NO_DESEA_RENOVAR" && !reasonId) {
+    throw new Error("Seleccione el motivo cuando el socio no desea renovar.");
+  }
+  if (result === "NO_LOCALIZADO" && reasonId) {
+    throw new Error(
+      "Una gestión sin contacto no lleva motivo: nadie pudo preguntarlo.",
+    );
+  }
+
   return {
     result: result as RetentionManagementResult,
     channel: channel as RetentionManagementChannel,
@@ -73,6 +96,7 @@ export function normalizeRetentionManagement(
     nextManagementDate:
       input.nextManagementDate
       ?? (result === "PROMESA_PAGO" ? input.promiseDate ?? null : null),
+    reasonId,
   };
 }
 
@@ -99,5 +123,3 @@ function assertCalendarDate(value: Date, name: string): void {
     throw new Error(`${name} debe ser una fecha de calendario UTC.`);
   }
 }
-
-

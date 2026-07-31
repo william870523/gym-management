@@ -8,6 +8,7 @@ import { PrismaClienteRepository } from "./PrismaClienteRepository";
 import { PlanInstallmentService } from "../../application/membership/plan-installment.service";
 import { datePartsInZone } from "../../config/tz";
 import { env } from "../../config/env";
+import { prismaWithoutSyncLog } from "./test-support/prisma-without-sync-log";
 
 /**
  * R5.2 — cobro por cuotas en el remoto (docs/PLAN_INSTALLMENTS.md).
@@ -38,7 +39,7 @@ describe("processPayment (Remote) · cobro por cuotas", () => {
   let todayUtc = 0;
 
   const useCase = () => new ProcessPaymentUseCase(
-    new PrismaPagoClienteRepository(),
+    new PrismaPagoClienteRepository(prismaWithoutSyncLog(prisma)),
     new PrismaPlanesPagoRepository(),
     new PrismaClienteRepository(),
   );

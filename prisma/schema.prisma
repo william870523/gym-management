@@ -423,12 +423,44 @@ model MembresiaSolicitud {
 
 // Bitácora operativa append-only de contactos por renovación. Nunca activa una
 // membresía ni sustituye la evidencia financiera del pago.
+// Catálogo administrable de motivos de baja (docs/PLAN_ESTADISTICAS.md §7-ter).
+// Los diez base (es_sistema=true) se siembran por gimnasio y no se pueden
+// borrar; el operador añade y retira los suyos sin tocar la aplicación.
+// Desactivar oculta el motivo de gestiones NUEVAS y no altera la historia;
+// borrar solo se permite si nunca se usó.
+model MotivoBaja {
+  motivo_baja_id String    @id
+  gym_id         String
+  nombre         String
+  codigo         String?
+  orden          Int       @default(0)
+  activo         Boolean   @default(true)
+  es_sistema     Boolean   @default(false)
+  is_deleted     Boolean   @default(false)
+  created_at     DateTime  @default(now())
+  source_device  String?
+  version        Int       @default(1)
+  updated_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  @@unique([gym_id, nombre], map: "uq_motivo_baja_nombre")
+  @@index([gym_id, activo, orden], map: "idx_motivo_baja_gym_activo")
+  @@map("motivo_baja")
+}
+
 model RetencionGestion {
   gestion_id                     String    @id
   membresia_id                   String
   ci                             String
   resultado                      String // CONTACTADO, PROMESA_PAGO, NO_LOCALIZADO, NO_DESEA_RENOVAR
   canal                          String // LLAMADA, WHATSAPP, SMS, PRESENCIAL, OTRO
+  // Motivo codificado (§7-ter). Obligatorio con NO_DESEA_RENOVAR, opcional con
+  // CONTACTADO y PROMESA_PAGO —ahí es aviso temprano, no baja— y no aplica a
+  // NO_LOCALIZADO, que ya es una categoría de baja por sí misma. Se agrupa por
+  // el ID para que renombrar no parta la serie; el snapshot conserva el nombre
+  // vigente al registrar.
+  motivo_baja_id                 String?
+  motivo_nombre_snapshot         String?
   nota                           String?
   promesa_fecha                  DateTime?
   proxima_gestion_fecha          DateTime?
@@ -1147,13 +1179,16 @@ model TesoreriaCierreSolicitud {
   movimiento_ids_json            String
   motivo                         String
   estado                         String
+  // Mismo actor congelado que el cierre mensual: el origen es lo que faltaba.
   solicitada_por_user_id         String
   solicitada_por_nombre_snapshot String
   solicitada_por_rol_snapshot    String
+  solicitada_por_origen          String?  @db.VarChar(32)
   solicitada_at                  DateTime
   decidida_por_user_id           String?
   decidida_por_nombre_snapshot   String?
   decidida_por_rol_snapshot      String?
+  decidida_por_origen            String?  @db.VarChar(32)
   decision_motivo                String?
   decidida_at                    DateTime?
   cierre_id                      String?
@@ -1222,14 +1257,19 @@ model TesoreriaCierreMensual {
   motivo_cierre                 String    @db.Text
   resumen_snapshot_json         String    @db.LongText
   resumen_sha256                String
+  // El origen completa el actor congelado que ya guardaban nombre y rol: sin él
+  // la subida no distingue una cuenta local legítima de un id equivocado, y
+  // acababa exigiendo fila en `User` (paridad R5.6).
   cerrado_por_user_id           String
   cerrado_por_nombre_snapshot   String
   cerrado_por_rol_snapshot      String
+  cerrado_por_origen            String?   @db.VarChar(32)
   cerrado_at                    DateTime  @db.DateTime(3)
   reapertura_motivo             String?   @db.Text
   reabierto_por_user_id         String?
   reabierto_por_nombre_snapshot String?
   reabierto_por_rol_snapshot    String?
+  reabierto_por_origen          String?   @db.VarChar(32)
   reabierto_at                  DateTime? @db.DateTime(3)
   is_deleted                    Boolean   @default(false)
   created_at                    DateTime  @default(now()) @db.DateTime(3)
@@ -1315,6 +1355,12 @@ model ClientePeso {
 model Cliente {
   ci               String    @id
   tipo_documento   String    @default("DESCONOCIDO") // CI_CUBANO, PASAPORTE, OTRO, DESCONOCIDO
+  // E0 (docs/PLAN_ESTADISTICAS.md §7-bis): día de calendario UTC. Con
+  // tipo_documento=CI_CUBANO la DERIVA el servidor de los 11 dígitos y no se
+  // acepta del cuerpo; con pasaporte u otro se captura y es obligatoria.
+  // Nullable solo por la historia anterior al corte, que la estadística cuenta
+  // aparte como «sin fecha» en vez de repartirla.
+  fecha_nacimiento DateTime?
   nombres          String
   apellidos        String
   sexo             String
@@ -1562,7 +1608,14 @@ model GastoGobernado {
   estado                  String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
   pagado_acumulado        Decimal   @default(0)
   comprobante_referencia  String?
+  // Actor congelado (paridad R5.6): quién lo registró viaja dentro del evento.
+  // `registrada_por_origen`: LOCAL_USER | SYNCED_USER | REMOTE_USER. Un
+  // LOCAL_USER puede no tener nunca fila aquí y aun así ser el autor, así que
+  // la subida valida el actor congelado y no exige fila en `User`.
   registrada_por_user_id  String
+  registrada_por_nombre_snapshot String? @db.VarChar(191)
+  registrada_por_rol_snapshot    String? @db.VarChar(80)
+  registrada_por_origen          String? @db.VarChar(32)
   formula_snapshot_json   String    @db.LongText
   is_deleted              Boolean   @default(false)
   created_at              DateTime  @default(now())

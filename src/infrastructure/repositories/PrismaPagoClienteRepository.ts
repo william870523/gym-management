@@ -96,6 +96,15 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     ci: data.ci,
                     fecha: data.fecha,
                     monto_total: data.monto_total,
+                    // R5.3. El evento los traía y `ApplyPagoClienteEventUseCase`
+                    // los mapeaba, pero el upsert no los escribía: en la web
+                    // ningún cobro tenía descuento y el informe de descuentos
+                    // concedidos salía vacío. Mismo defecto que el de
+                    // `fecha_nacimiento` en cliente, encontrado el 31-07-2026
+                    // por la huella de contenido.
+                    precio_lista_snapshot: data.precio_lista_snapshot ?? null,
+                    descuento_pct_snapshot: data.descuento_pct_snapshot ?? null,
+                    descuento_monto_snapshot: data.descuento_monto_snapshot ?? null,
                 recargo_mora_condonado_importe: data.recargo_mora_condonado_importe ?? null,
                 recargo_mora_condonado_motivo: data.recargo_mora_condonado_motivo ?? null,
                 recargo_mora_condonado_por: data.recargo_mora_condonado_por ?? null,
@@ -118,6 +127,15 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     ci: data.ci,
                     fecha: data.fecha,
                     monto_total: data.monto_total,
+                    // R5.3. El evento los traía y `ApplyPagoClienteEventUseCase`
+                    // los mapeaba, pero el upsert no los escribía: en la web
+                    // ningún cobro tenía descuento y el informe de descuentos
+                    // concedidos salía vacío. Mismo defecto que el de
+                    // `fecha_nacimiento` en cliente, encontrado el 31-07-2026
+                    // por la huella de contenido.
+                    precio_lista_snapshot: data.precio_lista_snapshot ?? null,
+                    descuento_pct_snapshot: data.descuento_pct_snapshot ?? null,
+                    descuento_monto_snapshot: data.descuento_monto_snapshot ?? null,
                 recargo_mora_condonado_importe: data.recargo_mora_condonado_importe ?? null,
                 recargo_mora_condonado_motivo: data.recargo_mora_condonado_motivo ?? null,
                 recargo_mora_condonado_por: data.recargo_mora_condonado_por ?? null,

@@ -10,6 +10,7 @@ import {
 import { PlanesPagoController } from "./PlanesPagoController";
 import { HorarioController } from "./HorarioController";
 import { CuentaController } from "./CuentaController";
+import { MotivoBajaController } from "./MotivoBajaController";
 
 // Helper for standard CRUD responses
 const handleCrud = async (c: Context, model: any, schema: any, updateSchema: any, idField: string) => {
@@ -311,3 +312,11 @@ export const getCuentaById = (c: Context) => cuentaController.getById(c);
 export const createCuenta = (c: Context) => cuentaController.create(c);
 export const updateCuenta = (c: Context) => cuentaController.update(c);
 export const deleteCuenta = (c: Context) => cuentaController.delete(c);
+
+// --- MotivoBaja (E0-b, docs/PLAN_ESTADISTICAS.md §7-ter) ---
+const motivoBajaController = new MotivoBajaController();
+export const getMotivosBaja = (c: Context) => motivoBajaController.list(c);
+export const getMotivoBajaById = (c: Context) => motivoBajaController.getById(c);
+export const createMotivoBaja = (c: Context) => motivoBajaController.create(c);
+export const updateMotivoBaja = (c: Context) => motivoBajaController.update(c);
+export const deleteMotivoBaja = (c: Context) => motivoBajaController.delete(c);

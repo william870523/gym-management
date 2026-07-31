@@ -5,6 +5,8 @@ import type { ClienteRepository } from "../../../domain/repositories/ClienteRepo
 import type { ClientePesoRepository } from "../../../domain/repositories/ClientePesoRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 import { trustedClock } from "../../../config/trusted-clock";
+import { resolverFechaNacimiento } from "../../clients/client-birthdate";
+import { fechaNegocioDeSede } from "../../clients/business-date";
 
 export class CreateClienteUseCase {
     constructor(
@@ -21,9 +23,19 @@ export class CreateClienteUseCase {
         membresia_cubre_hoy?: boolean | null;
     }> {
         const now = trustedClock.nowUtc();
+        // E0 (§7-bis): la fecha de nacimiento la fija el servidor. Con carné
+        // cubano se deriva de los 11 dígitos y lo que venga en el DTO se ignora.
+        const fecha_nacimiento = resolverFechaNacimiento({
+            tipoDocumento: dto.tipo_documento,
+            ci: dto.ci,
+            fechaNacimientoEntrante: dto.fecha_nacimiento,
+            fechaNegocio: await fechaNegocioDeSede(gymId, now),
+            esAlta: true,
+        });
         const newCliente: Cliente = {
             ci: dto.ci,
             tipo_documento: dto.tipo_documento,
+            fecha_nacimiento,
             nombres: dto.nombres,
             apellidos: dto.apellidos,
             sexo: dto.sexo,

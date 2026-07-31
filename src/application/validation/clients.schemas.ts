@@ -1,12 +1,41 @@
 import { z } from "zod";
+import { normalizarSexo, SEXOS_CANONICOS } from "../../domain/sexo-policy";
+
+/**
+ * Sexo normalizado por el servidor (docs/PLAN_ESTADISTICAS.md §7).
+ *
+ * Va en el esquema para que lo apliquen todas las rutas que validan, sin que
+ * nadie tenga que acordarse. El valor que sale de aquí es ya el que se guarda.
+ */
+export const sexoSchema = z
+    .string()
+    .min(1, "Sexo es requerido")
+    .transform((valor, ctx) => {
+        const normalizado = normalizarSexo(valor);
+        if (normalizado === null) {
+            ctx.addIssue({
+                code: "custom",
+                message:
+                    `El sexo «${valor}» no es válido. Valores admitidos: ` +
+                    `${SEXOS_CANONICOS.join(", ")}.`,
+            });
+            return z.NEVER;
+        }
+        return normalizado;
+    });
+
 
 // --- Cliente ---
 export const ClienteSchema = z.object({
     ci: z.string().min(1, "CI es requerido"),
     tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).default("DESCONOCIDO"),
+    // E0 (§7-bis): se admite en el cuerpo porque con pasaporte u otro documento
+    // hay que capturarla, pero el caso de uso la RESUELVE de nuevo: con carné
+    // cubano la deriva del CI e ignora este valor.
+    fecha_nacimiento: z.string().or(z.date()).optional().nullable(),
     nombres: z.string().min(1, "Nombres son requeridos"),
     apellidos: z.string().min(1, "Apellidos son requeridos"),
-    sexo: z.string().min(1, "Sexo es requerido"),
+    sexo: sexoSchema,
     // foto_cliente: z.any().optional(),
     cliente_peso_id: z.string().min(1, "Peso ID es requerido"), // This might be tricky if circular dependency, but usually client is created with initial weight
     estatura_cliente: z.number().min(0),

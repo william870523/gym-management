@@ -112,6 +112,12 @@ export class PrismaClienteRepository implements ClienteRepository {
       create: {
         ci: payload.ci,
         tipo_documento: payload.tipo_documento,
+        // E0 (§7-bis) y R5.3. Ambas viajaban en el evento y se perdían aquí:
+        // el escritorio derivaba la fecha del CI y clasificaba VIEJO, y la web
+        // enseñaba a todo el mundo sin fecha y como NUEVO. Un campo que el
+        // handler mapea pero el upsert no escribe es una divergencia silenciosa.
+        fecha_nacimiento: payload.fecha_nacimiento ?? null,
+        categoria: payload.categoria ?? "NUEVO",
         nombres: payload.nombres,
         apellidos: payload.apellidos,
         sexo: payload.sexo,
@@ -140,6 +146,8 @@ export class PrismaClienteRepository implements ClienteRepository {
       },
       update: {
         tipo_documento: payload.tipo_documento,
+        fecha_nacimiento: payload.fecha_nacimiento ?? null,
+        categoria: payload.categoria ?? "NUEVO",
         nombres: payload.nombres,
         apellidos: payload.apellidos,
         sexo: payload.sexo,

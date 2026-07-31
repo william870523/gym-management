@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sexoSchema } from "./clients.schemas";
 
 // --- Entrenador ---
 export const EntrenadorSchema = z.object({
@@ -7,7 +8,7 @@ export const EntrenadorSchema = z.object({
     tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).default("DESCONOCIDO"),
     nombres_entrenador: z.string().min(1, "Nombres son requeridos"),
     apellidos_entrenador: z.string().min(1, "Apellidos son requeridos"),
-    sexo_entrenador: z.string().min(1, "Sexo es requerido"),
+    sexo_entrenador: sexoSchema,
     foto_entrenador: z.string().optional().nullable(),
     direccion_entrenador: z.string().optional().nullable(),
     telefono_entrenador: z.number().int().optional().nullable(),

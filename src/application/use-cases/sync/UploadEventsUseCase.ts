@@ -19,6 +19,7 @@ import type { ApplyEntrenadorEventUseCase } from "./ApplyEntrenadorEventUseCase"
 import type { ApplyUserEventUseCase } from "./ApplyUserEventUseCase";
 import type { ApplyGymEventUseCase } from "./ApplyGymEventUseCase";
 import { trustedClock } from "../../../config/trusted-clock";
+import { frozenActorIsValid } from "../../accounting/frozen-actor";
 import { createHash } from "crypto";
 import {
   PARITY_SYNC_ENTITIES,
@@ -358,6 +359,8 @@ export class UploadEventsUseCase {
           "membresia_entrenador_asignacion",
           "pago_membresia_aplicacion",
           "pago_reversion",
+          // E0-b: catálogo de motivos de baja (PLAN_ESTADISTICAS.md §7-ter).
+          "motivo_baja",
           "gasto_categoria",
           "gasto_proveedor",
           "gasto_gobernado",
@@ -589,6 +592,12 @@ export class UploadEventsUseCase {
         delegate: client.retencionGestion,
         pk: "gestion_id",
       },
+      // E0-b: catálogo de motivos de baja (PLAN_ESTADISTICAS.md §7-ter). Es por
+      // sede, no global: cada gimnasio administra los suyos.
+      motivo_baja: {
+        delegate: client.motivoBaja,
+        pk: "motivo_baja_id",
+      },
       membresia_entrenador_asignacion: {
         delegate: client.membresiaEntrenadorAsignacion,
         pk: "asignacion_id",
@@ -702,23 +711,24 @@ export class UploadEventsUseCase {
       }
       const closerId = String(record.cerrado_por_user_id ?? "");
       const reopenerId = String(record.reabierto_por_user_id ?? "");
-      const [closer, reopener, existing] = await Promise.all([
-        closerId
-          ? client.user.findFirst({
-              where: { user_id: closerId, gym_id: gymId },
-              select: { user_id: true },
-            })
-          : null,
-        reopenerId
-          ? client.user.findFirst({
-              where: { user_id: reopenerId, gym_id: gymId },
-              select: { user_id: true },
-            })
-          : null,
-        client.tesoreriaCierreMensual.findUnique({
-          where: { cierre_mensual_id: ev.entidad_id },
-        }),
-      ]);
+      // Unidad 09 — quien firma el cierre viaja congelado (nombre, rol y
+      // origen). Exigir fila en `User` rechazaba todo cierre firmado desde una
+      // cuenta local del escritorio, que es el caso normal en una sede.
+      const closer = closerId
+        ? frozenActorIsValid({
+            userId: closerId,
+            origen: record.cerrado_por_origen,
+          })
+        : null;
+      const reopener = reopenerId
+        ? frozenActorIsValid({
+            userId: reopenerId,
+            origen: record.reabierto_por_origen,
+          })
+        : null;
+      const existing = await client.tesoreriaCierreMensual.findUnique({
+        where: { cierre_mensual_id: ev.entidad_id },
+      });
       const lockKey = record.bloqueo_clave == null
         ? null
         : String(record.bloqueo_clave);
@@ -1025,19 +1035,22 @@ export class UploadEventsUseCase {
             "la fotografía de movimientos no es válida.",
         );
       }
-      const [requester, decider, movements, close] = await Promise.all([
-        requesterId
-          ? client.user.findFirst({
-              where: { user_id: requesterId, gym_id: gymId },
-              select: { user_id: true },
-            })
-          : null,
-        deciderId
-          ? client.user.findFirst({
-              where: { user_id: deciderId, gym_id: gymId },
-              select: { user_id: true },
-            })
-          : null,
+      // Unidad 09 — quien solicita y quien decide el arqueo viajan congelados,
+      // por el mismo motivo que el cierre mensual: en una sede ambos suelen ser
+      // cuentas locales que nunca tendrán fila aquí.
+      const requester = requesterId
+        ? frozenActorIsValid({
+            userId: requesterId,
+            origen: record.solicitada_por_origen,
+          })
+        : null;
+      const decider = deciderId
+        ? frozenActorIsValid({
+            userId: deciderId,
+            origen: record.decidida_por_origen,
+          })
+        : null;
+      const [movements, close] = await Promise.all([
         movementIds.length
           ? prisma.tesoreriaMovimiento.findMany({
               where: {
@@ -1452,10 +1465,18 @@ export class UploadEventsUseCase {
       const recurringId = entity === "gasto_gobernado"
         ? String(record.recurrente_id ?? "").trim()
         : "";
-      const registeredBy = entity === "gasto_gobernado"
-        ? String(record.registrada_por_user_id ?? "").trim()
-        : "SYSTEM";
-      const [category, supplier, currency, recurring, operator] =
+      // Unidad 09 — el actor viaja congelado dentro del evento y se valida como
+      // tal: identificador presente y origen de la lista canónica. Exigir fila
+      // en `User` rechazaba todo gasto registrado desde una cuenta local del
+      // escritorio, que es la mayoría, y lo dejaba atascado en el outbox
+      // reintentando mientras la fila vivía solo en SQLite.
+      const operator = entity === "gasto_gobernado"
+        ? frozenActorIsValid({
+            userId: record.registrada_por_user_id,
+            origen: record.registrada_por_origen,
+          })
+        : true;
+      const [category, supplier, currency, recurring] =
         await Promise.all([
           categoryId
             ? client.gastoCategoria.findFirst({
@@ -1481,17 +1502,17 @@ export class UploadEventsUseCase {
                 select: { recurrente_id: true },
               })
             : true,
-          registeredBy && registeredBy !== "SYSTEM"
-            ? client.user.findFirst({
-                where: { user_id: registeredBy, gym_id: gymId },
-                select: { user_id: true },
-              })
-            : registeredBy === "SYSTEM",
         ]);
-      if (!category || !supplier || !currency || !recurring || !operator) {
+      if (!category || !supplier || !currency || !recurring) {
         throw new Error(
           `No se puede sincronizar ${entity} ${entityId}: ` +
-            "categoría, proveedor, moneda, plantilla u operador no pertenece al gimnasio autenticado.",
+            "categoría, proveedor, moneda o plantilla no pertenece al gimnasio autenticado.",
+        );
+      }
+      if (!operator) {
+        throw new Error(
+          `No se puede sincronizar ${entity} ${entityId}: ` +
+            "el actor que lo registró no viaja completo (falta identificador u origen válido).",
         );
       }
 

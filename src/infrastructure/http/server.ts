@@ -49,6 +49,7 @@ import { accountingRoutes } from "./routes/accounting.routes";
 import { planCuotaRoutes } from "./routes/plan_cuota.routes";
 import membershipRequestRoutes from "./routes/membership-request.routes";
 import retentionRoutes from "./routes/retention.routes";
+import estadisticasRoutes from "./routes/estadisticas.routes";
 import { getRemoteTimeStatus } from "../time/time.service";
 
 export const app = new Hono();
@@ -321,6 +322,15 @@ retentionProtected.use("*", requireStaff());
 retentionProtected.use("*", adminLimiter);
 retentionProtected.route("/", retentionRoutes);
 app.route("/retencion", retentionProtected);
+
+// R6 — perfiles estadísticos. La identidad tenant ya fue revalidada por
+// `authUser`; los handlers consumen exclusivamente `auth.gymId`.
+const estadisticasProtected = new Hono();
+estadisticasProtected.use("*", authUser());
+estadisticasProtected.use("*", requireStaff());
+estadisticasProtected.use("*", adminLimiter);
+estadisticasProtected.route("/", estadisticasRoutes);
+app.route("/estadisticas", estadisticasProtected);
 
 
 logger.info(`Starting REMOTE API on port ${env.port}...`);

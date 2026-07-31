@@ -3,6 +3,7 @@ import type { Entrenador } from "../../../domain/entities/Entrenador";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { EntrenadorRepository } from "../../../domain/repositories/EntrenadorRepository";
 import { normalizeBinary } from "../../../shared/utils/normalizeBinary";
+import { normalizarSexo } from "../../../domain/sexo-policy";
 
 export interface ApplyEntrenadorEventInput {
     eventId: string;
@@ -44,7 +45,11 @@ export class ApplyEntrenadorEventUseCase {
             tipo_documento: String(payload.tipo_documento ?? "DESCONOCIDO"),
             nombres_entrenador: String(payload.nombres_entrenador),
             apellidos_entrenador: String(payload.apellidos_entrenador),
-            sexo_entrenador: String(payload.sexo_entrenador),
+            // Mismo criterio que el socio: se normaliza al aplicar, y lo que no se
+      // entiende se conserva para que lo delate la alerta de calidad.
+      sexo_entrenador:
+        normalizarSexo(payload.sexo_entrenador) ??
+        String(payload.sexo_entrenador),
             foto_entrenador: normalizeBinary(payload.foto_entrenador),
             direccion_entrenador: (payload.direccion_entrenador as string | null) ?? null,
             telefono_entrenador: payload.telefono_entrenador ? Number(payload.telefono_entrenador) : null,

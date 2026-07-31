@@ -4,6 +4,7 @@ import { trustedClock } from "../../config/trusted-clock";
 import { parseTreasuryMonth, treasuryMinorToMoney, treasuryMoneyToMinor } from "../../domain/treasury-ledger-policy";
 import { prisma } from "../../infrastructure/db/prismaClient";
 import { CompensationProfileService } from "./compensation-profile.service";
+import { registeredByColumns, resolveFrozenActor } from "./frozen-actor";
 import { TreasuryLedgerService } from "./treasury-ledger.service";
 import { assertTreasuryMonthOpen } from "./treasury-month-lock.service";
 import { serialize } from "../../shared/utils/serialize";
@@ -228,6 +229,14 @@ export class GovernedExpenseWriteService {
         ),
       );
 
+      // Unidad 09 — quién registra el gasto se congela aquí, dentro de la misma
+      // transacción, para que el evento de sync lo lleve consigo (ver
+      // `frozen-actor.ts`). Por la web siempre es un usuario remoto.
+      const actor = await resolveFrozenActor(tx, {
+        userId: input.registrada_por_user_id,
+        gymId,
+      });
+
       const formulaSnapshot = {
         categoria_nombre: category.nombre,
         naturaleza: category.naturaleza,
@@ -259,7 +268,7 @@ export class GovernedExpenseWriteService {
           estado: "PENDIENTE",
           pagado_acumulado: 0,
           comprobante_referencia: input.comprobante_referencia ?? null,
-          registrada_por_user_id: input.registrada_por_user_id ?? "SYSTEM",
+          ...registeredByColumns(actor),
           formula_snapshot_json: JSON.stringify(formulaSnapshot),
           is_deleted: false,
           created_at: now,

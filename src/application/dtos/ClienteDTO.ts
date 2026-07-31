@@ -3,6 +3,9 @@ import { z } from "zod";
 export const CreateClienteSchema = z.object({
     ci: z.string().min(1),
     tipo_documento: z.enum(["CI_CUBANO", "PASAPORTE", "OTRO", "DESCONOCIDO"]).default("DESCONOCIDO"),
+    // E0 (§7-bis): se admite «1985-04-20» y también ISO completo. El caso de uso
+    // la resuelve de nuevo: con carné cubano la deriva del CI e ignora esto.
+    fecha_nacimiento: z.string().min(1).or(z.date()).optional().nullable(),
     nombres: z.string().min(1),
     apellidos: z.string().min(1),
     sexo: z.string(),
@@ -46,7 +49,9 @@ export const UpdateClienteSchema = z.object({
     fecha_fin: z.string().datetime().optional(),
     activo: z.any().optional(),
     id_horarios: z.string().min(1).optional().nullable(),
-    fecha_nacimiento: z.string().datetime().optional().nullable(),
+    // E0 (§7-bis): acepta día suelto además de ISO completo. `datetime()` habría
+    // rechazado «1985-04-20», que es justo lo que manda un selector de fecha.
+    fecha_nacimiento: z.string().min(1).or(z.date()).optional().nullable(),
     referencia_id: z.string().min(1).optional().nullable(),
 });
 

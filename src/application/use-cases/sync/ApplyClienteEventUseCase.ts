@@ -4,6 +4,7 @@ import type { Cliente } from "../../../domain/entities/Cliente";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { ClienteRepository } from "../../../domain/repositories/ClienteRepository";
 import { normalizeBinary } from "../../../shared/utils/normalizeBinary";
+import { normalizarSexo } from "../../../domain/sexo-policy";
 
 
 export interface ApplyClienteEventInput {
@@ -49,11 +50,25 @@ export class ApplyClienteEventUseCase {
     return {
       ci: input.entidadId,
       tipo_documento: String(payload.tipo_documento ?? "DESCONOCIDO"),
+      // E0 (§7-bis): viaja como día de calendario UTC. Ausente en la historia
+      // anterior al corte, que se conserva sin fecha en lugar de inventarla.
+      fecha_nacimiento: payload.fecha_nacimiento
+        ? new Date(String(payload.fecha_nacimiento))
+        : null,
       nombres: String(payload.nombres),
       apellidos: String(payload.apellidos),
-      sexo: String(payload.sexo),
+      // El sexo se normaliza también aquí: un escritorio con versión
+      // vieja podría seguir mandando «M» y volveríamos al problema.
+      // Si no se entiende, se conserva tal cual y lo delata la alerta
+      // de calidad de datos, en vez de romper la bajada del lote.
+      sexo: normalizarSexo(payload.sexo) ?? String(payload.sexo),
       foto_cliente: normalizeBinary(payload.foto_cliente),
-      cliente_peso_id: String(payload.cliente_peso_id),
+      // `String(null)` devuelve la cadena "null", que es lo que llegó a
+      // escribirse en MariaDB para los socios sin ficha de peso: una FK con
+      // cuatro letras dentro. Lo destapó la huella de contenido el 31-07-2026.
+      cliente_peso_id: payload.cliente_peso_id == null
+        ? null
+        : String(payload.cliente_peso_id),
       estatura_cliente: Number(payload.estatura_cliente),
       direccion: (payload.direccion as string | null) ?? null,
       telefono: payload.telefono ? Number(payload.telefono) : null,

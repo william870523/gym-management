@@ -20,6 +20,7 @@ import {
 import { EstadisticasSegmentacionService } from "../src/application/reporting/estadisticas-segmentacion.service";
 import { prisma } from "../src/infrastructure/db/prismaClient";
 import { PrismaEstadisticasSegmentacionReader } from "../src/infrastructure/repositories/prisma-estadisticas-segmentacion.reader";
+import { RetencionCanonicaDesdeServicio } from "../src/infrastructure/repositories/retencion-canonica.reader";
 
 // El remoto es multi-sede: el ámbito no sale de una variable de entorno sino
 // del token. Para verificar se fija la sede demo, igual que hace
@@ -52,6 +53,8 @@ try {
 
   const service = new EstadisticasSegmentacionService(
     new PrismaEstadisticasSegmentacionReader(),
+    // Bajas y tasa de renovación salen del motor canónico de retención.
+    new RetencionCanonicaDesdeServicio(),
   );
 
   let compatibles = 0;
@@ -93,7 +96,9 @@ try {
           (dimension === "tipo_pago" && medida === "ingreso") ||
           (dimension === "plan" && medida === "visitasPorSocio") ||
           (dimension === "moneda" && medida === "ingreso") ||
-          (dimension === "estado" && medida === "padron")
+          (dimension === "estado" && medida === "padron") ||
+          (dimension === "plan" && medida === "tasaRenovacion") ||
+          (dimension === "plan" && medida === "bajas")
         ) {
           muestras.push({
             dimension,

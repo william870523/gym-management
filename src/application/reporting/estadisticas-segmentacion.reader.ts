@@ -48,6 +48,11 @@ export const MEDIDAS = [
   "descuento",
   "recargoMora",
   "diasAtrasoMedio",
+  // Las dos que faltaban. No se calculan aquí: se leen del motor canónico de
+  // retención (regla 11 del plan), que es quien decide qué oportunidad está
+  // madura y quién causó salida.
+  "bajas",
+  "tasaRenovacion",
 ] as const;
 
 export type Medida = (typeof MEDIDAS)[number];
@@ -68,6 +73,14 @@ export interface DefinicionMedida {
   /** Nombre para la vista y el CSV. */
   titulo: string;
   fuente: FuenteMedida;
+  /**
+   * La cifra la produce el **motor canónico de retención**, no una consulta de
+   * este módulo. Cambia de dónde sale el dato y con qué ejes se puede cruzar:
+   * el motor desglosa por plan y por entrenador, y agrupar por cualquier otra
+   * cosa exigiría reclasificar las oportunidades por nuestra cuenta, que es
+   * justo lo que prohíbe la regla 11.
+   */
+  canonica?: boolean;
   /** El importe se agrupa por moneda y nunca se suma entre monedas. */
   dinero: boolean;
   /** Es una tasa: viaja con numerador y denominador (regla 7). */
@@ -175,6 +188,30 @@ export const DEFINICIONES_MEDIDA: Record<Medida, DefinicionMedida> = {
       "Media de días de atraso de los cobros que llevaron recargo. El " +
       "denominador son esos cobros, no todos.",
   },
+  bajas: {
+    titulo: "Bajas",
+    fuente: "membresia",
+    canonica: true,
+    dinero: false,
+    tasa: false,
+    ignoraPeriodo: false,
+    definicion:
+      "Salidas del motor canónico de retención: oportunidades cuya gracia ya " +
+      "terminó sin que el socio renovara. No se cuentan las que aún están " +
+      "dentro de la gracia, porque todavía pueden renovar.",
+  },
+  tasaRenovacion: {
+    titulo: "Tasa de renovación",
+    fuente: "membresia",
+    canonica: true,
+    dinero: false,
+    tasa: true,
+    ignoraPeriodo: false,
+    definicion:
+      "Retenidos ÷ oportunidades **maduras**, las que ya agotaron su gracia. " +
+      "Una renovación pendiente no cuenta ni a favor ni en contra: se queda " +
+      "fuera del denominador hasta que su plazo termine.",
+  },
 };
 
 /** A qué pertenece cada dimensión, que es lo que decide qué se puede cruzar. */
@@ -234,4 +271,36 @@ export interface FilaSegmentacion {
 
 export interface EstadisticasSegmentacionReader {
   leerSegmentacion(consulta: ConsultaSegmentacion): Promise<FilaSegmentacion[]>;
+}
+
+/** Una fila del desglose canónico de retención, tal como lo da el motor. */
+export interface FilaRetencionCanonica {
+  id: string;
+  nombre: string;
+  /** Oportunidades cuya gracia ya terminó. Es el denominador de la tasa. */
+  maduras: number;
+  /** De esas, las que renovaron —puntuales o dentro de la gracia—. */
+  retenidas: number;
+  /** De esas, las que causaron salida. */
+  bajas: number;
+}
+
+/**
+ * Puerto de **lectura** del motor canónico de retención.
+ *
+ * Se llama «lectura» a propósito: la implementación no clasifica nada, le
+ * pregunta al motor que ya existe (`domain/retention/`) y traduce su respuesta.
+ * Si algún día la estadística y el panel de Control y Calidad dieran cifras
+ * distintas de renovación, el defecto estaría en esta traducción, nunca en dos
+ * fórmulas rivales, porque solo hay una.
+ */
+export interface RetencionCanonicaReader {
+  leerRetencion(input: {
+    gymId: string;
+    desde: Date;
+    hasta: Date;
+  }): Promise<{
+    planes: FilaRetencionCanonica[];
+    entrenadores: FilaRetencionCanonica[];
+  }>;
 }

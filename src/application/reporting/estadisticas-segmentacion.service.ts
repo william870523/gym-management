@@ -6,8 +6,11 @@ import {
   TITULOS_DIMENSION,
   type Dimension,
   type EstadisticasSegmentacionReader,
+  type FilaRetencionCanonica,
+  type FilaSegmentacion,
   type FuenteMedida,
   type Medida,
+  type RetencionCanonicaReader,
 } from "./estadisticas-segmentacion.reader";
 
 const DIA_MS = 86_400_000;
@@ -65,6 +68,26 @@ export function resolverCompatibilidad(
   const familia = FAMILIA_DIMENSION[dimension];
   const titulo = TITULOS_DIMENSION[dimension];
 
+  // Las medidas canónicas se leen del motor de retención, que desglosa por plan
+  // y por entrenador. Agrupar por cualquier otro eje exigiría reclasificar las
+  // oportunidades por nuestra cuenta —decidir de nuevo cuál está madura y quién
+  // causó salida— y eso es exactamente la segunda fórmula que prohíbe la regla
+  // 11. Antes que dos verdades sobre la renovación, ninguna.
+  if (definicion.canonica) {
+    if (dimension === "plan" || dimension === "entrenador") {
+      return { compatible: true, fuente: definicion.fuente };
+    }
+    return {
+      compatible: false,
+      motivo:
+        `«${definicion.titulo}» solo se agrupa por plan o por entrenador. La ` +
+        `cifra la produce el motor canónico de retención, que desglosa por ` +
+        `esos dos ejes; sacarla por ${titulo.toLowerCase()} obligaría a ` +
+        `reclasificar las oportunidades aquí, y entonces habría dos formas de ` +
+        `calcular la renovación en el mismo sistema.`,
+    };
+  }
+
   if (familia === "cliente") return { compatible: true, fuente: definicion.fuente };
 
   // Dimensiones que solo existen en un cobro.
@@ -112,7 +135,43 @@ export function resolverCompatibilidad(
 }
 
 export class EstadisticasSegmentacionService {
-  constructor(private readonly reader: EstadisticasSegmentacionReader) {}
+  constructor(
+    private readonly reader: EstadisticasSegmentacionReader,
+    /** Opcional: sin él, las medidas canónicas se declaran no disponibles. */
+    private readonly retencion?: RetencionCanonicaReader,
+  ) {}
+
+  /**
+   * Traduce el desglose del motor canónico a filas del cruzador. No decide
+   * nada: `maduras`, `retenidas` y `bajas` vienen ya clasificadas.
+   */
+  private filasCanonicas(
+    filas: FilaRetencionCanonica[],
+    medida: Medida,
+  ): FilaSegmentacion[] {
+    return filas.map((fila) => {
+      if (medida === "bajas") {
+        return {
+          clave: fila.id,
+          etiqueta: fila.nombre,
+          valor: fila.bajas,
+          numerador: null,
+          denominador: null,
+        };
+      }
+      // Tasa de renovación: retenidos ÷ oportunidades maduras. El denominador
+      // viaja siempre, que es la regla 7.
+      return {
+        clave: fila.id,
+        etiqueta: fila.nombre,
+        valor: fila.maduras === 0
+          ? 0
+          : Math.round((fila.retenidas / fila.maduras) * 10_000) / 100,
+        numerador: fila.retenidas,
+        denominador: fila.maduras,
+      };
+    });
+  }
 
   async cruzar(input: {
     gymId: string;
@@ -185,17 +244,41 @@ export class EstadisticasSegmentacionService {
       };
     }
 
-    const filas = await this.reader.leerSegmentacion({
-      gymId: input.gymId,
-      dimension,
-      medida,
-      fuente: compatibilidad.fuente,
-      desde,
-      hastaExclusiva,
-      hoy,
-      monedaId: dimension === "moneda" ? null : monedaId,
-      limite,
-    });
+    let filas: FilaSegmentacion[];
+    if (definicion.canonica) {
+      if (!this.retencion) {
+        return {
+          ...cabecera,
+          compatible: false as const,
+          motivo:
+            `«${definicion.titulo}» necesita el motor canónico de retención y ` +
+            "esta instalación no lo tiene conectado.",
+          total: 0,
+          filas: [],
+        };
+      }
+      const desglose = await this.retencion.leerRetencion({
+        gymId: input.gymId,
+        desde,
+        hasta: hoy,
+      });
+      filas = this.filasCanonicas(
+        dimension === "plan" ? desglose.planes : desglose.entrenadores,
+        medida,
+      );
+    } else {
+      filas = await this.reader.leerSegmentacion({
+        gymId: input.gymId,
+        dimension,
+        medida,
+        fuente: compatibilidad.fuente,
+        desde,
+        hastaExclusiva,
+        hoy,
+        monedaId: dimension === "moneda" ? null : monedaId,
+        limite,
+      });
+    }
 
     const total = redondear(
       filas.reduce((suma, fila) => suma + fila.valor, 0),

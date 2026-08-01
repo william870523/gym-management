@@ -24,6 +24,7 @@ import {
   EstadisticasSegmentacionService,
 } from "../../../application/reporting/estadisticas-segmentacion.service";
 import { PrismaEstadisticasSegmentacionReader } from "../../repositories/prisma-estadisticas-segmentacion.reader";
+import { RetencionCanonicaDesdeServicio } from "../../repositories/retencion-canonica.reader";
 import {
   DEFINICIONES_MEDIDA,
   DIMENSIONES,
@@ -46,6 +47,9 @@ const rankingsService = new EstadisticasRankingsService(
 );
 const segmentacionService = new EstadisticasSegmentacionService(
   new PrismaEstadisticasSegmentacionReader(),
+  // Las bajas y la renovación las produce el motor canónico de retención,
+  // no una consulta de la estadística (regla 11 del plan).
+  new RetencionCanonicaDesdeServicio(),
 );
 
 type UserAuth = {

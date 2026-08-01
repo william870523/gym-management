@@ -6,6 +6,7 @@ import {
   resolverCompatibilidad,
 } from "./estadisticas-segmentacion.service";
 import {
+  DEFINICIONES_MEDIDA,
   DIMENSIONES,
   MEDIDAS,
   type ConsultaSegmentacion,
@@ -32,10 +33,27 @@ const base = {
 };
 
 describe("qué se puede cruzar con qué", () => {
-  it("las dimensiones del socio valen para todas las medidas", () => {
+  it("las dimensiones del socio valen para toda medida que se calcule aquí", () => {
     for (const medida of MEDIDAS) {
+      if (DEFINICIONES_MEDIDA[medida].canonica) continue;
       expect(resolverCompatibilidad("sexo", medida).compatible).toBe(true);
       expect(resolverCompatibilidad("plan", medida).compatible).toBe(true);
+    }
+  });
+
+  it("las canónicas solo por plan o entrenador, y dicen por qué", () => {
+    for (const medida of ["bajas", "tasaRenovacion"] as const) {
+      expect(resolverCompatibilidad("plan", medida).compatible).toBe(true);
+      expect(resolverCompatibilidad("entrenador", medida).compatible).toBe(true);
+
+      // Sexo es un eje del socio y aun así no vale: no es cuestión de alcance
+      // sino de que la cifra no se calcula aquí.
+      const porSexo = resolverCompatibilidad("sexo", medida);
+      expect(porSexo.compatible).toBe(false);
+      if (!porSexo.compatible) {
+        expect(porSexo.motivo).toContain("motor canónico de retención");
+        expect(porSexo.motivo).toContain("dos formas de calcular la renovación");
+      }
     }
   });
 
@@ -72,6 +90,12 @@ describe("qué se puede cruzar con qué", () => {
         true,
       );
     }
+  });
+
+  it("una medida canónica se declara como tal en el catálogo", () => {
+    expect(DEFINICIONES_MEDIDA.bajas.canonica).toBe(true);
+    expect(DEFINICIONES_MEDIDA.tasaRenovacion.canonica).toBe(true);
+    expect(DEFINICIONES_MEDIDA.altas.canonica).toBeUndefined();
   });
 });
 
@@ -160,6 +184,71 @@ describe("EstadisticasSegmentacionService", () => {
     });
     expect(salida.filas[0]?.valor).toBe(314442);
     expect(salida.total).toBe(314442);
+  });
+
+  it("las bajas y la renovación salen del motor, no de una consulta propia", async () => {
+    const consultasSql: ConsultaSegmentacion[] = [];
+    const reader: EstadisticasSegmentacionReader = {
+      async leerSegmentacion(consulta) {
+        consultasSql.push(consulta);
+        return [];
+      },
+    };
+    const retencion = {
+      async leerRetencion() {
+        return {
+          planes: [
+            // 30 maduras, 24 retenidas, 6 bajas.
+            { id: "p1", nombre: "Mensual", maduras: 30, retenidas: 24, bajas: 6 },
+            { id: "p2", nombre: "Diario", maduras: 4, retenidas: 1, bajas: 3 },
+          ],
+          entrenadores: [],
+        };
+      },
+    };
+    const service = new EstadisticasSegmentacionService(reader, retencion);
+
+    const tasa = await service.cruzar({
+      ...base,
+      dimension: "plan",
+      medida: "tasaRenovacion",
+    });
+    expect(tasa.filas[0]).toMatchObject({
+      etiqueta: "Mensual",
+      valor: 80,
+      numerador: 24,
+      denominador: 30,
+      muestraBaja: false,
+    });
+    // Cuatro oportunidades maduras no sostienen un porcentaje.
+    expect(tasa.filas[1]).toMatchObject({ etiqueta: "Diario", muestraBaja: true });
+    expect(tasa.total).toBeNull();
+
+    const bajas = await service.cruzar({
+      ...base,
+      dimension: "plan",
+      medida: "bajas",
+    });
+    expect(bajas.filas.map((f) => [f.etiqueta, f.valor])).toEqual([
+      ["Mensual", 6],
+      ["Diario", 3],
+    ]);
+    expect(bajas.total).toBe(9);
+
+    // Lo que importa: NO se consultó la base de segmentación ni una vez.
+    expect(consultasSql).toHaveLength(0);
+  });
+
+  it("sin motor conectado se declara no disponible, no se improvisa", async () => {
+    const { service } = servicio();
+    const salida = await service.cruzar({
+      ...base,
+      dimension: "plan",
+      medida: "bajas",
+    });
+    expect(salida.compatible).toBe(false);
+    expect(salida.motivo).toContain("motor canónico");
+    expect(salida.filas).toEqual([]);
   });
 
   it("una combinación imposible sale vacía y explicada, no en cero", async () => {

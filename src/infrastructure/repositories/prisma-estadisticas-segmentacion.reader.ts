@@ -292,6 +292,16 @@ function piezaMedida(medida: Medida, fuente: FuenteMedida): PiezaMedida {
         denominador: "COUNT(*)",
         filtroExtra: soloConRecargo,
       };
+    case "bajas":
+    case "tasaRenovacion":
+      // No tienen SQL aquí ni deben tenerlo: las produce el motor canónico de
+      // retención y el servicio las despacha antes de llegar a este lector. Si
+      // alguna vez cae una, es que alguien le quitó `canonica` a su definición
+      // y estaría a punto de nacer una segunda fórmula de renovación.
+      throw new Error(
+        `La medida ${medida} se lee del motor canónico de retención, no de ` +
+          "una consulta de segmentación.",
+      );
   }
 }
 

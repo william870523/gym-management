@@ -19,9 +19,9 @@ import {
  *   2. este descuento R5.3 → precio con descuento;
  *   3. recargo R5.1 por método de pago → precio final.
  *
- * El redondeo sigue el mismo patrón «ceil a entero superior» (múltiplos de 100
- * centavos) que R5.1, para que cliente y servidor coincidan sin centavos
- * fraccionarios en contexto de alta inflación.
+ * El redondeo se aplica al **precio final**, no al descuento: 30 con 16.67 %
+ * queda 24.999 y se cobra 25. Redondear el descuento daría 6 y cobraría 24,
+ * concediendo más rebaja que la configurada.
  */
 
 export class ClientDiscountPolicyError extends Error {
@@ -109,10 +109,11 @@ export function discountMinor(input: DiscountInput): bigint {
     );
   }
   if (pctMinor === 0n) return 0n;
-  const rawCents = (listMinor * pctMinor + 9999n) / 10000n;
-  if (rawCents === 0n) return 0n;
-  const integerUnits = (rawCents + 99n) / 100n;
-  return integerUnits * 100n;
+  const finalRawCents =
+    (listMinor * (10000n - pctMinor) + 9999n) / 10000n;
+  const finalWholeUnits = ((finalRawCents + 99n) / 100n) * 100n;
+  const finalMinor = finalWholeUnits > listMinor ? listMinor : finalWholeUnits;
+  return listMinor - finalMinor;
 }
 
 /** Desglose listo para recibo y para persistir en el snapshot del pago. */

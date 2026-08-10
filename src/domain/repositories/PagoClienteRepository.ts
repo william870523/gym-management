@@ -25,7 +25,7 @@ export interface InstallmentPaymentIntent {
 
 export interface PagoClienteRepository extends SyncTransactionalRepository<PagoClienteRepository> {
     upsertPagoCliente(data: PagoCliente): Promise<void>;
-    findAll(gymId: string): Promise<PagoCliente[]>;
+    findAll(gymId: string, skip?: number, take?: number): Promise<PagoCliente[]>;
     findById(id: string, gymId: string): Promise<PagoCliente | null>;
     create(data: PagoCliente): Promise<void>;
     update(id: string, gymId: string, data: Partial<PagoCliente>): Promise<void>;

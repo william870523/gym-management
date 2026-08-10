@@ -101,6 +101,11 @@ async function backfill() {
   const conSede = usuarios.filter((u) => u.gym_id && u.gym_id.trim().length > 0);
   const sinSede = usuarios.filter((u) => !u.gym_id || !u.gym_id.trim().length);
   const ahora = trustedClock.nowUtc();
+  // Gemelo exacto del local: el relleno se ejecuta por separado en cada base y
+  // sellarlo con la hora de ejecución hacía divergir `created_at` —56 segundos
+  // medidos el 01-08-2026—. `updated_at` sigue con la hora real, porque el
+  // comparador lo excluye por diseño.
+  const SEMBRADO_EN = new Date("2026-01-01T00:00:00.000Z");
 
   let creadas = 0;
   for (const usuario of conSede) {
@@ -116,10 +121,20 @@ async function backfill() {
       usuario.gym_id,
       usuario.role,
       usuario.active ? 1 : 0,
-      ahora,
+      SEMBRADO_EN,
       ahora,
     );
     creadas += Number(afectadas);
+    // Filas ya rellenadas por una ejecución anterior: se alinea solo
+    // `created_at`, nunca el rol ni el estado, que el dueño sí puede cambiar.
+    if (!afectadas) {
+      await prisma.$executeRawUnsafe(
+        "UPDATE usuario_sede SET created_at = ? WHERE usuario_sede_id = ? AND created_at <> ?",
+        SEMBRADO_EN,
+        id,
+        SEMBRADO_EN,
+      );
+    }
   }
 
   console.log(

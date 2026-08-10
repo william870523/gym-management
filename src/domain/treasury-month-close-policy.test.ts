@@ -30,4 +30,35 @@ describe("remote treasury month close policy parity", () => {
     expect(normalizeMonthlyCloseReason("  Cierre revisado por gerencia ", "cerrar"))
       .toBe("Cierre revisado por gerencia");
   });
+
+  /**
+   * Unidad 10 · ADR-roles-multitenant — recepción no firma dinero.
+   *
+   * La prueba de arriba cubría `accounting` y `administrador`, pero **no
+   * `reception`**, que es precisamente el rol que existe de verdad en la base y
+   * el que el manual nombra. Un cierre firmado por quien no debe no da error:
+   * queda firmado, y el nombre del firmante es lo que audita el mes.
+   */
+  test("recepción no puede firmar ni reabrir un cierre", () => {
+    for (const rol of ["reception", "recepcion", "recepcionista", "operador"]) {
+      expect(canCloseTreasuryMonth(rol)).toBeFalse();
+      expect(canReopenTreasuryMonth(rol)).toBeFalse();
+    }
+  });
+
+  test("administración sí cierra y sí reabre", () => {
+    for (const rol of ["admin", "administrador"]) {
+      expect(canCloseTreasuryMonth(rol)).toBeTrue();
+      expect(canReopenTreasuryMonth(rol)).toBeTrue();
+    }
+  });
+
+  test("un rol desconocido o ausente no autoriza nada", () => {
+    // Fallar abierto aquí sería catastrófico: cualquier token sin rol podría
+    // firmar el mes.
+    for (const rol of [undefined, null, "", "  ", "device", "inventado"]) {
+      expect(canCloseTreasuryMonth(rol)).toBeFalse();
+      expect(canReopenTreasuryMonth(rol)).toBeFalse();
+    }
+  });
 });

@@ -61,6 +61,17 @@ function build(opts: {
     planesPagoRepository,
     clienteRepository,
     actorResolver,
+    async () => ({
+      precio_lista: "30.00",
+      descuento_pct: null,
+      descuento: "0.00",
+      precio_final: "30.00",
+      motivo: "SIN_DESCUENTO",
+      categoria_cliente: "NUEVO",
+      plan_codigo: "plan-1",
+      plan_nombre: "Plan de prueba",
+      cuota_sufijo: null,
+    }),
   );
   return { useCase, saved, plan };
 }

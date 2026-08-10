@@ -45,6 +45,18 @@ export class ApplyDetallePagoEventUseCase {
             cuenta_id: (payload.cuenta_id as string | null) ?? null,
             cantidad: Number(payload.cantidad),
             tipo_cambio_id: payload.tipo_cambio_id ? String(payload.tipo_cambio_id) : null,
+            recargo_metodo_base: payload.recargo_metodo_base == null
+                ? null : String(payload.recargo_metodo_base),
+            recargo_metodo_pct: payload.recargo_metodo_pct == null
+                ? null : String(payload.recargo_metodo_pct),
+            recargo_metodo_importe: payload.recargo_metodo_importe == null
+                ? null : String(payload.recargo_metodo_importe),
+            recargo_metodo_total: payload.recargo_metodo_total == null
+                ? null : String(payload.recargo_metodo_total),
+            recargo_metodo_politica: payload.recargo_metodo_politica == null
+                ? null : String(payload.recargo_metodo_politica),
+            recargo_metodo_tasa_version: payload.recargo_metodo_tasa_version == null
+                ? null : Number(payload.recargo_metodo_tasa_version),
             // Snapshot congelado del recargo por mora (docs/RECARGO_MORA.md).
             // Histórico anterior al recargo llega nulo y así se conserva.
             recargo_mora_modo_snapshot: payload.recargo_mora_modo_snapshot == null

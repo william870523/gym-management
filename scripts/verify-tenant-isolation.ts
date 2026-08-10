@@ -63,13 +63,63 @@ async function runDeniedProbe(token: string, probe: Probe) {
 
 async function main() {
   if (remove) {
+    const syncBefore = await prisma.syncLog.count();
     await removeTenantIsolationDemo(prisma);
-    console.log("Fixture A/B de aislamiento remoto eliminada.");
+    await removeTenantIsolationDemo(prisma);
+    const [memberships, users, gyms, syncAfter] = await Promise.all([
+      prisma.usuarioSede.count({
+        where: { usuario_sede_id: { in: [I.membershipA, I.membershipB] } },
+      }),
+      prisma.user.count({ where: { user_id: { in: [I.userA, I.userB] } } }),
+      prisma.gym.count({ where: { gym_id: { in: [I.gymA, I.gymB] } } }),
+      prisma.syncLog.count(),
+    ]);
+    if (memberships !== 0 || users !== 0 || gyms !== 0) {
+      fail(
+        `teardown incompleto: usuario_sede=${memberships}, users=${users}, gyms=${gyms}`,
+      );
+    }
+    if (syncAfter !== syncBefore) {
+      fail(`el teardown alteró sync_log: ${syncBefore} -> ${syncAfter}`);
+    }
+    console.log(JSON.stringify({
+      result: "PASS",
+      operation: "double-remove",
+      remaining: { usuario_sede: memberships, users, gyms },
+      sync_log: { before: syncBefore, after: syncAfter, delta: 0 },
+    }, null, 2));
     return;
   }
 
   const syncBefore = await prisma.syncLog.count();
   await installTenantIsolationDemo(prisma);
+  await installTenantIsolationDemo(prisma);
+
+  const memberships = await prisma.usuarioSede.findMany({
+    where: { usuario_sede_id: { in: [I.membershipA, I.membershipB] } },
+    orderBy: { usuario_sede_id: "asc" },
+  });
+  const expectedMemberships = new Map<string, { userId: string; gymId: string }>([
+    [I.membershipA, { userId: I.userA, gymId: I.gymA }],
+    [I.membershipB, { userId: I.userB, gymId: I.gymB }],
+  ]);
+  if (memberships.length !== 2) {
+    fail(`la instalación doble dejó ${memberships.length} membresías; esperaba 2`);
+  }
+  for (const membership of memberships) {
+    const expected = expectedMemberships.get(membership.usuario_sede_id);
+    if (
+      !expected ||
+      membership.user_id !== expected.userId ||
+      membership.gym_id !== expected.gymId ||
+      membership.rol !== "admin" ||
+      !membership.activo ||
+      membership.is_deleted ||
+      membership.deleted_at !== null
+    ) {
+      fail(`membresía inválida ${membership.usuario_sede_id}`);
+    }
+  }
 
   const tokenA = JwtService.signAdminToken({
     userId: I.userA,
@@ -212,7 +262,8 @@ async function main() {
   console.log(JSON.stringify({
     result: "PASS",
     database: "MariaDB remota",
-    fixture: "demo-tenant-isolation-v1 (retained)",
+    fixture: "demo-tenant-isolation-v1 (double-install, retained)",
+    fixture_gate: { deterministic_memberships: memberships.length },
     actor_gym: I.gymA,
     foreign_gym: I.gymB,
     checks: {

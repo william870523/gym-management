@@ -29,6 +29,10 @@ import {
   asTreasuryMonthCloseError,
 } from "../../../application/accounting/treasury-month-close.service";
 import {
+  TreasuryPeriodCloseService,
+  asTreasuryPeriodCloseError,
+} from "../../../application/accounting/treasury-period-close.service";
+import {
   OperationalResultsService,
   asOperationalResultsServiceError,
 } from "../../../application/reporting/operational-results.service";
@@ -113,6 +117,7 @@ const treasuryMonthCloses = new TreasuryMonthCloseService(
   managementMargin,
   governedExpenseReadService,
 );
+const treasuryPeriodCloses = new TreasuryPeriodCloseService(treasuryMonthCloses);
 
 function gymIdentity(c: any) {
   const auth = c.get("auth") as
@@ -157,6 +162,8 @@ function handleTreasuryRefundError(c: any, error: unknown) {
 }
 
 function handleTreasuryLedgerError(c: any, error: unknown) {
+  const periodClose = asTreasuryPeriodCloseError(error);
+  if (periodClose) return c.json({ error: periodClose.message, bloqueadores: periodClose.blockers ?? [] }, periodClose.status);
   const monthClose = asTreasuryMonthCloseError(error);
   if (monthClose) return c.json({ error: monthClose.message }, monthClose.status);
   const known = asTreasuryLedgerError(error);
@@ -533,6 +540,40 @@ accountingRoutes.get("/treasury-monthly-summary", async (c) => {
   } catch (error) {
     return handleTreasuryLedgerError(c, error);
   }
+});
+
+accountingRoutes.get("/treasury-period-summary", async (c) => {
+  const auth = accountingIdentity(c);
+  if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
+  const requestedGym = c.req.query("gym_id");
+  if (requestedGym && requestedGym !== auth.gymId) return c.json({ error: "No se encontró el período solicitado." }, 404);
+  try { return c.json(await treasuryPeriodCloses.summary({ gymId: auth.gymId, desde: c.req.query("desde"), hasta: c.req.query("hasta"), tipo: c.req.query("tipo"), monedaId: c.req.query("moneda_id"), cuentaId: c.req.query("cuenta_id"), userId: auth.sub!, role: auth.role })); }
+  catch (error) { return handleTreasuryLedgerError(c, error); }
+});
+
+accountingRoutes.get("/treasury-period-closes", async (c) => {
+  const auth = accountingIdentity(c);
+  if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
+  try { return c.json(await treasuryPeriodCloses.list({ gymId: auth.gymId, desde: c.req.query("desde"), hasta: c.req.query("hasta") })); }
+  catch (error) { return handleTreasuryLedgerError(c, error); }
+});
+
+accountingRoutes.post("/treasury-period-closes", async (c) => {
+  const auth = accountingIdentity(c);
+  if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
+  const body = await c.req.json();
+  if (body.gym_id && body.gym_id !== auth.gymId) return c.json({ error: "No se encontró el período solicitado." }, 404);
+  try { return c.json(await treasuryPeriodCloses.sign({ gymId: auth.gymId, desde: body.desde, hasta: body.hasta, tipo: body.tipo_periodo ?? body.tipo, operationId: body.operacion_id, reason: body.motivo, userId: auth.sub!, role: auth.role }), 201); }
+  catch (error) { return handleTreasuryLedgerError(c, error); }
+});
+
+accountingRoutes.post("/treasury-period-closes/:id/reopen", async (c) => {
+  const auth = accountingIdentity(c);
+  if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
+  const body = await c.req.json();
+  if (body.gym_id && body.gym_id !== auth.gymId) return c.json({ error: "No se encontró el cierre solicitado." }, 404);
+  try { return c.json(await treasuryPeriodCloses.reopen({ gymId: auth.gymId, closeId: c.req.param("id"), operationId: body.operacion_id, reason: body.reapertura_motivo ?? body.motivo, userId: auth.sub!, role: auth.role })); }
+  catch (error) { return handleTreasuryLedgerError(c, error); }
 });
 
 accountingRoutes.get("/operational-results", async (c) => {

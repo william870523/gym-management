@@ -130,7 +130,7 @@ describe("Rutas de cuotas (Remote)", () => {
         ci: CI,
         nombres: "Socio",
         apellidos: "Rutas Cuotas",
-        sexo: "M",
+        sexo: "Masculino",
         estatura_cliente: 1.8,
         nacionalidad_id: nationality.nacionalidad_id,
         fecha_inicio: utcDay(-15),

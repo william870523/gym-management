@@ -65,8 +65,8 @@ describe("client-discount-policy · discountMinor", () => {
     ).toBe(200n);
   });
 
-  it("cliente VIEJO con % y sin excepción aplica ceil a entero superior", () => {
-    // 30.00 × 16.67 % = 5.001 → ceil a 6.00 (mismo patrón que R5.1).
+  it("cliente VIEJO redondea el precio final, no el descuento", () => {
+    // 30.00 × (1 − 16.67 %) = 24.999 → precio final 25.00, descuento 5.00.
     expect(
       discountMinor({
         listPrice: "30.00",
@@ -74,7 +74,7 @@ describe("client-discount-policy · discountMinor", () => {
         discountPct: "16.67",
         planFixedOldPrice: null,
       }),
-    ).toBe(600n);
+    ).toBe(500n);
   });
 
   it("% exacto sin residuo no se infla", () => {
@@ -190,8 +190,8 @@ describe("client-discount-policy · discountBreakdown", () => {
       planFixedOldPrice: null,
     });
     expect(b.precio_lista).toBe("30.00");
-    expect(b.descuento).toBe("6.00");
-    expect(b.precio_final).toBe("24.00");
+    expect(b.descuento).toBe("5.00");
+    expect(b.precio_final).toBe("25.00");
     expect(b.descuento_pct).toBe("16.67");
     expect(b.motivo).toBe("PORCENTAJE_GLOBAL");
   });

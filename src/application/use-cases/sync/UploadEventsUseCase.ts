@@ -20,7 +20,9 @@ import type { ApplyUserEventUseCase } from "./ApplyUserEventUseCase";
 import type { ApplyGymEventUseCase } from "./ApplyGymEventUseCase";
 import { trustedClock } from "../../../config/trusted-clock";
 import { frozenActorIsValid } from "../../accounting/frozen-actor";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
+import { datePartsInZone } from "../../../config/tz";
+import { reconcileFutureMembershipCoverage } from "../../../domain/membership-coverage-reconciliation";
 import {
   PARITY_SYNC_ENTITIES,
   PARITY_SYNC_TARGET_DEFINITIONS,
@@ -29,6 +31,7 @@ import {
   buildAuthenticatedSyncPayload,
   buildAuthoritativeGymRecord,
   normalizeSyncDates,
+  optionalSyncVersion,
   requireMappedSyncTarget,
   requireSyncEntityId,
   requireSyncOperation,
@@ -58,6 +61,163 @@ export interface UploadEventsResult {
 }
 
 type ApplyOutcome = "APPLIED" | "DUPLICATE";
+
+export async function reconcileMembershipCoverageInRemoteTransaction(input: {
+  tx: SyncTransactionContext;
+  gymId: string;
+  ci: string;
+  deviceId: string;
+  syncLogRepository: SyncLogRepository;
+}): Promise<number> {
+  const { tx, gymId, ci, deviceId, syncLogRepository } = input;
+  const client: any = tx;
+  const gym = await client.gym.findUnique({
+    where: { gym_id: gymId },
+    select: { timezone: true },
+  });
+  const parts = datePartsInZone(
+    String(gym?.timezone ?? "Etc/UTC"),
+    trustedClock.nowUtc(),
+  );
+  const businessToday = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  const memberships = await client.membresiaCliente.findMany({
+    where: {
+      gym_id: gymId,
+      ci,
+      is_deleted: false,
+      estado: { in: ["PENDIENTE", "ACTIVA"] },
+      fecha_fin: { gt: businessToday },
+    },
+    select: {
+      membresia_id: true,
+      fecha_inicio: true,
+      fecha_fin: true,
+      activada_at: true,
+      estado: true,
+      is_deleted: true,
+      id_entrenador: true,
+      importe_pagado: true,
+      precio_snapshot: true,
+    },
+  });
+  const reconciliation = reconcileFutureMembershipCoverage({
+    businessToday,
+    memberships: memberships.map((membership: any) => ({
+      membershipId: String(membership.membresia_id),
+      start: new Date(membership.fecha_inicio),
+      endExclusive: new Date(membership.fecha_fin),
+      activatedAt: membership.activada_at ? new Date(membership.activada_at) : null,
+      state: String(membership.estado),
+      isDeleted: Boolean(membership.is_deleted),
+      trainerId: membership.id_entrenador ? String(membership.id_entrenador) : null,
+      paidAmount: Number(membership.importe_pagado),
+      contractedPrice: Number(membership.precio_snapshot),
+    })),
+  });
+  if (reconciliation.corrections.length === 0) return 0;
+
+  const membershipIds = reconciliation.orderedMembershipIds;
+  const unsafeCounts = await Promise.all([
+    client.membresiaPausa.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.membresiaSolicitud.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.membresiaEntrenadorAsignacion.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.membresiaCuota.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.entrenadorComisionDevengo.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.membresiaAjusteFinanciero.count({
+      where: {
+        is_deleted: false,
+        OR: [
+          { membresia_origen_id: { in: membershipIds } },
+          { membresia_destino_id: { in: membershipIds } },
+        ],
+      },
+    }),
+    client.creditoMembresiaAplicacion.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.clienteReembolsoTesoreria.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+    client.pagoReversion.count({ where: { membresia_id: { in: membershipIds }, is_deleted: false } }),
+  ]);
+  if (unsafeCounts.some((count) => Number(count) > 0)) {
+    throw new Error(
+      "La cobertura concurrente tiene cuotas, pausas o efectos financieros; requiere conciliación supervisada.",
+    );
+  }
+
+  const now = trustedClock.nowUtc();
+  for (const correction of reconciliation.corrections) {
+    const updated = await client.membresiaCliente.update({
+      where: { membresia_id: correction.membershipId },
+      data: {
+        fecha_inicio: correction.start,
+        fecha_fin: correction.endExclusive,
+        version: { increment: 1 },
+        updated_at: now,
+      },
+    });
+    await syncLogRepository.register(
+      {
+        eventId: randomUUID(),
+        entidad: "membresia_cliente",
+        operacion: "UPDATE",
+        entidadId: updated.membresia_id,
+        gymId,
+        deviceId,
+        payload: updated,
+      },
+      tx,
+    );
+  }
+
+  const lastId = reconciliation.orderedMembershipIds[
+    reconciliation.orderedMembershipIds.length - 1
+  ]!;
+  const lastMembership = await client.membresiaCliente.findUnique({
+    where: { membresia_id: lastId },
+  });
+  if (!lastMembership) {
+    throw new Error("No se pudo proyectar la última cobertura conciliada.");
+  }
+  const projectedClient = await client.cliente.updateMany({
+    where: { ci, gym_id: gymId, is_deleted: false },
+    data: {
+      activo: true,
+      id_planes_pago: lastMembership.id_planes_pago,
+      id_entrenador: lastMembership.id_entrenador,
+      fecha_inicio: lastMembership.fecha_inicio,
+      fecha_fin: lastMembership.fecha_fin,
+      version: { increment: 1 },
+      updated_at: now,
+    },
+  });
+  if (projectedClient.count !== 1) {
+    throw new Error("No se pudo proyectar la cobertura dentro del gimnasio autenticado.");
+  }
+  const updatedClient = await client.cliente.findFirst({
+    where: { ci, gym_id: gymId, is_deleted: false },
+  });
+  if (!updatedClient) {
+    throw new Error("No se encontró al cliente después de proyectar su cobertura.");
+  }
+  const nationality = await client.nacionalidad.findUnique({
+    where: { nacionalidad_id: updatedClient.nacionalidad_id },
+    select: { codigo_iso: true },
+  });
+  await syncLogRepository.register(
+    {
+      eventId: randomUUID(),
+      entidad: "cliente",
+      operacion: "UPDATE",
+      entidadId: ci,
+      gymId,
+      deviceId,
+      payload: {
+        ...updatedClient,
+        ...(nationality ? { nacionalidad_codigo_iso: nationality.codigo_iso } : {}),
+      },
+    },
+    tx,
+  );
+  return reconciliation.corrections.length;
+}
 
 export class UploadEventsUseCase {
   constructor(
@@ -352,6 +512,7 @@ export class UploadEventsUseCase {
           "tesoreria_cierre_solicitud",
           "tesoreria_conciliacion",
           "tesoreria_cierre_mensual",
+          "tesoreria_cierre_periodo",
           "membresia_cliente",
           "membresia_pausa",
           "membresia_solicitud",
@@ -386,6 +547,21 @@ export class UploadEventsUseCase {
         throw new Error(`Entidad de sync no soportada: ${ev.entidad}.`);
       }
 
+      // Un DELETE local incrementa `version` antes de encolarse. El remoto
+      // debe congelar esa misma versión dentro de esta transacción; de lo
+      // contrario, la fila queda borrada en ambos lados pero con huellas
+      // distintas (PD-4). Los modelos del mapper genérico se atienden dentro
+      // de applyPrismaMappedEvent; aquí cubrimos los handlers dedicados.
+      if (ev.operacion === "DELETE") {
+        await this.applyDedicatedDeleteVersion({
+          entity: ev.entidad,
+          entityId: ev.entidad_id,
+          gymId: gym_id,
+          payload: effectivePayload,
+          tx,
+        });
+      }
+
       const effectiveGymId = GLOBAL_SYNC_ENTITIES.has(ev.entidad)
         ? null
         : gym_id;
@@ -404,7 +580,77 @@ export class UploadEventsUseCase {
         tx,
       );
 
+      // El evento original se registra primero. Si la unión local/remota
+      // descubre dos compras futuras solapadas, las correcciones quedan después
+      // en el cursor y ningún cliente puede sobrescribirlas con el payload viejo.
+      if (ev.entidad === "membresia_cliente" && ev.operacion !== "DELETE") {
+        const ci = String(effectivePayload.ci ?? "").trim();
+        if (!ci) {
+          throw new Error("La membresía sincronizada no identifica al cliente.");
+        }
+        await reconcileMembershipCoverageInRemoteTransaction({
+          tx,
+          gymId: gym_id,
+          ci,
+          deviceId: device_id,
+          syncLogRepository: this.syncLogRepository,
+        });
+      }
+
       return "APPLIED";
+  }
+
+  private async applyDedicatedDeleteVersion(input: {
+    entity: string;
+    entityId: string;
+    gymId: string;
+    payload: Record<string, unknown>;
+    tx: SyncTransactionContext;
+  }) {
+    const client: any = input.tx;
+    const mapping: Record<
+      string,
+      { delegate: any; pk: string; global?: boolean }
+    > = {
+      cliente: { delegate: client.cliente, pk: "ci" },
+      user: { delegate: client.user, pk: "user_id" },
+      cliente_peso: { delegate: client.clientePeso, pk: "cliente_peso_id" },
+      asistencia: { delegate: client.asistencia, pk: "asistencia_id" },
+      pago_cliente: { delegate: client.pagoCliente, pk: "pago_cliente_id" },
+      detalle_pago: { delegate: client.detallePago, pk: "detalle_pago_id" },
+      moneda: { delegate: client.moneda, pk: "moneda_id", global: true },
+      nacionalidad: {
+        delegate: client.nacionalidad,
+        pk: "nacionalidad_id",
+        global: true,
+      },
+      tipo_pago: { delegate: client.tipoPago, pk: "tipo_pago_id", global: true },
+      tipo_cambio: {
+        delegate: client.tipoCambio,
+        pk: "tipo_cambio_id",
+        global: true,
+      },
+      referencia: {
+        delegate: client.referencia,
+        pk: "referencia_id",
+        global: true,
+      },
+      horario: { delegate: client.horario, pk: "horario_id" },
+      planes_pago: { delegate: client.planesPago, pk: "id_planes_pago" },
+      cuenta: { delegate: client.cuenta, pk: "id_cuenta" },
+      entrenador: { delegate: client.entrenador, pk: "id_entrenador" },
+    };
+    const target = mapping[input.entity];
+    // `gym` no tiene columna version y las entidades genéricas ya se
+    // actualizaron en applyPrismaMappedEvent.
+    if (!target) return;
+
+    const version = optionalSyncVersion(input.payload, input.entity);
+    if (version === undefined) return;
+
+    const where: Record<string, unknown> = { [target.pk]: input.entityId };
+    if (!target.global) where.gym_id = input.gymId;
+    await target.delegate.updateMany({ where, data: { version } });
   }
 
   /** Telemetría del dispositivo. Fuera de la transacción por evento. */
@@ -663,6 +909,24 @@ export class UploadEventsUseCase {
       existingRecord: existingOwnedRecord,
     });
 
+    // R5.4 — convergencia del aviso de administración: **«leído» gana y nunca
+    // retrocede**. Gemela de la regla del worker local. Sin ella, un aviso que
+    // administración ya marcó como leído en la web volvía a aparecer pendiente
+    // en cuanto subiera la copia del escritorio que aún lo tenía sin leer. Es
+    // monótona a propósito: se puede marcar desde cualquiera de los dos lados y
+    // el orden de llegada deja de importar.
+    if (
+      ev.entidad === "aviso_administracion" &&
+      operation !== "DELETE" &&
+      record.leido === false
+    ) {
+      const existente: { leido: boolean } | null = await target.delegate.findUnique({
+        where: { [target.pk]: primaryKey },
+        select: { leido: true },
+      });
+      if (existente?.leido) record.leido = true;
+    }
+
     if (ev.entidad === "configuracion_sistema" && operation !== "DELETE") {
       const key = String(record.clave ?? "").trim();
       if (!key) {
@@ -775,6 +1039,67 @@ export class UploadEventsUseCase {
         throw new Error(
           `No se puede sincronizar el cierre mensual ${ev.entidad_id}: ` +
             "la firma, el período, los actores o la fotografía auditada no son válidos.",
+        );
+      }
+    }
+
+    if (ev.entidad === "tesoreria_cierre_periodo") {
+      if (operation === "DELETE") {
+        throw new Error("Un cierre por período auditado no se puede eliminar por sincronización.");
+      }
+      const type = String(record.tipo_periodo ?? "").trim().toUpperCase();
+      const state = String(record.estado ?? "").trim().toUpperCase();
+      const start = new Date(String(record.fecha_inicio ?? ""));
+      const endExclusive = new Date(String(record.fecha_fin_exclusiva ?? ""));
+      const snapshotJson = String(record.snapshot_json ?? "");
+      const expectedHash = createHash("sha256").update(snapshotJson).digest("hex");
+      let snapshot: any = null;
+      try { snapshot = JSON.parse(snapshotJson); } catch { snapshot = null; }
+      const closerId = String(record.cerrado_por_user_id ?? "").trim();
+      const existing = await client.tesoreriaCierrePeriodo.findUnique({
+        where: { cierre_periodo_id: ev.entidad_id },
+      });
+      const key = record.clave_periodo_activa == null
+        ? null
+        : String(record.clave_periodo_activa);
+      const expectedKey = Number.isNaN(start.getTime()) || Number.isNaN(endExclusive.getTime())
+        ? ""
+        : `${gymId}|${type}|${start.toISOString().slice(0, 10)}|${endExclusive.toISOString().slice(0, 10)}`;
+      const immutableConflict = existing && (
+        existing.gym_id !== gymId ||
+        existing.tipo_periodo !== type ||
+        existing.operacion_id !== String(record.operacion_id ?? "") ||
+        existing.motivo_cierre !== String(record.motivo_cierre ?? "") ||
+        existing.snapshot_json !== snapshotJson ||
+        existing.snapshot_sha256 !== String(record.snapshot_sha256 ?? "") ||
+        existing.cerrado_por_user_id !== closerId ||
+        existing.fecha_inicio.getTime() !== start.getTime() ||
+        existing.fecha_fin_exclusiva.getTime() !== endExclusive.getTime()
+      );
+      const validReopen = state === "REABIERTO"
+        ? Boolean(record.reapertura_operacion_id && record.reapertura_motivo &&
+            record.reabierto_por_user_id && record.reabierto_por_nombre_snapshot &&
+            record.reabierto_por_rol_snapshot && record.reabierto_at)
+        : record.reapertura_operacion_id == null;
+      if (
+        !["DIARIO", "SEMANAL", "PERSONALIZADO"].includes(type) ||
+        !["CERRADO", "REABIERTO"].includes(state) ||
+        Number.isNaN(start.getTime()) || Number.isNaN(endExclusive.getTime()) ||
+        endExclusive.getTime() <= start.getTime() ||
+        (state === "CERRADO" ? key !== expectedKey : key != null) ||
+        !validReopen || !closerId || !record.cerrado_por_nombre_snapshot ||
+        !record.cerrado_por_rol_snapshot || !snapshot ||
+        snapshot.gym_id !== gymId || snapshot.tipo_periodo !== type ||
+        snapshot.fecha_inicio !== start.toISOString().slice(0, 10) ||
+        snapshot.fecha_fin_exclusiva !== endExclusive.toISOString().slice(0, 10) ||
+        snapshot.cerrado_por?.user_id !== closerId ||
+        expectedHash !== String(record.snapshot_sha256 ?? "") ||
+        (operation === "INSERT" && state !== "CERRADO") ||
+        (operation === "UPDATE" && !existing) || Boolean(immutableConflict)
+      ) {
+        throw new Error(
+          `No se puede sincronizar el cierre por período ${ev.entidad_id}: ` +
+            "tenant, rango, actor, ciclo o firma no válidos.",
         );
       }
     }
@@ -1386,9 +1711,15 @@ export class UploadEventsUseCase {
 
     if (operation === "DELETE") {
       const now = trustedClock.nowUtc();
+      const version = optionalSyncVersion(payload, ev.entidad);
       const deleted = await target.delegate.updateMany({
         where: { [target.pk]: record[target.pk], gym_id: gymId },
-        data: { is_deleted: true, deleted_at: now, updated_at: now },
+        data: {
+          is_deleted: true,
+          deleted_at: now,
+          updated_at: now,
+          ...(version === undefined ? {} : { version }),
+        },
       });
       if (existingOwnedRecord && deleted.count !== 1) {
         throw new Error(

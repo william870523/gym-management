@@ -123,7 +123,7 @@ describe("processPayment (Remote) · recargo por mora cobrado", () => {
         fecha: now.toISOString(),
         detalles: [
           {
-            tipo_pago_id: paymentType.tipo_pago_id,
+            tipo_pago_id: account.tipo_pago_id ?? paymentType.tipo_pago_id,
             moneda_id: currency.moneda_id,
             cuenta_id: account.cuenta_id,
             cantidad: 33,

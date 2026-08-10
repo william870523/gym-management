@@ -1,3 +1,16 @@
+/**
+ * Entidades de SEDE que viajan por sincronización.
+ *
+ * **`roles` y `permissions` NO están aquí, y es deliberado.** El
+ * ADR-roles-multitenant (02-08-2026, opción A) decidió que son catálogo del
+ * **producto**, no dato de gimnasio: se versionan con el software y se siembran
+ * con `migrate:roles-global`, que produce la misma huella en las dos bases.
+ *
+ * Añadirlos «por simetría» con el resto de catálogos reabriría la contradicción
+ * que ese ADR cerró: un rol con `gym_id` no da aislamiento —lo da la relación
+ * usuario↔gimnasio— y sí crea un frente de sincronización que nadie necesita.
+ * Hay una prueba que falla si alguien los añade.
+ */
 export const PARITY_SYNC_TARGET_DEFINITIONS = {
   gasto_categoria: { delegateKey: "gastoCategoria", pk: "categoria_id" },
   gasto_proveedor: { delegateKey: "gastoProveedor", pk: "proveedor_id" },
@@ -11,6 +24,10 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
   membresia_cuota: {
     delegateKey: "membresiaCuota",
     pk: "cuota_instancia_id",
+  },
+  tesoreria_cierre_periodo: {
+    delegateKey: "tesoreriaCierrePeriodo",
+    pk: "cierre_periodo_id",
   },
 } as const;
 
@@ -58,6 +75,28 @@ export function requireSyncEntityId(value: unknown, entity: string): string {
     throw new Error(`Falta entidad_id para el evento de sync ${entity}.`);
   }
   return String(value);
+}
+
+/**
+ * La versión del emisor es autoritativa también en DELETE. Los eventos
+ * antiguos que no la incluyen conservan el comportamiento legacy, pero una
+ * versión presente debe ser un entero positivo para evitar divergencias
+ * silenciosas entre SQLite y MariaDB.
+ */
+export function optionalSyncVersion(
+  payload: Record<string, unknown>,
+  entity: string,
+): number | undefined {
+  const rawVersion = payload.version;
+  if (rawVersion === undefined || rawVersion === null) return undefined;
+
+  const version = Number(rawVersion);
+  if (!Number.isInteger(version) || version <= 0) {
+    throw new Error(
+      `Versión de sync inválida para ${entity}: ${String(rawVersion)}.`,
+    );
+  }
+  return version;
 }
 
 export function requireMappedSyncTarget<T extends SyncTarget>(

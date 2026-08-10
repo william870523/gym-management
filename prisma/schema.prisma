@@ -66,6 +66,16 @@ model UsuarioSede {
   @@map("usuario_sede")
 }
 
+/// Rol del PRODUCTO, no de la sede (ADR-roles-multitenant, 02-08-2026, opción A).
+///
+/// Gemelo del modelo local. `name` es único de forma global **a propósito**: los
+/// roles son los mismos en todas las sedes y se versionan con el producto, no se
+/// sincronizan como dato de gimnasio. La pertenencia a una sede vive en
+/// `usuario_sede`, nunca aquí.
+///
+/// `gym_id` **NO APLICA** y debe quedar siempre en NULL. Rellenarla no da
+/// aislamiento: lo da la relación usuario↔gimnasio. Hay una prueba que falla si
+/// alguien la rellena.
 model Role {
   id          String       @id @default(uuid())
   name        String       @unique // e.g., 'ADMIN', 'RECEPTIONIST'
@@ -74,6 +84,7 @@ model Role {
   users       User[]
 
   // Sync Fields
+  /// NO APLICA — ver ADR-roles-multitenant. Siempre NULL.
   gym_id        String?
   source_device String?
   version       Int       @default(1)
@@ -85,6 +96,10 @@ model Role {
   @@map("roles")
 }
 
+/// Permiso del PRODUCTO, no de la sede (ADR-roles-multitenant, opción A).
+///
+/// Mismo contrato que Role: `action` es único de forma global porque el permiso
+/// describe una capacidad del software, y `gym_id` **NO APLICA**.
 model Permission {
   id          String  @id @default(uuid())
   action      String  @unique // e.g., 'users.read', 'clients.create'
@@ -92,6 +107,7 @@ model Permission {
   roles       Role[]
 
   // Sync Fields
+  /// NO APLICA — ver ADR-roles-multitenant. Siempre NULL.
   gym_id        String?
   source_device String?
   version       Int       @default(1)
@@ -1284,6 +1300,44 @@ model TesoreriaCierreMensual {
   @@map("tesoreria_cierre_mensual")
 }
 
+// R5.7: certificado flexible para día, semana o rango personalizado. Un mes
+// natural exacto delega en TesoreriaCierreMensual y nunca crea esta fila.
+model TesoreriaCierrePeriodo {
+  cierre_periodo_id               String    @id
+  operacion_id                    String    @unique(map: "uq_tes_cierre_periodo_operacion")
+  clave_periodo_activa            String?   @unique(map: "uq_tes_cierre_periodo_activa")
+  tipo_periodo                    String
+  fecha_inicio                    DateTime
+  fecha_fin_exclusiva             DateTime
+  ciclo_numero                    Int
+  estado                          String
+  motivo_cierre                   String
+  cerrado_por_user_id             String
+  cerrado_por_nombre_snapshot     String
+  cerrado_por_rol_snapshot        String
+  cerrado_at                      DateTime
+  reapertura_operacion_id         String?   @unique(map: "uq_tes_cierre_periodo_reapertura")
+  reapertura_motivo               String?   @db.Text
+  reabierto_por_user_id           String?
+  reabierto_por_nombre_snapshot   String?
+  reabierto_por_rol_snapshot      String?
+  reabierto_at                    DateTime?
+  snapshot_version                Int       @default(1)
+  snapshot_json                   String    @db.LongText
+  snapshot_sha256                 String
+  is_deleted                      Boolean   @default(false)
+  created_at                      DateTime  @default(now())
+  gym_id                          String
+  source_device                   String?
+  version                         Int       @default(1)
+  updated_at                      DateTime  @default(now())
+  deleted_at                      DateTime?
+
+  @@index([gym_id, fecha_inicio, fecha_fin_exclusiva], map: "idx_tes_cierre_periodo_gym_rango")
+  @@index([gym_id, estado, cerrado_at], map: "idx_tes_cierre_periodo_gym_estado")
+  @@map("tesoreria_cierre_periodo")
+}
+
 model Cuenta {
   cuenta_id     String    @id
   nombre_cuenta String
@@ -1439,6 +1493,9 @@ model PagoCliente {
   precio_lista_snapshot    Float?
   descuento_pct_snapshot   String?
   descuento_monto_snapshot Float?
+  categoria_cliente_snapshot String?
+  plan_codigo_snapshot       String?
+  cuota_sufijo_snapshot      String?
   // Condonación del recargo por mora (docs/RECARGO_MORA.md §6-bis). El recargo
   // se aplica siempre que corresponda; perdonarlo exige motivo y deja rastro.
   // El importe es el que se HABRÍA cobrado, calculado por el servidor.
@@ -1482,6 +1539,14 @@ model DetallePago {
   cuenta_id       String?
   cantidad        Float
   tipo_cambio_id  String?
+  // R5.1: snapshot autoritativo del recargo por método. Nulo en historia
+  // anterior al corte y cuando no hay recargo configurado.
+  recargo_metodo_base         String?
+  recargo_metodo_pct          String?
+  recargo_metodo_importe      String?
+  recargo_metodo_total        String?
+  recargo_metodo_politica     String?
+  recargo_metodo_tasa_version Int?
   // Recargo por mora congelado (docs/RECARGO_MORA.md). Históricos = null
   // (pre-recargo-mora); sin backfill. Importes como string decimal.
   recargo_mora_modo_snapshot  String?

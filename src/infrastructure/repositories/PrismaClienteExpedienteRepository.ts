@@ -8,7 +8,7 @@ export class PrismaClienteExpedienteRepository implements ClienteExpedienteRepos
   async findByClient(ci: string, gymId: string) {
     const client = await prisma.cliente.findFirst({
       where: { ci, gym_id: gymId, is_deleted: false },
-      select: { ci: true, nombres: true, apellidos: true },
+      select: { ci: true, nombres: true, apellidos: true, categoria: true },
     });
     if (!client) return null;
 
@@ -173,6 +173,19 @@ export class PrismaClienteExpedienteRepository implements ClienteExpedienteRepos
         id_entrenador: payment.id_entrenador,
         is_deleted: payment.is_deleted,
         deleted_at: payment.deleted_at,
+        // H1: instantánea de descuento congelada al cobrar (no se recalcula).
+        precio_lista_snapshot: payment.precio_lista_snapshot,
+        descuento_pct_snapshot: payment.descuento_pct_snapshot,
+        descuento_monto_snapshot: payment.descuento_monto_snapshot,
+        categoria_cliente_snapshot: payment.categoria_cliente_snapshot,
+        // H3: código de plan + sufijo de cuota (igual que el panel de pagos).
+        plan_codigo_snapshot: payment.plan_codigo_snapshot,
+        cuota_sufijo_snapshot: payment.cuota_sufijo_snapshot,
+        // H5: cobrador congelado (R5.6), mismo cuarteto que tesorería.
+        cobrado_por_user_id: payment.cobrado_por_user_id,
+        cobrado_por_nombre_snapshot: payment.cobrado_por_nombre_snapshot,
+        cobrado_por_rol_snapshot: payment.cobrado_por_rol_snapshot,
+        cobrado_por_origen: payment.cobrado_por_origen,
         detalles: (detailsByPayment.get(payment.pago_cliente_id) ?? []).map(
           (detail) => {
             const detailCurrency = currenciesById.get(detail.moneda_id);

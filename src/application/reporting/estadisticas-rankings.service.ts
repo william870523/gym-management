@@ -10,6 +10,10 @@ import {
   TIPOS_RANKING,
 } from "./estadisticas-rankings.reader";
 import { calcularAlertas } from "./estadisticas-alertas";
+import type {
+  FilaRetencionCanonica,
+  RetencionCanonicaReader,
+} from "./estadisticas-segmentacion.reader";
 
 const DIA_MS = 86_400_000;
 const TAMANO_LOTE_EXPORTACION = 10_000;
@@ -73,7 +77,44 @@ function valorPorMoneda(filas: RankingValorSocio[], limite: number) {
 }
 
 export class EstadisticasRankingsService {
-  constructor(private readonly reader: EstadisticasRankingsReader) {}
+  constructor(
+    private readonly reader: EstadisticasRankingsReader,
+    /**
+     * Motor canónico de retención. Solo lo usa la alerta de churn por plan; sin
+     * él esa regla se declara **no evaluada**, nunca en orden (regla 11).
+     */
+    private readonly retencion?: RetencionCanonicaReader,
+  ) {}
+
+  /**
+   * El desglose canónico por plan, o `null` si no se pudo leer.
+   *
+   * Un fallo del motor no puede dejar la portada en blanco —es la pantalla de
+   * entrada de administración—, pero tampoco puede pasar por «todo en orden»:
+   * devolver `null` hace que la regla de churn viaje marcada como no evaluada.
+   */
+  private async desgloseCanonicoPorPlan(
+    gymId: string,
+    desde: Date,
+    hasta: Date,
+  ): Promise<FilaRetencionCanonica[] | null> {
+    if (!this.retencion) return null;
+    try {
+      const desglose = await this.retencion.leerRetencion({
+        gymId,
+        desde,
+        hasta,
+      });
+      return desglose.planes;
+    } catch (error) {
+      console.error(
+        "No se pudo leer el motor canónico de retención para la alerta de " +
+          "churn; la regla queda sin evaluar:",
+        error,
+      );
+      return null;
+    }
+  }
 
   async portada(input: {
     gymId: string;
@@ -210,6 +251,11 @@ export class EstadisticasRankingsService {
       indicadores,
       planes,
       entrenadores,
+      retencionPlanes: await this.desgloseCanonicoPorPlan(
+        input.gymId,
+        desde,
+        hoy,
+      ),
     });
 
     return {

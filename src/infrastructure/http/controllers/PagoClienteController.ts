@@ -20,6 +20,12 @@ import {
 import { getUserGymActor } from "../middleware/auth.middleware";
 import { PaymentRuleError } from "../../../domain/payment-rule-error";
 import { PaymentActorError } from "../../../application/payment/payment-actor";
+import {
+    MethodSurchargeError,
+    quoteMethodSurcharge,
+} from "../../../application/payment/method-surcharge.service";
+import { trustedClock } from "../../../config/trusted-clock";
+import { ClientDiscountQuoteService } from "../../../application/payment/client-discount-quote.service";
 
 const ProcessPaymentSchema = CreatePagoClienteSchema.extend({
     detalles: z.array(CreateDetallePagoSchema.omit({ pago_cliente_id: true })),
@@ -58,6 +64,7 @@ export class PagoClienteController {
     private processUseCase: ProcessPaymentUseCase;
     private recargoMoraQuotes: RecargoMoraQuoteService;
     private reversalService: PaymentReversalService;
+    private clientDiscountQuotes: ClientDiscountQuoteService;
 
     constructor() {
         const repository = new PrismaPagoClienteRepository();
@@ -75,6 +82,7 @@ export class PagoClienteController {
         );
         this.reversalService = new PaymentReversalService();
         this.recargoMoraQuotes = new RecargoMoraQuoteService();
+        this.clientDiscountQuotes = new ClientDiscountQuoteService();
     }
 
     // ... existing methods ...
@@ -135,6 +143,47 @@ export class PagoClienteController {
         }
     }
 
+    async descuentoClienteQuote(c: Context) {
+        try {
+            const auth = c.get("auth");
+            if (!auth?.gymId) {
+                return c.json({ error: "El token no identifica un gimnasio." }, 403);
+            }
+            return c.json(await this.clientDiscountQuotes.quote({
+                gymId: auth.gymId,
+                ci: c.req.query("ci") ?? "",
+                planId: c.req.query("plan_id") ?? "",
+                numeroCuota: c.req.query("numero_cuota")
+                    ? Number(c.req.query("numero_cuota"))
+                    : null,
+            }));
+        } catch (error: any) {
+            return c.json({ error: error.message }, 400);
+        }
+    }
+
+    async recargoMetodoQuote(c: Context) {
+        try {
+            const auth = c.get("auth");
+            if (!auth?.gymId) {
+                return c.json({ error: "El token no identifica un gimnasio." }, 403);
+            }
+            const body = await c.req.json();
+            const quote = await quoteMethodSurcharge(prisma, {
+                receivedAmount: body.total_recibido,
+                paymentTypeId: body.tipo_pago_id,
+                accountId: body.cuenta_id,
+                paymentCurrencyId: body.moneda_pago_id,
+                planCurrencyId: body.moneda_plan_id,
+                exchangeRateId: body.tipo_cambio_id ?? null,
+            }, auth.gymId, trustedClock.nowUtc());
+            return c.json(quote);
+        } catch (error: any) {
+            const status = error instanceof MethodSurchargeError ? error.status : 400;
+            return c.json({ error: error.message }, status as any);
+        }
+    }
+
     async process(c: Context) {
         try {
             const body = await c.req.json();
@@ -169,6 +218,9 @@ export class PagoClienteController {
             if (error instanceof PaymentActorError) {
                 return c.json({ error: error.message }, error.status as any);
             }
+            if (error instanceof MethodSurchargeError) {
+                return c.json({ error: error.message }, error.status as any);
+            }
             // Regla de negocio incumplida: el operador debe leer el motivo.
             if (error instanceof PaymentRuleError) {
                 return c.json({ error: error.message }, 400);
@@ -185,8 +237,17 @@ export class PagoClienteController {
         try {
             const actor = getUserGymActor(c);
             if (!actor) return c.json({ error: "Gym scope required" }, 403);
-            const result = await this.listUseCase.execute(actor.gymId);
-            return c.json(result);
+            const page = Math.max(1, Number(c.req.query("page")) || 1);
+            const limit = Math.min(500, Math.max(1, Number(c.req.query("limit")) || 10));
+            const skip = (page - 1) * limit;
+            const [data, total, totalVoided] = await Promise.all([
+                this.listUseCase.execute(actor.gymId, skip, limit),
+                prisma.pagoCliente.count({ where: { gym_id: actor.gymId } }),
+                prisma.pagoCliente.count({
+                    where: { gym_id: actor.gymId, is_deleted: true },
+                }),
+            ]);
+            return c.json({ data, total, totalVoided });
         } catch (error) {
             return c.json({ error: "Internal Server Error" }, 500);
         }

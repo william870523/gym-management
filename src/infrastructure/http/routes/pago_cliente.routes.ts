@@ -11,6 +11,8 @@ pagoClienteRoutes.get("/cliente/:ci", (c) => controller.listByClient(c));
 // Cotización del recargo por mora (docs/RECARGO_MORA.md). Antes de "/:id"
 // para que no la capture la ruta por identificador.
 pagoClienteRoutes.get("/recargo-mora/quote", (c) => controller.recargoMoraQuote(c));
+pagoClienteRoutes.get("/descuento-cliente/quote", (c) => controller.descuentoClienteQuote(c));
+pagoClienteRoutes.post("/recargo-metodo/quote", (c) => controller.recargoMetodoQuote(c));
 pagoClienteRoutes.get("/:id", (c) => controller.getById(c));
 pagoClienteRoutes.post("/", paymentWriteGone);
 // Cobrar es el trabajo de recepción (R5.6: el cobro queda a nombre de quien lo

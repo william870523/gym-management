@@ -29,6 +29,9 @@ const ADDITIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "pago_cliente", column: "precio_lista_snapshot", ddl: "ADD COLUMN precio_lista_snapshot DOUBLE NULL" },
   { table: "pago_cliente", column: "descuento_pct_snapshot", ddl: "ADD COLUMN descuento_pct_snapshot VARCHAR(191) NULL" },
   { table: "pago_cliente", column: "descuento_monto_snapshot", ddl: "ADD COLUMN descuento_monto_snapshot DOUBLE NULL" },
+  { table: "pago_cliente", column: "categoria_cliente_snapshot", ddl: "ADD COLUMN categoria_cliente_snapshot VARCHAR(191) NULL" },
+  { table: "pago_cliente", column: "plan_codigo_snapshot", ddl: "ADD COLUMN plan_codigo_snapshot VARCHAR(191) NULL" },
+  { table: "pago_cliente", column: "cuota_sufijo_snapshot", ddl: "ADD COLUMN cuota_sufijo_snapshot VARCHAR(191) NULL" },
 ];
 
 async function migrate() {

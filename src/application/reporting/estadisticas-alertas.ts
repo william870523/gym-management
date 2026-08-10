@@ -7,6 +7,7 @@ import {
   type ResumenRankings,
   type TipoRanking,
 } from "./estadisticas-rankings.reader";
+import type { FilaRetencionCanonica } from "./estadisticas-segmentacion.reader";
 
 /**
  * Alertas explicables de la portada (docs/PLAN_ESTADISTICAS.md §5.1).
@@ -30,6 +31,7 @@ export type FamiliaAlerta =
   | "asistencia"
   | "mora"
   | "plan"
+  | "churn"
   | "entrenador"
   | "datos";
 
@@ -57,6 +59,13 @@ export interface AlertaEstadistica {
   regla: string;
   comparacion: ComparacionMetrica | null;
   muestra: MuestraAlerta | null;
+  /**
+   * Cuánto se pasó del umbral, en la unidad de su regla: porcentaje de caída o
+   * de subida, y puntos porcentuales en el churn. Es lo que ordena el panel, y
+   * viaja explícito porque no todas las reglas comparan contra un período
+   * anterior: el churn se compara contra el propio gimnasio.
+   */
+  magnitud: number | null;
   monedaId: string | null;
   destino: DestinoAlerta | null;
 }
@@ -64,6 +73,11 @@ export interface AlertaEstadistica {
 export interface ReglaAlerta {
   familia: FamiliaAlerta;
   texto: string;
+  /**
+   * `false` cuando la regla no se pudo mirar por falta de su fuente. No es lo
+   * mismo que «todo en orden»: una regla no evaluada tiene que decirlo.
+   */
+  evaluada: boolean;
 }
 
 export interface ResultadoAlertas {
@@ -80,58 +94,72 @@ export const UMBRALES_ALERTA = {
   asistencia: { aviso: 15, peligro: 30, baseMinima: 30 },
   mora: { aviso: 25, peligro: 50, baseMinima: 5 },
   plan: { aviso: 30, peligro: 50, baseMinima: 5 },
+  /**
+   * El churn no se juzga contra un valor absoluto sino contra el propio
+   * gimnasio: en un gimnasio con 40 % de churn general, un plan al 45 % no es
+   * la noticia; uno al 70 % sí. Por eso el umbral son **puntos porcentuales por
+   * encima del churn del gimnasio**, no un porcentaje suelto.
+   */
+  churn: { avisoPp: 15, peligroPp: 30, baseMinima: 5 },
   entrenador: { aviso: 20, peligro: 40, baseMinima: 5 },
   datos: { coberturaAviso: 90, coberturaPeligro: 75, sinSexoAviso: 10 },
 } as const;
 
-const REGLAS: ReglaAlerta[] = [
-  {
-    familia: "asistencia",
-    texto:
-      `Asistencia: se avisa cuando las visitas del período caen ` +
-      `${UMBRALES_ALERTA.asistencia.aviso} % o más frente al bloque anterior ` +
-      `de igual duración (peligro desde ` +
-      `${UMBRALES_ALERTA.asistencia.peligro} %). No se evalúa con menos de ` +
-      `${UMBRALES_ALERTA.asistencia.baseMinima} visitas en el bloque anterior.`,
-  },
-  {
-    familia: "mora",
-    texto:
-      `Mora: se avisa, por moneda y sin sumarlas, cuando el recargo cobrado ` +
-      `sube ${UMBRALES_ALERTA.mora.aviso} % o más (peligro desde ` +
-      `${UMBRALES_ALERTA.mora.peligro} %). No se evalúa con menos de ` +
-      `${UMBRALES_ALERTA.mora.baseMinima} cobros con recargo en el bloque ` +
-      `anterior.`,
-  },
-  {
-    familia: "plan",
-    texto:
-      `Planes: se avisa cuando la contratación de un plan cae ` +
-      `${UMBRALES_ALERTA.plan.aviso} % o más (peligro desde ` +
-      `${UMBRALES_ALERTA.plan.peligro} %), con al menos ` +
-      `${UMBRALES_ALERTA.plan.baseMinima} contratos en el bloque anterior. ` +
-      `El churn por plan no se juzga aquí: espera al motor canónico de ` +
-      `cohortes maduras (regla 11 del plan).`,
-  },
-  {
-    familia: "entrenador",
-    texto:
-      `Entrenadores: se avisa cuando la cartera activa cae ` +
-      `${UMBRALES_ALERTA.entrenador.aviso} % o más respecto al corte ` +
-      `anterior (peligro desde ${UMBRALES_ALERTA.entrenador.peligro} %), con ` +
-      `al menos ${UMBRALES_ALERTA.entrenador.baseMinima} socios en aquel ` +
-      `corte.`,
-  },
-  {
-    familia: "datos",
-    texto:
-      `Datos: se avisa cuando la fecha de nacimiento cubre menos del ` +
-      `${UMBRALES_ALERTA.datos.coberturaAviso} % del padrón (peligro por ` +
-      `debajo del ${UMBRALES_ALERTA.datos.coberturaPeligro} %), cuando falta ` +
-      `el sexo en más del ${UMBRALES_ALERTA.datos.sinSexoAviso} % o cuando ` +
-      `el mismo sexo aparece escrito de más de dos formas.`,
-  },
+const TEXTOS_REGLA: Record<FamiliaAlerta, string> = {
+  asistencia:
+    `Asistencia: se avisa cuando las visitas del período caen ` +
+    `${UMBRALES_ALERTA.asistencia.aviso} % o más frente al bloque anterior ` +
+    `de igual duración (peligro desde ` +
+    `${UMBRALES_ALERTA.asistencia.peligro} %). No se evalúa con menos de ` +
+    `${UMBRALES_ALERTA.asistencia.baseMinima} visitas en el bloque anterior.`,
+  mora:
+    `Mora: se avisa, por moneda y sin sumarlas, cuando el recargo cobrado ` +
+    `sube ${UMBRALES_ALERTA.mora.aviso} % o más (peligro desde ` +
+    `${UMBRALES_ALERTA.mora.peligro} %). No se evalúa con menos de ` +
+    `${UMBRALES_ALERTA.mora.baseMinima} cobros con recargo en el bloque ` +
+    `anterior.`,
+  plan:
+    `Planes: se avisa cuando la contratación de un plan cae ` +
+    `${UMBRALES_ALERTA.plan.aviso} % o más (peligro desde ` +
+    `${UMBRALES_ALERTA.plan.peligro} %), con al menos ` +
+    `${UMBRALES_ALERTA.plan.baseMinima} contratos en el bloque anterior. ` +
+    `Esta regla mira cuántos entran; el churn del plan lo juzga la familia ` +
+    `«churn», con su propia fuente.`,
+  churn:
+    `Churn por plan: la cifra la produce el motor canónico de retención ` +
+    `—bajas ÷ oportunidades cuya gracia ya terminó—, la misma que usa Control ` +
+    `y Calidad; aquí no se reclasifica nada (regla 11 del plan). Se avisa ` +
+    `cuando el churn de un plan supera en ${UMBRALES_ALERTA.churn.avisoPp} ` +
+    `puntos porcentuales el del gimnasio entero (peligro desde ` +
+    `${UMBRALES_ALERTA.churn.peligroPp}), con al menos ` +
+    `${UMBRALES_ALERTA.churn.baseMinima} oportunidades maduras en ese plan.`,
+  entrenador:
+    `Entrenadores: se avisa cuando la cartera activa cae ` +
+    `${UMBRALES_ALERTA.entrenador.aviso} % o más respecto al corte ` +
+    `anterior (peligro desde ${UMBRALES_ALERTA.entrenador.peligro} %), con ` +
+    `al menos ${UMBRALES_ALERTA.entrenador.baseMinima} socios en aquel ` +
+    `corte.`,
+  datos:
+    `Datos: se avisa cuando la fecha de nacimiento cubre menos del ` +
+    `${UMBRALES_ALERTA.datos.coberturaAviso} % del padrón (peligro por ` +
+    `debajo del ${UMBRALES_ALERTA.datos.coberturaPeligro} %), cuando falta ` +
+    `el sexo en más del ${UMBRALES_ALERTA.datos.sinSexoAviso} % o cuando ` +
+    `el mismo sexo aparece escrito de más de dos formas.`,
+};
+
+/** Orden en que se presentan las reglas del panel. */
+const ORDEN_REGLAS: FamiliaAlerta[] = [
+  "asistencia",
+  "mora",
+  "plan",
+  "churn",
+  "entrenador",
+  "datos",
 ];
+
+function regla(familia: FamiliaAlerta): string {
+  return TEXTOS_REGLA[familia];
+}
 
 const SIN_DATO = "SIN DATO";
 
@@ -179,7 +207,8 @@ const PESO_SEVERIDAD: Record<SeveridadAlerta, number> = {
 };
 
 function magnitudDe(alerta: AlertaEstadistica) {
-  return Math.abs(alerta.comparacion?.variacionPorcentual ?? 0);
+  return alerta.magnitud
+    ?? Math.abs(alerta.comparacion?.variacionPorcentual ?? 0);
 }
 
 /**
@@ -210,6 +239,12 @@ export function calcularAlertas(entrada: {
   planes: RankingPlan[];
   /** Todos los entrenadores, por la misma razón. */
   entrenadores: RankingEntrenador[];
+  /**
+   * Desglose por plan del **motor canónico de retención**, tal como lo entrega
+   * su puerto de lectura. `null` o ausente = no se pudo consultar, y entonces
+   * la regla de churn se declara no evaluada en vez de callar.
+   */
+  retencionPlanes?: FilaRetencionCanonica[] | null;
 }): ResultadoAlertas {
   const alertas: AlertaEstadistica[] = [];
 
@@ -229,7 +264,7 @@ export function calcularAlertas(entrada: {
           `Se registraron ${entero(visitas.actual)} visitas frente a ` +
           `${entero(visitas.anterior)} del bloque anterior: ` +
           `${porcentaje(magnitud)} % menos.`,
-        regla: REGLAS[0]!.texto,
+        regla: regla("asistencia"),
         comparacion: compararMetrica(
           "visitas",
           visitas.actual,
@@ -240,6 +275,7 @@ export function calcularAlertas(entrada: {
           base: visitas.anterior,
           etiqueta: "visitas del período sobre las del anterior",
         },
+        magnitud: Math.round(magnitud * 100) / 100,
         monedaId: null,
         destino: { tipo: "ranking", ranking: "socios-inactividad" },
       });
@@ -263,7 +299,7 @@ export function calcularAlertas(entrada: {
         `${importe(mora.importeActual)} (${porcentaje(magnitud)} % más) en ` +
         `${entero(mora.cobrosActual)} cobros, frente a ` +
         `${entero(mora.cobrosAnterior)} antes.`,
-      regla: REGLAS[1]!.texto,
+      regla: regla("mora"),
       comparacion: compararMetrica(
         "recargoMora",
         mora.importeActual,
@@ -274,6 +310,7 @@ export function calcularAlertas(entrada: {
         base: mora.cobrosAnterior,
         etiqueta: "cobros con recargo sobre los del bloque anterior",
       },
+      magnitud: Math.round(magnitud * 100) / 100,
       monedaId: mora.monedaId,
       // Todavía no existe un ranking de mora: el detalle por persona vive en
       // la Puntualidad del perfil de cada socio. Antes que un destino que no
@@ -298,7 +335,7 @@ export function calcularAlertas(entrada: {
         `Se contrató ${entero(plan.vendidos)} veces frente a ` +
         `${entero(plan.vendidosAnterior)} en el bloque anterior: ` +
         `${porcentaje(magnitud)} % menos.`,
-      regla: REGLAS[2]!.texto,
+      regla: regla("plan"),
       comparacion: compararMetrica(
         "vendidos",
         plan.vendidos,
@@ -309,6 +346,7 @@ export function calcularAlertas(entrada: {
         base: plan.vendidosAnterior,
         etiqueta: "contratos del período sobre los del anterior",
       },
+      magnitud: Math.round(magnitud * 100) / 100,
       monedaId: null,
       destino: { tipo: "plan", id: plan.id },
     });
@@ -339,7 +377,7 @@ export function calcularAlertas(entrada: {
         `${porcentaje(magnitud)} % menos. Perdió ` +
         `${entero(entrenador.perdidos)} y ganó ` +
         `${entero(entrenador.ganados)} en el período.`,
-      regla: REGLAS[3]!.texto,
+      regla: regla("entrenador"),
       comparacion: compararMetrica(
         "carteraActiva",
         entrenador.carteraActiva,
@@ -350,9 +388,69 @@ export function calcularAlertas(entrada: {
         base: entrenador.carteraActivaAnterior,
         etiqueta: "socios de la cartera sobre los del corte anterior",
       },
+      magnitud: Math.round(magnitud * 100) / 100,
       monedaId: null,
       destino: { tipo: "entrenador", id: entrenador.id },
     });
+  }
+
+  // Churn por plan. La regla 11 lo tuvo fuera hasta que hubo un motor canónico
+  // al que preguntárselo; ahora lo hay y llega por su puerto de lectura, ya
+  // clasificado. Aquí no se decide quién es baja ni qué oportunidad está
+  // madura: solo se compara el churn de cada plan con el del gimnasio entero.
+  const retencionPlanes = entrada.retencionPlanes ?? null;
+  if (retencionPlanes !== null) {
+    const madurasTotal = retencionPlanes.reduce(
+      (suma, fila) => suma + fila.maduras,
+      0,
+    );
+    const bajasTotal = retencionPlanes.reduce(
+      (suma, fila) => suma + fila.bajas,
+      0,
+    );
+    // Sin oportunidades maduras en todo el gimnasio no hay contra qué comparar:
+    // el churn de un plan sobre un padrón sin historia no significa nada.
+    const churnGimnasio = madurasTotal === 0
+      ? null
+      : (bajasTotal / madurasTotal) * 100;
+    if (churnGimnasio !== null) {
+      for (const fila of retencionPlanes) {
+        if (fila.maduras < UMBRALES_ALERTA.churn.baseMinima) continue;
+        const churnPlan = (fila.bajas / fila.maduras) * 100;
+        const exceso = churnPlan - churnGimnasio;
+        const nivel = exceso >= UMBRALES_ALERTA.churn.peligroPp
+          ? "peligro"
+          : exceso >= UMBRALES_ALERTA.churn.avisoPp
+          ? "aviso"
+          : null;
+        if (!nivel) continue;
+        alertas.push({
+          id: `plan-churn-anormal:${fila.id}`,
+          familia: "churn",
+          severidad: nivel,
+          titulo: `${fila.nombre} pierde socios por encima de la media`,
+          detalle:
+            `${entero(fila.bajas)} de ${entero(fila.maduras)} oportunidades ` +
+            `maduras acabaron en salida: ${porcentaje(churnPlan)} % frente al ` +
+            `${porcentaje(churnGimnasio)} % del gimnasio, ` +
+            `${porcentaje(exceso)} puntos por encima. Maduras son las que ya ` +
+            `agotaron su gracia; las abiertas no cuentan porque todavía ` +
+            `pueden renovar.`,
+          regla: regla("churn"),
+          // No hay bloque anterior con el que comparar: la referencia es el
+          // propio gimnasio, y va en `magnitud` y en el detalle.
+          comparacion: null,
+          muestra: {
+            valor: fila.bajas,
+            base: fila.maduras,
+            etiqueta: "bajas sobre oportunidades maduras del plan",
+          },
+          magnitud: Math.round(exceso * 100) / 100,
+          monedaId: null,
+          destino: { tipo: "plan", id: fila.id },
+        });
+      }
+    }
   }
 
   const padron = entrada.resumen.sociosRegistrados;
@@ -374,13 +472,14 @@ export function calcularAlertas(entrada: {
           `${entero(entrada.resumen.sinFechaNacimiento)} socios no la tienen. ` +
           `La segmentación por edad solo cubre ${porcentaje(cobertura)} % del ` +
           `padrón y el resto se cuenta aparte, nunca se reparte.`,
-        regla: REGLAS[4]!.texto,
+        regla: regla("datos"),
         comparacion: null,
         muestra: {
           valor: conFecha,
           base: padron,
           etiqueta: "socios con fecha sobre el padrón",
         },
+        magnitud: Math.round((100 - cobertura) * 100) / 100,
         monedaId: null,
         destino: null,
       });
@@ -406,13 +505,14 @@ export function calcularAlertas(entrada: {
             `categorías duplicadas hasta normalizarlo.`
           : `${entero(sinSexo)} socios no lo tienen, el ` +
             `${porcentaje(faltaSexo)} % del padrón.`,
-        regla: REGLAS[4]!.texto,
+        regla: regla("datos"),
         comparacion: null,
         muestra: {
           valor: padron - sinSexo,
           base: padron,
           etiqueta: "socios con sexo sobre el padrón",
         },
+        magnitud: Math.round(faltaSexo * 100) / 100,
         monedaId: null,
         destino: null,
       });
@@ -427,5 +527,15 @@ export function calcularAlertas(entrada: {
   );
 
   const { conservadas, omitidas } = recortarPorFamilia(alertas);
-  return { alertas: conservadas, omitidas, reglas: REGLAS };
+  return {
+    alertas: conservadas,
+    omitidas,
+    // Las reglas viajan siempre, disparadas o no; y la de churn dice además si
+    // llegó a mirarse, porque «no evaluada» y «todo en orden» no son lo mismo.
+    reglas: ORDEN_REGLAS.map((familia) => ({
+      familia,
+      texto: TEXTOS_REGLA[familia],
+      evaluada: familia === "churn" ? retencionPlanes !== null : true,
+    })),
+  };
 }

@@ -23,7 +23,7 @@ export class PrismaDetallePagoRepository implements DetallePagoRepository {
   // no expone `$transaction`.
   private runInClient<T>(work: (c: any) => Promise<T>): Promise<T> {
     return typeof this.client.$transaction === "function"
-      ? this.runInClient(work)
+      ? this.client.$transaction(work)
       : work(this.client);
   }
 
@@ -63,6 +63,12 @@ export class PrismaDetallePagoRepository implements DetallePagoRepository {
                     cuenta_id: data.cuenta_id ?? null,
                     cantidad: data.cantidad,
                     tipo_cambio_id: data.tipo_cambio_id ?? null,
+                    recargo_metodo_base: data.recargo_metodo_base == null ? null : String(data.recargo_metodo_base),
+                    recargo_metodo_pct: data.recargo_metodo_pct ?? null,
+                    recargo_metodo_importe: data.recargo_metodo_importe ?? null,
+                    recargo_metodo_total: data.recargo_metodo_total ?? null,
+                    recargo_metodo_politica: data.recargo_metodo_politica ?? null,
+                    recargo_metodo_tasa_version: data.recargo_metodo_tasa_version ?? null,
                     recargo_mora_modo_snapshot: data.recargo_mora_modo_snapshot ?? null,
                     recargo_mora_dias_atraso: data.recargo_mora_dias_atraso ?? null,
                     recargo_mora_base: data.recargo_mora_base ?? null,
@@ -84,6 +90,12 @@ export class PrismaDetallePagoRepository implements DetallePagoRepository {
                     cuenta_id: data.cuenta_id ?? null,
                     cantidad: data.cantidad,
                     tipo_cambio_id: data.tipo_cambio_id ?? null,
+                    recargo_metodo_base: data.recargo_metodo_base == null ? null : String(data.recargo_metodo_base),
+                    recargo_metodo_pct: data.recargo_metodo_pct ?? null,
+                    recargo_metodo_importe: data.recargo_metodo_importe ?? null,
+                    recargo_metodo_total: data.recargo_metodo_total ?? null,
+                    recargo_metodo_politica: data.recargo_metodo_politica ?? null,
+                    recargo_metodo_tasa_version: data.recargo_metodo_tasa_version ?? null,
                     recargo_mora_modo_snapshot: data.recargo_mora_modo_snapshot ?? null,
                     recargo_mora_dias_atraso: data.recargo_mora_dias_atraso ?? null,
                     recargo_mora_base: data.recargo_mora_base ?? null,
@@ -143,6 +155,12 @@ export class PrismaDetallePagoRepository implements DetallePagoRepository {
                 cuenta_id: data.cuenta_id ?? null,
                 cantidad: data.cantidad,
                 tipo_cambio_id: data.tipo_cambio_id ?? null,
+                recargo_metodo_base: data.recargo_metodo_base == null ? null : String(data.recargo_metodo_base),
+                recargo_metodo_pct: data.recargo_metodo_pct ?? null,
+                recargo_metodo_importe: data.recargo_metodo_importe ?? null,
+                recargo_metodo_total: data.recargo_metodo_total ?? null,
+                recargo_metodo_politica: data.recargo_metodo_politica ?? null,
+                recargo_metodo_tasa_version: data.recargo_metodo_tasa_version ?? null,
                 recargo_mora_modo_snapshot: data.recargo_mora_modo_snapshot ?? null,
                 recargo_mora_dias_atraso: data.recargo_mora_dias_atraso ?? null,
                 recargo_mora_base: data.recargo_mora_base ?? null,
@@ -191,6 +209,12 @@ export class PrismaDetallePagoRepository implements DetallePagoRepository {
                 cuenta_id: data.cuenta_id ?? undefined,
                 cantidad: data.cantidad,
                 tipo_cambio_id: data.tipo_cambio_id,
+                recargo_metodo_base: data.recargo_metodo_base == null ? data.recargo_metodo_base : String(data.recargo_metodo_base),
+                recargo_metodo_pct: data.recargo_metodo_pct,
+                recargo_metodo_importe: data.recargo_metodo_importe,
+                recargo_metodo_total: data.recargo_metodo_total,
+                recargo_metodo_politica: data.recargo_metodo_politica,
+                recargo_metodo_tasa_version: data.recargo_metodo_tasa_version,
                 recargo_mora_modo_snapshot: data.recargo_mora_modo_snapshot,
                 recargo_mora_dias_atraso: data.recargo_mora_dias_atraso,
                 recargo_mora_base: data.recargo_mora_base,

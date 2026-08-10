@@ -133,7 +133,7 @@ describe("processPayment (Remote) · cobro por cuotas", () => {
     });
     currencyId = currency.moneda_id;
     nationalityId = nationality.nacionalidad_id;
-    paymentTypeId = paymentType.tipo_pago_id;
+    paymentTypeId = account.tipo_pago_id ?? paymentType.tipo_pago_id;
     accountId = account.cuenta_id;
 
     // El atraso se mide contra la FECHA DE NEGOCIO del gimnasio, no contra el
@@ -161,6 +161,7 @@ describe("processPayment (Remote) · cobro por cuotas", () => {
         activo: true,
         gym_id: gymId,
         acepta_cuotas: true,
+        codigo: "PCI",
         recargo_mora_modo: "PORCENTAJE",
         recargo_mora_valor: "10.00",
         recargo_mora_activo: true,
@@ -261,6 +262,8 @@ describe("processPayment (Remote) · cobro por cuotas", () => {
     });
 
     expect(Number(saved?.monto_total)).toBe(11);
+    expect(saved?.plan_codigo_snapshot).toBe("PCI");
+    expect(saved?.cuota_sufijo_snapshot).toBe("/2");
     expect(detalles[0]!.recargo_mora_importe).toBe("1.00");
     expect(detalles[0]!.recargo_mora_dias_atraso).toBe(5);
     // El recargo NO paga plan: 10 + 10, no 21.

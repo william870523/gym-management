@@ -814,12 +814,30 @@ export class TreasuryLedgerService {
         })
       : [];
     const rateById = new Map(rates.map((row) => [row.tipo_cambio_id, row]));
-    let remainingBaseMinor = treasuryMoneyToMinor(this.money(payment.monto_total));
+    const hasMethodSnapshot = rows.some((row) => row.recargo_metodo_base != null);
+    let remainingBaseMinor = hasMethodSnapshot
+      ? rows.reduce((sum, detail) => {
+          const baseMinor = treasuryMoneyToMinor(
+            this.money(detail.recargo_metodo_base ?? detail.cantidad),
+          );
+          const conversion = this.detailConversion(
+            detail,
+            payment.moneda_id,
+            rateById.get(detail.tipo_cambio_id),
+          );
+          return conversion.valid
+            ? sum + BigInt(Math.round(Number(baseMinor) * conversion.baseFactor))
+            : sum;
+        }, 0n)
+      : treasuryMoneyToMinor(this.money(payment.monto_total));
     const drafts: MovementDraft[] = [];
     let detectedChange = false;
     for (const detail of rows) {
       const grossMinor = treasuryMoneyToMinor(this.money(detail.cantidad));
       if (grossMinor <= 0n) continue;
+      const appliedMinor = treasuryMoneyToMinor(
+        this.money(detail.recargo_metodo_base ?? detail.cantidad),
+      );
       const conversion = this.detailConversion(
         detail,
         payment.moneda_id,
@@ -829,7 +847,7 @@ export class TreasuryLedgerService {
       if (!detail.cuenta_id) reasons.push("MOVIMIENTO_SIN_CUENTA");
       if (!conversion.valid) reasons.push("TIPO_CAMBIO_NO_RESOLUBLE");
       const equivalentMinor = conversion.valid
-        ? BigInt(Math.round(Number(grossMinor) * conversion.baseFactor))
+        ? BigInt(Math.round(Number(appliedMinor) * conversion.baseFactor))
         : 0n;
       const acceptedBaseMinor = equivalentMinor > remainingBaseMinor
         ? remainingBaseMinor

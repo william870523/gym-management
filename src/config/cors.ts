@@ -42,6 +42,10 @@ export const corsMiddleware = () => {
             "Authorization",
             "Content-Type",
             "X-Requested-With",
+            // AppClock calibra el reloj con una lectura no cacheable. En web
+            // esta cabecera dispara preflight; si no se autoriza, el navegador
+            // bloquea /system/time y la UI conserva el bootstrap Etc/UTC.
+            "Cache-Control",
             GYM_CONTEXT_HEADER,
         ],
         exposeHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],

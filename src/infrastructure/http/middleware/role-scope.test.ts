@@ -118,3 +118,46 @@ describe("requireAdminForWrites", () => {
         expect(response.status).toBe(200);
     });
 });
+
+/**
+ * Unidad 10 · el rol que **llega al manejador**.
+ *
+ * Las pruebas de arriba comprueban guardianes que devuelven 403. Pero las rutas
+ * de tesorería no se defienden así: van detrás de `requireStaff`, que deja pasar
+ * a recepción a propósito —recepción trabaja en la web—, y la autoridad para
+ * firmar la decide después el manejador leyendo `auth.role`
+ * (`canCloseTreasuryMonth`). Ahí el guardián no dice nada; lo único que separa a
+ * recepción de firmar el mes es que ese valor sea el **guardado** y no el que
+ * venga firmado en el token.
+ */
+describe("el rol que llega al manejador", () => {
+    /** App que expone el rol tal y como lo vería una ruta de contabilidad. */
+    const appQueLeeElRol = (persistedRole: string) => {
+        const app = new Hono();
+        app.use("*", authUser(async () => ({ role: persistedRole }), noAudit));
+        app.use("*", requireStaff(noAudit));
+        app.get("/", (c) => c.json({ role: (c.get("auth") as { role?: string }).role }));
+        return app;
+    };
+
+    it("recepción con un token que se declara admin sigue siendo recepción", async () => {
+        const response = await appQueLeeElRol("reception")
+            .request("/", { headers: bearer(tokenFor("admin", "recepcion-con-claim-forjado")) });
+
+        // requireStaff la deja entrar: recepción es personal y la web es suya.
+        expect(response.status).toBe(200);
+        // Y aun así el manejador ve "reception", que es lo que hace que
+        // canCloseTreasuryMonth le niegue la firma del mes.
+        expect(await response.json()).toEqual({ role: "reception" });
+    });
+
+    it("administración con un token que se declara recepción sigue siendo administración", async () => {
+        // El sentido contrario importa igual: si el token pudiera degradar el
+        // puesto, bastaría un token viejo para bloquear a quien sí manda.
+        const response = await appQueLeeElRol("admin")
+            .request("/", { headers: bearer(tokenFor("reception", "admin-con-token-viejo")) });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ role: "admin" });
+    });
+});

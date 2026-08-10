@@ -149,7 +149,78 @@ describe("EstadisticasRankingsService", () => {
       destino: { tipo: "plan", id: "hundido" },
       muestra: { valor: 2, base: 12 },
     });
-    expect(salida.reglasAlerta).toHaveLength(5);
+    expect(salida.reglasAlerta).toHaveLength(6);
+    // Esta portada se construyó sin motor canónico de retención, así que la
+    // regla de churn viaja marcada como no evaluada en vez de callarse.
+    expect(
+      salida.reglasAlerta.find((regla) => regla.familia === "churn")?.evaluada,
+    ).toBe(false);
+  });
+
+  it("lee el churn del motor canónico cuando está conectado", async () => {
+    const motor = {
+      llamadas: 0,
+      async leerRetencion() {
+        this.llamadas += 1;
+        return {
+          planes: [
+            {
+              id: "hundido",
+              nombre: "Plan hundido",
+              maduras: 20,
+              retenidas: 5,
+              bajas: 15,
+            },
+            {
+              id: "sano",
+              nombre: "Plan sano",
+              maduras: 80,
+              retenidas: 72,
+              bajas: 8,
+            },
+          ],
+          entrenadores: [],
+        };
+      },
+    };
+
+    const salida = await new EstadisticasRankingsService(reader, motor)
+      .portada({
+        gymId: "gym",
+        zona: "America/Havana",
+        hoy: new Date("2026-07-30T00:00:00.000Z"),
+        dias: 30,
+      });
+
+    expect(motor.llamadas).toBe(1);
+    expect(
+      salida.reglasAlerta.find((regla) => regla.familia === "churn")?.evaluada,
+    ).toBe(true);
+    expect(salida.alertas.map((fila) => fila.id)).toContain(
+      "plan-churn-anormal:hundido",
+    );
+  });
+
+  it("un motor caído deja la regla sin evaluar, pero no tumba la portada", async () => {
+    const motorCaido = {
+      async leerRetencion(): Promise<never> {
+        throw new Error("motor no disponible");
+      },
+    };
+
+    const salida = await new EstadisticasRankingsService(reader, motorCaido)
+      .portada({
+        gymId: "gym",
+        zona: "America/Havana",
+        hoy: new Date("2026-07-30T00:00:00.000Z"),
+        dias: 30,
+      });
+
+    expect(salida.resumen).toBeDefined();
+    expect(
+      salida.reglasAlerta.find((regla) => regla.familia === "churn")?.evaluada,
+    ).toBe(false);
+    expect(salida.alertas.some((fila) => fila.familia === "churn")).toBe(false);
   });
 
   it("pagina y conserva búsqueda y orden en el servidor", async () => {

@@ -11,6 +11,9 @@ export interface PagoCliente {
     precio_lista_snapshot?: number | null;
     descuento_pct_snapshot?: string | null;
     descuento_monto_snapshot?: number | null;
+    categoria_cliente_snapshot?: string | null;
+    plan_codigo_snapshot?: string | null;
+    cuota_sufijo_snapshot?: string | null;
     // Condonación del recargo por mora (docs/RECARGO_MORA.md §6-bis).
     recargo_mora_condonado_importe?: string | null;
     recargo_mora_condonado_motivo?: string | null;

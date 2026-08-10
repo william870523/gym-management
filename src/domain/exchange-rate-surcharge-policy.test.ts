@@ -5,6 +5,7 @@ import {
   parseExchangeRateSurcharges,
   serializeExchangeRateSurcharges,
   surchargeBreakdown,
+  surchargeBreakdownFromTotal,
   surchargeMinor,
 } from "./exchange-rate-surcharge-policy";
 
@@ -75,5 +76,24 @@ describe("exchange rate surcharge policy", () => {
     expect(without.recargo).toBe("0.00");
     expect(without.recargo_pct).toBeNull();
     expect(without.total).toBe("4500.00");
+  });
+
+  test("deriva la base desde el total recibido sin cambiar la fórmula A", () => {
+    expect(surchargeBreakdownFromTotal("10.00", { tp: "5.00" }, "tp"))
+      .toEqual({
+        base: "9.00",
+        recargo_pct: "5.00",
+        recargo: "1.00",
+        total: "10.00",
+      });
+    expect(surchargeBreakdownFromTotal("11.00", { tp: "5.00" }, "tp"))
+      .toEqual({
+        base: "10.00",
+        recargo_pct: "5.00",
+        recargo: "1.00",
+        total: "11.00",
+      });
+    expect(() => surchargeBreakdownFromTotal("21.50", { tp: "5.00" }, "tp"))
+      .toThrow("no admite un desglose exacto");
   });
 });

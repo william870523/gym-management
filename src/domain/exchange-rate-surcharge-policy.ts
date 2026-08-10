@@ -124,3 +124,48 @@ export function surchargeBreakdown(
     total: treasuryMinorToMoney(baseMinor + surcharge),
   };
 }
+
+/**
+ * Descompone el total realmente recibido conservando la fórmula A:
+ * `total = base + ceil(base × porcentaje)`.
+ *
+ * El redondeo al entero crea algunos importes que no tienen una descomposición
+ * exacta. En esos casos se falla cerrado: recepción debe introducir un total
+ * que coincida con el desglose mostrado, nunca se inventa cambio ni cobertura.
+ */
+export function surchargeBreakdownFromTotal(
+  totalAmount: string,
+  surcharges: Record<string, string>,
+  paymentTypeId: string,
+) {
+  const totalMinor = treasuryMoneyToMinor(totalAmount);
+  if (totalMinor < 0n) {
+    throw new ExchangeRateSurchargePolicyError(
+      "El total recibido no puede ser negativo.",
+    );
+  }
+
+  let low = 0n;
+  let high = totalMinor;
+  while (low < high) {
+    const middle = (low + high + 1n) / 2n;
+    const gross = middle + surchargeMinor(middle, surcharges, paymentTypeId);
+    if (gross <= totalMinor) low = middle;
+    else high = middle - 1n;
+  }
+
+  const surcharge = surchargeMinor(low, surcharges, paymentTypeId);
+  const computedTotal = low + surcharge;
+  if (computedTotal !== totalMinor) {
+    throw new ExchangeRateSurchargePolicyError(
+      "El total recibido no admite un desglose exacto con el redondeo del recargo.",
+    );
+  }
+
+  return {
+    base: treasuryMinorToMoney(low),
+    recargo_pct: surcharges[paymentTypeId] ?? null,
+    recargo: treasuryMinorToMoney(surcharge),
+    total: treasuryMinorToMoney(computedTotal),
+  };
+}

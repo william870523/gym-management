@@ -35,6 +35,8 @@ import {
 } from "./gym-scoped-sync-write";
 import { assertGymScopedReference } from "./gym-scoped-reference";
 import { PaymentRuleError } from "../../domain/payment-rule-error";
+import { quoteMethodSurcharge } from "../../application/payment/method-surcharge.service";
+import { resolveClientDiscountQuote } from "../../application/payment/client-discount-quote.service";
 
 export class PrismaPagoClienteRepository implements PagoClienteRepository {
   // Unidad 01: `client` es prisma o el cliente de la transacción del upload.
@@ -105,6 +107,9 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     precio_lista_snapshot: data.precio_lista_snapshot ?? null,
                     descuento_pct_snapshot: data.descuento_pct_snapshot ?? null,
                     descuento_monto_snapshot: data.descuento_monto_snapshot ?? null,
+                    categoria_cliente_snapshot: data.categoria_cliente_snapshot ?? null,
+                    plan_codigo_snapshot: data.plan_codigo_snapshot ?? null,
+                    cuota_sufijo_snapshot: data.cuota_sufijo_snapshot ?? null,
                 recargo_mora_condonado_importe: data.recargo_mora_condonado_importe ?? null,
                 recargo_mora_condonado_motivo: data.recargo_mora_condonado_motivo ?? null,
                 recargo_mora_condonado_por: data.recargo_mora_condonado_por ?? null,
@@ -136,6 +141,9 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     precio_lista_snapshot: data.precio_lista_snapshot ?? null,
                     descuento_pct_snapshot: data.descuento_pct_snapshot ?? null,
                     descuento_monto_snapshot: data.descuento_monto_snapshot ?? null,
+                    categoria_cliente_snapshot: data.categoria_cliente_snapshot ?? null,
+                    plan_codigo_snapshot: data.plan_codigo_snapshot ?? null,
+                    cuota_sufijo_snapshot: data.cuota_sufijo_snapshot ?? null,
                 recargo_mora_condonado_importe: data.recargo_mora_condonado_importe ?? null,
                 recargo_mora_condonado_motivo: data.recargo_mora_condonado_motivo ?? null,
                 recargo_mora_condonado_por: data.recargo_mora_condonado_por ?? null,
@@ -157,9 +165,14 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
         });
     }
 
-    async findAll(gymId: string): Promise<PagoCliente[]> {
+    async findAll(gymId: string, skip = 0, take = 500): Promise<PagoCliente[]> {
         const payments = await this.client.pagoCliente.findMany({
-            where: { gym_id: gymId, is_deleted: false },
+            // El Libro de pagos es también la superficie de auditoría de los
+            // reversos: excluir is_deleted hacía que «Anulados» siempre fuera
+            // cero y que su filtro quedara vacío en /pagos.
+            where: { gym_id: gymId },
+            skip,
+            take,
             orderBy: { fecha: "desc" },
             include: {
                 cliente: {
@@ -173,10 +186,26 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                 },
             },
         });
+        const reversals = payments.length === 0
+            ? []
+            : await this.client.pagoReversion.findMany({
+                where: {
+                    gym_id: gymId,
+                    pago_cliente_id: { in: payments.map((payment: any) => payment.pago_cliente_id) },
+                    is_deleted: false,
+                },
+            });
+        const reversalByPayment = new Map<string, any>(
+            reversals.map((reversal: any) => [reversal.pago_cliente_id, reversal]),
+        );
         return payments.map((payment: any) => ({
             ...payment,
             clientName: `${payment.cliente.nombres ?? ""} ${payment.cliente.apellidos ?? ""}`.trim(),
             details: payment.detalles,
+            anulado_por_user_id: reversalByPayment.get(payment.pago_cliente_id)?.registrada_por_user_id ?? null,
+            anulado_por_nombre_snapshot: reversalByPayment.get(payment.pago_cliente_id)?.registrada_por_nombre_snapshot ?? null,
+            motivo_anulacion: reversalByPayment.get(payment.pago_cliente_id)?.motivo ?? null,
+            anulado_at: reversalByPayment.get(payment.pago_cliente_id)?.registrada_at ?? null,
         })) as PagoCliente[];
     }
 
@@ -262,6 +291,15 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
             if (!cliente) {
                 throw new PaymentRuleError(`Cliente con CI ${pago.ci} no encontrado al procesar pago.`);
             }
+            // R5.3: se recalcula dentro de la transacción; el importe que vino
+            // del navegador nunca decide el precio contratado.
+            const discountQuote = installment
+                ? null
+                : await resolveClientDiscountQuote(tx, {
+                    gymId,
+                    ci: pago.ci,
+                    planId: plan.id_planes_pago,
+                });
 
             // La fecha de negocio se resuelve antes de las dos ramas: el
             // recargo por mora de una cuota se mide contra ella.
@@ -334,7 +372,9 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                         id_entrenador: pago.id_entrenador ?? cliente.id_entrenador ?? null,
                         plan_nombre_snapshot:
                             plan.nombre_plan_pago?.trim() || plan.id_planes_pago,
-                        precio_snapshot: plan.importe_plan_pago,
+                        precio_snapshot: Number(
+                            discountQuote?.precio_final ?? plan.importe_plan_pago,
+                        ),
                         moneda_id: plan.moneda_id,
                         duracion_dias_snapshot: plan.duracion_plan_pago,
                         fecha_inicio: cliente.fecha_inicio,
@@ -356,7 +396,9 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                 });
             }
 
-            const contracted = Number(membership.precio_snapshot);
+            const contracted = Number(
+                discountQuote?.precio_final ?? membership.precio_snapshot,
+            );
             const previouslyApplied = Number(membership.importe_pagado ?? 0);
             // R5.2 — contratando por cuotas, lo exigido es la cuota 1, no el
             // plan entero: la cuota 1 activa la membresía y el resto queda
@@ -401,6 +443,30 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                 );
             }
 
+            const methodQuotes = await Promise.all(detalles.map((d) =>
+                quoteMethodSurcharge(tx, {
+                    baseAmount: d.recargo_metodo_base ?? d.cantidad,
+                    paymentTypeId: d.tipo_pago_id,
+                    accountId: d.cuenta_id!,
+                    paymentCurrencyId: d.moneda_id,
+                    planCurrencyId: membership.moneda_id,
+                    exchangeRateId: d.tipo_cambio_id ?? null,
+                    exchangeRateVersion: d.recargo_metodo_tasa_version ?? null,
+                    totalAmount: d.cantidad,
+                    confirmation: true,
+                }, gymId, occurredAt),
+            ));
+            const appliedByMethods = methodQuotes.reduce(
+                (sum, quote) => sum + Number(quote.equivalente_plan), 0,
+            );
+            const requiredByPayment = cashRequired + recargoCobrado;
+            if (methodQuotes.length && Math.abs(appliedByMethods - requiredByPayment) > 0.009) {
+                throw new PaymentRuleError(
+                    `Las bases de los métodos aplican ${appliedByMethods.toFixed(2)} ` +
+                    `pero el cobro requiere ${requiredByPayment.toFixed(2)}.`,
+                );
+            }
+
             const current = await tx.membresiaCliente.findFirst({
                 where: {
                     ci: pago.ci,
@@ -436,7 +502,8 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     // paga plan (docs/RECARGO_MORA.md §6-ter).
                     importe_pagado: installment
                         ? cashRequired
-                        : membership.precio_snapshot,
+                        : contracted,
+                    precio_snapshot: contracted,
                     activada_at: occurredAt,
                     version: { increment: 1 },
                     updated_at: occurredAt,
@@ -508,10 +575,26 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     // recargo por mora. Sin sumar el recargo, la tesorería veía
                     // un detalle mayor que el encabezado y registraba la
                     // diferencia como cambio devuelto al socio.
-                    monto_total: cashRequired + recargoCobrado,
+                    monto_total: methodQuotes.length
+                        ? methodQuotes.reduce((sum, quote) => sum + Number(quote.total), 0)
+                        : cashRequired + recargoCobrado,
                     id_entrenador: membership.id_entrenador,
                     id_planes_pago: membership.id_planes_pago,
                     moneda_id: membership.moneda_id,
+                    precio_lista_snapshot: Number(
+                        discountQuote?.precio_lista ?? plan.importe_plan_pago,
+                    ),
+                    descuento_pct_snapshot: discountQuote?.descuento_pct ?? null,
+                    descuento_monto_snapshot: Number(discountQuote?.descuento ?? 0),
+                    categoria_cliente_snapshot:
+                        discountQuote?.categoria_cliente
+                        ?? String(cliente.categoria ?? "NUEVO"),
+                    plan_codigo_snapshot:
+                        discountQuote?.plan_codigo
+                        ?? (String(plan.codigo ?? "").trim()
+                            || String(plan.nombre_plan_pago ?? "").trim()
+                            || plan.id_planes_pago),
+                    cuota_sufijo_snapshot: pago.cuota_sufijo_snapshot ?? null,
                     // Condonación del recargo por mora (docs/RECARGO_MORA.md
                     // §6-bis): sin esto un cobro condonado desde la web no deja
                     // rastro y no puede aparecer en el cierre diario.
@@ -546,7 +629,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
             );
 
             const createdDetails: any[] = [];
-            for (const d of detalles) {
+            for (const [index, d] of detalles.entries()) {
                 const detail = await tx.detallePago.create({
                     data: {
                         detalle_pago_id: d.detalle_pago_id,
@@ -571,6 +654,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                             installmentMora?.planValor ?? d.recargo_mora_plan_valor ?? null,
                         recargo_mora_plan_tope:
                             installmentMora?.planTope ?? d.recargo_mora_plan_tope ?? null,
+                        ...methodQuotes[index]!.snapshot,
                         gym_id: gymId,
                         source_device: "WEB_ADMIN",
                         version: d.version,
@@ -873,16 +957,51 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
         }
         const appliedMora = !condonar && moraQuote?.aplicado ? moraQuote : null;
 
+        const methodQuotes = await Promise.all(input.detalles.map((d) =>
+            quoteMethodSurcharge(tx, {
+                baseAmount: d.recargo_metodo_base ?? d.cantidad,
+                paymentTypeId: d.tipo_pago_id,
+                accountId: d.cuenta_id!,
+                paymentCurrencyId: d.moneda_id,
+                planCurrencyId: membership.moneda_id,
+                exchangeRateId: d.tipo_cambio_id ?? null,
+                exchangeRateVersion: d.recargo_metodo_tasa_version ?? null,
+                totalAmount: d.cantidad,
+                confirmation: true,
+            }, gymId, occurredAt),
+        ));
+        const appliedByMethods = methodQuotes.reduce(
+            (sum, quote) => sum + Number(quote.equivalente_plan), 0,
+        );
+        if (methodQuotes.length && Math.abs(appliedByMethods - exigido) > 0.009) {
+            throw new PaymentRuleError(
+                `Las bases de los métodos aplican ${appliedByMethods.toFixed(2)} ` +
+                `pero la cuota requiere ${exigido.toFixed(2)}.`,
+            );
+        }
+
         const payment = await tx.pagoCliente.create({
             data: {
                 pago_cliente_id: pago.pago_cliente_id,
                 ci: pago.ci,
                 fecha: occurredAt,
                 // Total cobrado = base de la cuota + recargo por mora.
-                monto_total: exigido,
+                monto_total: methodQuotes.length
+                    ? methodQuotes.reduce((sum, quote) => sum + Number(quote.total), 0)
+                    : exigido,
                 id_entrenador: membership.id_entrenador,
                 id_planes_pago: membership.id_planes_pago,
                 moneda_id: membership.moneda_id,
+                // R5.3: la cuota siguiente debe conservar el mismo rótulo
+                // histórico que el primer cobro. La vista conoce estos datos,
+                // pero el comprobante y el cierre leen el snapshot persistido.
+                plan_codigo_snapshot:
+                    pago.plan_codigo_snapshot
+                    ?? (String(plan.codigo ?? "").trim()
+                        || String(plan.nombre_plan_pago ?? "").trim()
+                        || plan.id_planes_pago),
+                cuota_sufijo_snapshot:
+                    pago.cuota_sufijo_snapshot ?? `/${numeroCuota}`,
                 recargo_mora_condonado_importe:
                     condonacion?.recargo_mora_condonado_importe ?? null,
                 recargo_mora_condonado_motivo:
@@ -902,7 +1021,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
         await this.recordSync(tx, "pago_cliente", "INSERT", payment.pago_cliente_id, gymId, payment);
 
         const createdDetails: any[] = [];
-        for (const d of input.detalles) {
+        for (const [index, d] of input.detalles.entries()) {
             const detail = await tx.detallePago.create({
                 data: {
                     detalle_pago_id: d.detalle_pago_id,
@@ -918,6 +1037,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     recargo_mora_importe: appliedMora?.recargo ?? null,
                     recargo_mora_plan_valor: appliedMora ? (moraConfig?.valor ?? null) : null,
                     recargo_mora_plan_tope: appliedMora ? (moraConfig?.tope ?? null) : null,
+                    ...methodQuotes[index]!.snapshot,
                     gym_id: gymId,
                     source_device: "WEB_ADMIN",
                     version: d.version,

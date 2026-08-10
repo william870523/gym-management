@@ -39,3 +39,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Logs de ejecución
 *.log
+
+# Respaldos y artefactos de campañas de verificación. No son fuente.
+scratch/

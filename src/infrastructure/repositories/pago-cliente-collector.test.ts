@@ -106,7 +106,7 @@ describe("processPayment (Remote) · cobrador autenticado", () => {
       throw new Error("Faltan catálogos base (moneda CUP, nacionalidad, tipo de pago o cuenta).");
     }
     currencyId = currency.moneda_id;
-    paymentTypeId = paymentType.tipo_pago_id;
+    paymentTypeId = account.tipo_pago_id ?? paymentType.tipo_pago_id;
     accountId = account.cuenta_id;
 
     await prisma.gym.create({

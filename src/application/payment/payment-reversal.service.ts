@@ -19,6 +19,22 @@ export class PaymentReversalError extends Error {
   }
 }
 
+export function resolveInstallmentReversalProjection(input: {
+  remainingPaid: number;
+  currentState: string;
+  currentActivatedAt: Date | null;
+  quotas: Array<{ estado: string; fecha_cobertura_fin: Date }>;
+}) {
+  const covered = input.quotas.filter((item) => item.estado === "PAGADA" || item.estado === "ANTICIPADA");
+  if (input.quotas.length === 0 || covered.length === 0) return null;
+  return {
+    paidAmount: Math.max(0, Math.round(input.remainingPaid * 100) / 100),
+    state: input.currentState === "PAUSADA" ? "PAUSADA" : "ACTIVA",
+    activatedAt: input.currentActivatedAt,
+    coverageEnd: new Date(Math.max(...covered.map((item) => item.fecha_cobertura_fin.getTime()))),
+  };
+}
+
 export class PaymentReversalService {
   private readonly treasuryLedger = new TreasuryLedgerService();
 
@@ -64,7 +80,7 @@ export class PaymentReversalService {
         );
       }
 
-      const [applications, accruals, operator] = await Promise.all([
+      const [applications, accruals, operator, paymentDetails] = await Promise.all([
         tx.pagoMembresiaAplicacion.findMany({
           where: { pago_cliente_id: paymentId, gym_id: input.gymId, is_deleted: false },
         }),
@@ -74,6 +90,10 @@ export class PaymentReversalService {
         tx.user.findFirst({
           where: { user_id: input.userId, gym_id: input.gymId, active: true, is_deleted: false },
           select: { user_nombre: true },
+        }),
+        tx.detallePago.findMany({
+          where: { pago_cliente_id: paymentId, gym_id: input.gymId, is_deleted: false },
+          select: { detalle_pago_id: true },
         }),
       ]);
       if (!operator) throw new PaymentReversalError("La cuenta operadora no está disponible.", 403);
@@ -93,6 +113,23 @@ export class PaymentReversalService {
       }
 
       const now = trustedClock.nowUtc();
+      const detailIds = paymentDetails.map((item) => item.detalle_pago_id);
+      const membershipInstallments = detailIds.length === 0 ? [] : await tx.membresiaCuota.findMany({
+        where: { pago_detalle_id: { in: detailIds }, gym_id: input.gymId, is_deleted: false },
+      });
+      for (const installment of membershipInstallments) {
+        const reopened = await tx.membresiaCuota.update({
+          where: { cuota_instancia_id: installment.cuota_instancia_id },
+          data: {
+            estado: "PENDIENTE",
+            fecha_pagada: null,
+            pago_detalle_id: null,
+            version: { increment: 1 },
+            updated_at: now,
+          },
+        });
+        await this.recordSync(tx, "membresia_cuota", "UPDATE", reopened.cuota_instancia_id, input.gymId, reopened);
+      }
       for (const installment of installments) {
         if (installment.estado === "ANULADO") continue;
         const updated = await tx.entrenadorComisionCuota.update({
@@ -149,18 +186,29 @@ export class PaymentReversalService {
         const remainingPaid = remainingApplications
           .filter((item) => validIds.has(item.pago_cliente_id))
           .reduce((sum, item) => sum + Number(item.monto_aplicado), 0);
-        const resolution = resolveMembershipAfterReversal({
+        const quotaSchedule = await tx.membresiaCuota.findMany({
+          where: { membresia_id: membershipId, gym_id: input.gymId, is_deleted: false },
+        });
+        const installmentResolution = resolveInstallmentReversalProjection({
+          remainingPaid,
+          currentState: membership.estado,
+          currentActivatedAt: membership.activada_at,
+          quotas: quotaSchedule,
+        });
+        const resolution = installmentResolution ?? resolveMembershipAfterReversal({
           contractedAmount: Number(membership.precio_snapshot),
           remainingPaidAmount: remainingPaid,
           currentState: membership.estado,
           currentActivatedAt: membership.activada_at,
         });
+        const coverageEnd = installmentResolution?.coverageEnd ?? null;
         const updated = await tx.membresiaCliente.update({
           where: { membresia_id: membershipId },
           data: {
             importe_pagado: resolution.paidAmount,
             estado: resolution.state,
             activada_at: resolution.activatedAt,
+            ...(coverageEnd ? { fecha_fin: coverageEnd } : {}),
             version: { increment: 1 },
             updated_at: now,
           },
@@ -237,6 +285,7 @@ export class PaymentReversalService {
         membresias_pendientes: membershipsPending,
         devengos_anulados: accruals.filter((item) => item.estado !== "ANULADO").length,
         cuotas_anuladas: installments.filter((item) => item.estado !== "ANULADO").length,
+        cuotas_membresia_reabiertas: membershipInstallments.map((item) => item.cuota_instancia_id),
         pausas_canceladas: pausesCancelled,
         solicitudes_canceladas: requestsCancelled,
         asignaciones_pendientes: assignmentsPending,

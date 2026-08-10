@@ -6,6 +6,7 @@ import type {
   RankingPlan,
   ResumenRankings,
 } from "./estadisticas-rankings.reader";
+import type { FilaRetencionCanonica } from "./estadisticas-segmentacion.reader";
 
 const resumenSano: ResumenRankings = {
   sociosRegistrados: 100,
@@ -26,13 +27,29 @@ function calcular(entrada: {
   indicadores?: IndicadoresAlerta;
   planes?: RankingPlan[];
   entrenadores?: RankingEntrenador[];
+  retencionPlanes?: FilaRetencionCanonica[] | null;
 } = {}) {
   return calcularAlertas({
     resumen: entrada.resumen ?? resumenSano,
     indicadores: entrada.indicadores ?? indicadoresSanos,
     planes: entrada.planes ?? [],
     entrenadores: entrada.entrenadores ?? [],
+    retencionPlanes: entrada.retencionPlanes,
   });
+}
+
+function canonica(
+  parcial: Partial<FilaRetencionCanonica> & { id: string },
+): FilaRetencionCanonica {
+  const maduras = parcial.maduras ?? 10;
+  const bajas = parcial.bajas ?? 0;
+  return {
+    nombre: `Plan ${parcial.id}`,
+    maduras,
+    retenidas: maduras - bajas,
+    bajas,
+    ...parcial,
+  };
 }
 
 function plan(parcial: Partial<RankingPlan> & { id: string }): RankingPlan {
@@ -70,9 +87,87 @@ describe("calcularAlertas", () => {
       "asistencia",
       "mora",
       "plan",
+      "churn",
       "entrenador",
       "datos",
     ]);
+  });
+
+  it("sin el motor canónico, la regla de churn se declara NO evaluada", () => {
+    const salida = calcular({
+      planes: [plan({ id: "p1", vendidos: 10, vendidosAnterior: 10 })],
+    });
+    const churn = salida.reglas.find((regla) => regla.familia === "churn")!;
+    // No es lo mismo que «no hay churn anormal»: es que no se llegó a mirar.
+    expect(churn.evaluada).toBe(false);
+    expect(salida.alertas.some((alerta) => alerta.familia === "churn"))
+      .toBe(false);
+    // Las demás sí se evaluaron.
+    expect(
+      salida.reglas.filter((regla) => regla.familia !== "churn")
+        .every((regla) => regla.evaluada),
+    ).toBe(true);
+  });
+
+  it("juzga el churn de un plan contra el del gimnasio, no contra un absoluto", () => {
+    // Gimnasio: 30 bajas de 100 maduras = 30 %. El plan pesado está al 70 %,
+    // cuarenta puntos por encima: peligro. El otro, al 20 %, no dispara nada
+    // aunque en absoluto sea un churn alto.
+    const salida = calcular({
+      retencionPlanes: [
+        canonica({ id: "p-caro", nombre: "Anual Premium", maduras: 20, bajas: 14 }),
+        canonica({ id: "p-sano", maduras: 80, bajas: 16 }),
+      ],
+    });
+    expect(salida.alertas.map((alerta) => alerta.id)).toEqual([
+      "plan-churn-anormal:p-caro",
+    ]);
+    const alerta = salida.alertas[0]!;
+    expect(alerta).toMatchObject({
+      familia: "churn",
+      severidad: "peligro",
+      titulo: "Anual Premium pierde socios por encima de la media",
+      muestra: { valor: 14, base: 20 },
+      destino: { tipo: "plan", id: "p-caro" },
+    });
+    expect(alerta.magnitud).toBe(40);
+    expect(alerta.detalle).toContain("70 % frente al 30 %");
+    // La regla que la disparó dice de dónde sale la cifra.
+    expect(alerta.regla).toContain("motor canónico de retención");
+    expect(alerta.regla).toContain("regla 11");
+  });
+
+  it("gradúa el churn: aviso entre 15 y 30 puntos por encima", () => {
+    const salida = calcular({
+      retencionPlanes: [
+        canonica({ id: "p1", maduras: 20, bajas: 9 }), // 45 % ...
+        canonica({ id: "p2", maduras: 80, bajas: 20 }), // ... sobre 29 % global
+      ],
+    });
+    expect(salida.alertas).toHaveLength(1);
+    expect(salida.alertas[0]!.severidad).toBe("aviso");
+  });
+
+  it("no juzga el churn de un plan sin oportunidades maduras suficientes", () => {
+    const salida = calcular({
+      retencionPlanes: [
+        // Cuatro maduras y las cuatro se fueron: 100 % de churn, y aun así no
+        // se avisa. Una tasa sobre cuatro casos no es una tendencia.
+        canonica({ id: "p-chico", maduras: 4, bajas: 4 }),
+        canonica({ id: "p-grande", maduras: 96, bajas: 10 }),
+      ],
+    });
+    expect(salida.alertas).toEqual([]);
+    expect(
+      salida.reglas.find((regla) => regla.familia === "churn")!.evaluada,
+    ).toBe(true);
+  });
+
+  it("sin ninguna oportunidad madura en el gimnasio no hay contra qué comparar", () => {
+    const salida = calcular({
+      retencionPlanes: [canonica({ id: "p1", maduras: 0, bajas: 0 })],
+    });
+    expect(salida.alertas).toEqual([]);
   });
 
   it("gradúa la caída de asistencia y lleva al ranking que la explica", () => {

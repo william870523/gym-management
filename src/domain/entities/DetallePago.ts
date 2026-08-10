@@ -6,6 +6,12 @@ export interface DetallePago {
     cuenta_id?: string | null;
     cantidad: number;
     tipo_cambio_id?: string | null;
+    recargo_metodo_base?: string | number | null;
+    recargo_metodo_pct?: string | null;
+    recargo_metodo_importe?: string | null;
+    recargo_metodo_total?: string | null;
+    recargo_metodo_politica?: string | null;
+    recargo_metodo_tasa_version?: number | null;
     // Snapshot congelado del recargo por mora (docs/RECARGO_MORA.md).
     // Histórico anterior al recargo queda nulo (pre-recargo-mora).
     recargo_mora_modo_snapshot?: string | null;

@@ -22,6 +22,12 @@ import {
     quoteRecargoMora,
     type RecargoMoraQuote,
 } from "../../../domain/recargo-mora-policy";
+import { resolveClientDiscountQuote } from "../../payment/client-discount-quote.service";
+import type { ClientDiscountQuote } from "../../payment/client-discount-quote.service";
+
+export type ClientDiscountQuoteResolver = (
+    input: { gymId: string; ci: string; planId: string },
+) => Promise<ClientDiscountQuote>;
 
 export interface ProcessPaymentInput extends CreatePagoClienteDTO {
     detalles: Omit<CreateDetallePagoDTO, 'pago_cliente_id'>[];
@@ -52,6 +58,8 @@ export class ProcessPaymentUseCase {
          */
         private readonly actorResolver: PaymentActorResolver =
             new PrismaPaymentActorResolver(prisma),
+        private readonly discountQuoteResolver: ClientDiscountQuoteResolver =
+            (input) => resolveClientDiscountQuote(prisma, input),
     ) { }
 
     async execute(
@@ -95,6 +103,15 @@ export class ProcessPaymentUseCase {
         // cuota entre la consulta y la escritura.
         const porCuotas = Boolean(input.modo_cuotas);
         const numeroCuota = Number(input.numero_cuota ?? 0);
+        // Cotización temprana para responder con un error claro. El repositorio
+        // vuelve a resolverla dentro de la transacción antes de escribir.
+        const discountQuote = porCuotas
+            ? null
+            : await this.discountQuoteResolver({
+                gymId: authenticatedGymId,
+                ci: input.ci,
+                planId: input.id_planes_pago,
+            });
 
         let moraQuote: RecargoMoraQuote | null = null;
         if (!porCuotas && moraConfig && this.clienteRepository) {
@@ -102,7 +119,7 @@ export class ProcessPaymentUseCase {
                 input.ci, authenticatedGymId,
             );
             moraQuote = quoteRecargoMora({
-                baseAmount: plan.importe_plan_pago.toFixed(2),
+                baseAmount: discountQuote!.precio_final,
                 diasAtraso: calcularDiasAtraso(occurredAt, (cliente as any)?.fecha_fin),
                 // El recargo siempre se cotiza; condonarlo es la excepción.
                 aplicar: true,
@@ -124,7 +141,7 @@ export class ProcessPaymentUseCase {
         }
         const recargoMora = condonar ? 0 : Number(moraQuote?.recargo ?? 0);
         if (!porCuotas) {
-            const requiredTotal = plan.importe_plan_pago + recargoMora;
+            const requiredTotal = Number(discountQuote!.precio_final) + recargoMora;
             if (!isFullPayment(input.monto_total, requiredTotal)) {
                 throw new PaymentRuleError(
                     `El cobro completo requiere ${requiredTotal.toFixed(2)} ${plan.moneda_id}` +
@@ -146,10 +163,24 @@ export class ProcessPaymentUseCase {
             // recibe efectivo de más, el cambio se modelará como salida de caja.
             // Total cobrado = precio del plan + recargo por mora (desglosado
             // en el detalle; el recargo es ingreso aparte).
-            monto_total: plan.importe_plan_pago + recargoMora,
+            monto_total:
+                Number(discountQuote?.precio_final ?? plan.importe_plan_pago)
+                + recargoMora,
             id_entrenador: input.id_entrenador ?? null,
             id_planes_pago: input.id_planes_pago,
             moneda_id: input.moneda_id,
+            precio_lista_snapshot: Number(
+                discountQuote?.precio_lista ?? plan.importe_plan_pago,
+            ),
+            descuento_pct_snapshot: discountQuote?.descuento_pct ?? null,
+            descuento_monto_snapshot: Number(discountQuote?.descuento ?? 0),
+            categoria_cliente_snapshot: discountQuote?.categoria_cliente ?? null,
+            plan_codigo_snapshot:
+                discountQuote?.plan_codigo
+                ?? (String(plan.codigo ?? "").trim()
+                    || String(plan.nombre_plan_pago ?? "").trim()
+                    || plan.id_planes_pago),
+            cuota_sufijo_snapshot: numeroCuota > 0 ? `/${numeroCuota}` : null,
             gym_id: authenticatedGymId,
             source_device: null,
             version: 1,
@@ -173,6 +204,8 @@ export class ProcessPaymentUseCase {
             cuenta_id: d.cuenta_id ?? null,
             cantidad: d.cantidad,
             tipo_cambio_id: d.tipo_cambio_id ?? null,
+            recargo_metodo_base: d.recargo_metodo_base ?? null,
+            recargo_metodo_tasa_version: d.recargo_metodo_tasa_version ?? null,
             recargo_mora_modo_snapshot: appliedMora?.modo ?? null,
             recargo_mora_dias_atraso: appliedMora?.dias_atraso ?? null,
             recargo_mora_base: appliedMora?.base ?? null,

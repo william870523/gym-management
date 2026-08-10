@@ -45,10 +45,15 @@ describe("CORS de la web", () => {
 
     it("admite las cabeceras que la web manda en cada petición", async () => {
         const response = await preflight(
-            `Authorization, Content-Type, ${GYM_CONTEXT_HEADER}`,
+            `Authorization, Content-Type, Cache-Control, ${GYM_CONTEXT_HEADER}`,
         );
         const lista = allowed(response);
-        for (const cabecera of ["authorization", "content-type", GYM_CONTEXT_HEADER.toLowerCase()]) {
+        for (const cabecera of [
+            "authorization",
+            "content-type",
+            "cache-control",
+            GYM_CONTEXT_HEADER.toLowerCase(),
+        ]) {
             expect(lista).toContain(cabecera);
         }
     });

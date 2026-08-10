@@ -24,6 +24,41 @@ import {
   EstadisticasSegmentacionService,
 } from "../../../application/reporting/estadisticas-segmentacion.service";
 import { PrismaEstadisticasSegmentacionReader } from "../../repositories/prisma-estadisticas-segmentacion.reader";
+import {
+  ConsultaCohortesInvalida,
+  EstadisticasCohortesService,
+} from "../../../application/reporting/estadisticas-cohortes.service";
+import { PrismaEstadisticasCohortesReader } from "../../repositories/prisma-estadisticas-cohortes.reader";
+import {
+  ConsultaDemandaInvalida,
+  EstadisticasDemandaService,
+} from "../../../application/reporting/estadisticas-demanda.service";
+import { PrismaEstadisticasDemandaReader } from "../../repositories/prisma-estadisticas-demanda.reader";
+import {
+  ConsultaCalidadInvalida,
+  EstadisticasCalidadService,
+} from "../../../application/reporting/estadisticas-calidad.service";
+import { PrismaEstadisticasCalidadReader } from "../../repositories/prisma-estadisticas-calidad.reader";
+import {
+  ConsultaContabilidadGraficaInvalida,
+  EstadisticasContabilidadService,
+} from "../../../application/reporting/estadisticas-contabilidad.service";
+import { PrismaEstadisticasContabilidadReader } from "../../repositories/prisma-estadisticas-contabilidad.reader";
+import {
+  ConsultaPronosticoInvalida,
+  EstadisticasPronosticoService,
+} from "../../../application/reporting/estadisticas-pronostico.service";
+import { PrismaEstadisticasPronosticoReader } from "../../repositories/prisma-estadisticas-pronostico.reader";
+import { TreasuryLedgerService } from "../../../application/accounting/treasury-ledger.service";
+import { ManagementMarginService } from "../../../application/reporting/management-margin.service";
+import { GovernedExpenseService } from "../../../application/reporting/governed-expense.service";
+import { AccrualOperatingResultService } from "../../../application/reporting/accrual-operating-result.service";
+import { ExchangeRevaluationService } from "../../../application/reporting/exchange-revaluation.service";
+import { PrismaMembershipRevenueReader } from "../../reporting/prisma-membership-revenue.reader";
+import { PrismaTrainerServiceCostReader } from "../../reporting/prisma-trainer-service-cost.reader";
+import { PrismaManagementMarginMonthlyCloseReader } from "../../reporting/prisma-management-margin.reader";
+import { PrismaGovernedExpenseReader } from "../../reporting/prisma-governed-expense.reader";
+import { PrismaExchangeRevaluationReader } from "../../reporting/prisma-exchange-revaluation.reader";
 import { RetencionCanonicaDesdeServicio } from "../../repositories/retencion-canonica.reader";
 import {
   DEFINICIONES_MEDIDA,
@@ -42,14 +77,50 @@ const entrenadorService = new EstadisticasEntrenadorService(
 const planService = new EstadisticasPlanService(
   new PrismaEstadisticasPlanReader(),
 );
+// Una sola traducción del motor canónico para todas las superficies que lo
+// consultan: cruzador, portada, cohortes y calidad. Compartirla es lo que
+// garantiza que ninguna pueda derivar una segunda fórmula de retención.
+const retencionCanonica = new RetencionCanonicaDesdeServicio();
 const rankingsService = new EstadisticasRankingsService(
   new PrismaEstadisticasRankingsReader(),
+  retencionCanonica,
 );
 const segmentacionService = new EstadisticasSegmentacionService(
   new PrismaEstadisticasSegmentacionReader(),
   // Las bajas y la renovación las produce el motor canónico de retención,
   // no una consulta de la estadística (regla 11 del plan).
-  new RetencionCanonicaDesdeServicio(),
+  retencionCanonica,
+);
+const cohortesService = new EstadisticasCohortesService(
+  new PrismaEstadisticasCohortesReader(),
+  retencionCanonica,
+);
+const demandaService = new EstadisticasDemandaService(
+  new PrismaEstadisticasDemandaReader(),
+);
+const calidadService = new EstadisticasCalidadService(
+  new PrismaEstadisticasCalidadReader(),
+  retencionCanonica,
+);
+const treasuryLedger = new TreasuryLedgerService();
+const managementMargin = new ManagementMarginService(
+  new PrismaMembershipRevenueReader(),
+  new PrismaTrainerServiceCostReader(),
+  new PrismaManagementMarginMonthlyCloseReader(),
+);
+const governedExpenses = new GovernedExpenseService(new PrismaGovernedExpenseReader());
+const accountingCharts = new EstadisticasContabilidadService(
+  new PrismaEstadisticasContabilidadReader(),
+  { get: ({ gymId, month }) => treasuryLedger.monthly(gymId, month) },
+  new AccrualOperatingResultService(
+    managementMargin,
+    governedExpenses,
+    new PrismaManagementMarginMonthlyCloseReader(),
+  ),
+  new ExchangeRevaluationService(new PrismaExchangeRevaluationReader()),
+);
+const forecastService = new EstadisticasPronosticoService(
+  new PrismaEstadisticasPronosticoReader(),
 );
 
 type UserAuth = {
@@ -62,6 +133,11 @@ function gymIdentity(c: any): string | null {
   const auth = c.get("auth") as UserAuth | undefined;
   if (!auth?.sub || !auth.gymId || auth.role === "device") return null;
   return auth.gymId;
+}
+
+function adminGymIdentity(c: any): string | null {
+  const auth = c.get("auth") as UserAuth | undefined;
+  return auth?.sub && auth.gymId && auth.role === "admin" ? auth.gymId : null;
 }
 
 async function contextoSede(gymId: string) {
@@ -172,6 +248,124 @@ routes.get("/segmentacion", async (c) => {
       return c.json({ error: error.message }, 400);
     }
     return fail(c, "segmentación", error);
+  }
+});
+
+/**
+ * Cohortes de alta con retención a 30/60/90 días (§4.3).
+ *
+ * La supervivencia la decide el motor canónico de retención; aquí solo se
+ * agrupa por el mes o la semana en que entró cada socio.
+ */
+routes.get("/cohortes", async (c) => {
+  const gymId = gymIdentity(c);
+  if (!gymId) {
+    return c.json({ error: "Se requiere una cuenta de usuario del gimnasio." }, 403);
+  }
+  try {
+    const { zona, hoy } = await contextoSede(gymId);
+    return c.json(await cohortesService.cohortes({
+      gymId,
+      zona,
+      hoy,
+      dias: Number(c.req.query("dias") ?? "365"),
+      granularidad: c.req.query("granularidad") ?? "mes",
+    }));
+  } catch (error: unknown) {
+    if (error instanceof ConsultaCohortesInvalida) {
+      return c.json({ error: error.message }, 400);
+    }
+    return fail(c, "cohortes de alta", error);
+  }
+});
+
+/** Mapa de demanda observada día × hora (§5.2). Nunca porcentaje de ocupación. */
+routes.get("/demanda", async (c) => {
+  const gymId = gymIdentity(c);
+  if (!gymId) {
+    return c.json({ error: "Se requiere una cuenta de usuario del gimnasio." }, 403);
+  }
+  try {
+    const { zona, hoy } = await contextoSede(gymId);
+    return c.json(await demandaService.demanda({
+      gymId,
+      zona,
+      hoy,
+      dias: Number(c.req.query("dias") ?? "90"),
+    }));
+  } catch (error: unknown) {
+    if (error instanceof ConsultaDemandaInvalida) {
+      return c.json({ error: error.message }, 400);
+    }
+    return fail(c, "mapa de demanda", error);
+  }
+});
+
+/** Panel de calidad de datos (§5.3). */
+routes.get("/calidad", async (c) => {
+  const gymId = gymIdentity(c);
+  if (!gymId) {
+    return c.json({ error: "Se requiere una cuenta de usuario del gimnasio." }, 403);
+  }
+  try {
+    const { zona, hoy } = await contextoSede(gymId);
+    return c.json(await calidadService.calidad({
+      gymId,
+      zona,
+      hoy,
+      dias: Number(c.req.query("dias") ?? "90"),
+    }));
+  } catch (error: unknown) {
+    if (error instanceof ConsultaCalidadInvalida) {
+      return c.json({ error: error.message }, 400);
+    }
+    return fail(c, "calidad de datos", error);
+  }
+});
+
+/** E4: capa gráfica canónica; el gimnasio solo sale del JWT remoto. */
+routes.get("/contabilidad", async (c) => {
+  const gymId = adminGymIdentity(c);
+  if (!gymId) {
+    return c.json({ error: "Se requiere una cuenta administradora." }, 403);
+  }
+  try {
+    const { zona, hoy } = await contextoSede(gymId);
+    return c.json(await accountingCharts.dashboard({
+      gymId,
+      zona,
+      hoy,
+      desde: c.req.query("desde"),
+      hasta: c.req.query("hasta"),
+    }));
+  } catch (error: any) {
+    if (error instanceof ConsultaContabilidadGraficaInvalida) {
+      return c.json({ error: error.message }, 400);
+    }
+    return fail(c, "contabilidad gráfica", error);
+  }
+});
+
+/** E5: pronóstico explicable; la sede sale únicamente del JWT remoto. */
+routes.get("/pronostico", async (c) => {
+  const gymId = adminGymIdentity(c);
+  if (!gymId) {
+    return c.json({ error: "Se requiere una cuenta administradora." }, 403);
+  }
+  try {
+    const { zona, hoy } = await contextoSede(gymId);
+    return c.json(await forecastService.pronostico({
+      gymId,
+      zona,
+      hoy,
+      diasHistoria: Number(c.req.query("historia") ?? "180"),
+      diasHorizonte: Number(c.req.query("horizonte") ?? "28"),
+    }));
+  } catch (error: unknown) {
+    if (error instanceof ConsultaPronosticoInvalida) {
+      return c.json({ error: error.message }, 400);
+    }
+    return fail(c, "pronóstico estadístico", error);
   }
 });
 

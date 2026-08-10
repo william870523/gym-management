@@ -13,6 +13,14 @@ import { existsSync } from "fs";
 import { resolve } from "path";
 import { prisma } from "../src/infrastructure/db/prismaClient";
 
+/**
+ * Instante declarado de siembra del catálogo. Debe ser **idéntico** al de
+ * `gym-local-api/scripts/migrate-dropout-reasons.ts`: el catálogo se siembra por
+ * separado en cada base y dejar la fecha al `DEFAULT CURRENT_TIMESTAMP` hacía
+ * divergir las diez filas.
+ */
+const SEMBRADO_EN = new Date("2026-01-01T00:00:00.000Z");
+
 const MOTIVOS_BASE: ReadonlyArray<{ codigo: string; nombre: string }> = [
   { codigo: "PRECIO", nombre: "Precio" },
   { codigo: "HORARIO", nombre: "Horario" },
@@ -90,13 +98,27 @@ async function migrate() {
   // los existentes, para no pisar renombres del operador.
   const gyms = await prisma.gym.findMany({ select: { gym_id: true } });
   let sembrados = 0;
+  let alineados = 0;
   for (const gym of gyms) {
     for (const [indice, motivo] of MOTIVOS_BASE.entries()) {
       const existe = await prisma.motivoBaja.findFirst({
         where: { gym_id: gym.gym_id, nombre: motivo.nombre },
-        select: { motivo_baja_id: true },
+        select: { motivo_baja_id: true, created_at: true },
       });
-      if (existe) continue;
+      if (existe) {
+        // Gemelo exacto del local: sin instante declarado, cada base guardaba
+        // la hora de SU migración y las diez filas divergían para siempre
+        // (huella del 01-08-2026). Se alinea solo `created_at`; los renombres
+        // del operador se respetan como hasta ahora.
+        if (existe.created_at?.getTime() !== SEMBRADO_EN.getTime()) {
+          await prisma.motivoBaja.update({
+            where: { motivo_baja_id: existe.motivo_baja_id },
+            data: { created_at: SEMBRADO_EN },
+          });
+          alineados += 1;
+        }
+        continue;
+      }
       await prisma.motivoBaja.create({
         data: {
           motivo_baja_id: motivoId(gym.gym_id, motivo.codigo),
@@ -106,11 +128,13 @@ async function migrate() {
           orden: indice + 1,
           activo: true,
           es_sistema: true,
+          created_at: SEMBRADO_EN,
         },
       });
       sembrados += 1;
     }
   }
+  if (alineados) console.log(`created_at alineado en ${alineados} motivos de sistema.`);
 
   const total = await prisma.motivoBaja.count();
   const conMotivo = await prisma.retencionGestion.count({

@@ -6,6 +6,7 @@ import {
   buildAuthenticatedSyncPayload,
   buildAuthoritativeGymRecord,
   normalizeSyncDates,
+  optionalSyncVersion,
   requireMappedSyncTarget,
   requireSyncEntityId,
   requireSyncOperation,
@@ -15,7 +16,7 @@ import {
 } from "./sync-event-contract";
 
 describe("contrato fail-closed de upload", () => {
-  it("declara las siete entidades con pertenencia estricta", () => {
+  it("declara las ocho entidades con pertenencia estricta", () => {
     expect([...PARITY_SYNC_ENTITIES]).toEqual([
       "gasto_categoria",
       "gasto_proveedor",
@@ -24,10 +25,15 @@ describe("contrato fail-closed de upload", () => {
       "gasto_recurrente",
       "plan_cuota_esquema",
       "membresia_cuota",
+      "tesoreria_cierre_periodo",
     ]);
     expect(PARITY_SYNC_TARGET_DEFINITIONS.membresia_cuota).toEqual({
       delegateKey: "membresiaCuota",
       pk: "cuota_instancia_id",
+    });
+    expect(PARITY_SYNC_TARGET_DEFINITIONS.tesoreria_cierre_periodo).toEqual({
+      delegateKey: "tesoreriaCierrePeriodo",
+      pk: "cierre_periodo_id",
     });
   });
 
@@ -133,6 +139,17 @@ describe("contrato fail-closed de upload", () => {
     });
     expect(result.aplicada_at).toBeInstanceOf(Date);
     expect(result.periodo_pertenencia_mes).toBe("2026-07");
+  });
+
+  it("PD-4: valida la versión autoritativa de un DELETE", () => {
+    expect(optionalSyncVersion({ version: 2 }, "pago_cliente")).toBe(2);
+    expect(optionalSyncVersion({}, "pago_cliente")).toBeUndefined();
+    expect(() => optionalSyncVersion({ version: 0 }, "pago_cliente")).toThrow(
+      "Versión de sync inválida",
+    );
+    expect(() => optionalSyncVersion({ version: 1.5 }, "pago_cliente")).toThrow(
+      "Versión de sync inválida",
+    );
   });
 
   it("rechaza esquemas y cuotas con semántica imposible", () => {

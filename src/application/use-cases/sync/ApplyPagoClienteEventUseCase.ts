@@ -63,6 +63,12 @@ export class ApplyPagoClienteEventUseCase {
             descuento_monto_snapshot: payload.descuento_monto_snapshot === null || payload.descuento_monto_snapshot === undefined
                 ? null
                 : Number(payload.descuento_monto_snapshot),
+            categoria_cliente_snapshot:
+                (payload.categoria_cliente_snapshot as string | null) ?? null,
+            plan_codigo_snapshot:
+                (payload.plan_codigo_snapshot as string | null) ?? null,
+            cuota_sufijo_snapshot:
+                (payload.cuota_sufijo_snapshot as string | null) ?? null,
             // Condonación del recargo por mora (docs/RECARGO_MORA.md §6-bis).
             // Sin esto el cierre remoto no puede mostrar cuánto se perdonó ni
             // quién lo autorizó: el rastro se perdía al subir el cobro.

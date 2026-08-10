@@ -108,6 +108,22 @@ function makeDto() {
   } as any;
 }
 
+function makeInsertDeleteDto() {
+  const dto = makeDto();
+  dto.events.push({
+    event_id: "demo-upload-atomicity-hz-delete-1",
+    entidad: "horario",
+    operacion: "DELETE",
+    entidad_id: "demo-upload-atomicity-h-1",
+    payload: {
+      horario_id: "demo-upload-atomicity-h-1",
+      version: 2,
+    },
+    occurred_at_utc: "2026-07-23T00:01:00.000Z",
+  });
+  return dto;
+}
+
 describe("Paso 3 — handler dedicado horario dentro de la transacción", () => {
   it("éxito: la entidad y el sync_log se confirman juntos", async () => {
     const db = makeFakeDatabase();
@@ -132,5 +148,22 @@ describe("Paso 3 — handler dedicado horario dentro de la transacción", () => 
     expect(db.committed.syncLog.size).toBe(0);
     expect(res.failed_event_id).toBe("demo-upload-atomicity-hz-1");
     expect(res.accepted_event_ids).toEqual([]);
+  });
+
+  it("PD-4: DELETE conserva en remoto la versión incrementada por el emisor", async () => {
+    const db = makeFakeDatabase();
+    const useCase = buildUseCase(db);
+
+    const res: any = await useCase.execute(makeInsertDeleteDto());
+
+    expect(res.accepted_event_ids).toEqual([
+      "demo-upload-atomicity-hz-1",
+      "demo-upload-atomicity-hz-delete-1",
+    ]);
+    expect(db.committed.horarios.get("demo-upload-atomicity-h-1")).toMatchObject({
+      is_deleted: true,
+      version: 2,
+    });
+    expect(db.committed.syncLog.size).toBe(2);
   });
 });

@@ -208,7 +208,11 @@ export class ClienteController {
             const actor = getUserGymActor(c);
             if (!actor) return c.json({ error: "Gym scope required" }, 403);
             const validated = UpdateClienteSchema.parse(body);
-            await this.updateUseCase.execute(id, validated, actor.gymId);
+            await this.updateUseCase.execute(id, validated, actor.gymId, {
+                userId: actor.userId ?? null,
+                nombre: (actor as any).nombre ?? null,
+                role: (actor as any).role ?? null,
+            });
             return c.json({ message: "Cliente updated successfully" });
         } catch (error: any) {
             if (error.name === 'ZodError') {
@@ -216,6 +220,11 @@ export class ClienteController {
             }
             if (error.message === "Cliente not found") {
                 return c.json({ error: "Cliente not found" }, 404);
+            }
+            // R5.3: 403 si no es administración, 400 si falta el motivo. No puede
+            // caer al 500 genérico: es un rechazo de negocio y hay que explicarlo.
+            if (error.name === "CategoriaCambioError") {
+                return c.json({ error: error.message }, error.status);
             }
             if (String(error.message).includes("no pertenece al gimnasio")) {
                 return c.json({ error: error.message }, 400);

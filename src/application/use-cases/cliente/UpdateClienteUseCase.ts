@@ -37,6 +37,9 @@ export class UpdateClienteUseCase {
                 fechaNegocio: await fechaNegocioDeSede(gymId, now),
                 esAlta: false,
             }),
+            // R5.3 — sin esta línea, editar a VIEJO desde la web respondía 200
+            // y dejaba la categoría como estaba. Solo se toca si viene.
+            ...(dto.categoria === undefined ? {} : { categoria: dto.categoria }),
             updated_at: now,
             version: (existing.version ?? 0) + 1
         };

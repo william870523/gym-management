@@ -25,6 +25,12 @@ export const CreateClienteSchema = z.object({
     activo: z.any(),
     id_horarios: z.string().min(1).optional().nullable(),
     referencia_id: z.string().min(1).optional().nullable(),
+    // R5.3 — categoría viejo/nuevo. **Decide el precio**, así que no puede
+    // faltar aquí: sin esta línea zod la descartaba en silencio y el alta desde
+    // la web guardaba el `@default("NUEVO")` del esquema aunque el operador
+    // hubiera elegido VIEJO. Observado el 10-08-2026: pedido VIEJO, guardado
+    // NUEVO, y la respuesta devolvía NUEVO sin avisar.
+    categoria: z.enum(["NUEVO", "VIEJO"]).optional(),
 });
 
 export type CreateClienteDTO = z.infer<typeof CreateClienteSchema>;
@@ -53,6 +59,9 @@ export const UpdateClienteSchema = z.object({
     // rechazado «1985-04-20», que es justo lo que manda un selector de fecha.
     fecha_nacimiento: z.string().min(1).or(z.date()).optional().nullable(),
     referencia_id: z.string().min(1).optional().nullable(),
+    // R5.3 — misma razón que en el alta: editar a VIEJO desde la web respondía
+    // 200 y dejaba NUEVO.
+    categoria: z.enum(["NUEVO", "VIEJO"]).optional(),
 });
 
 export type UpdateClienteDTO = z.infer<typeof UpdateClienteSchema>;

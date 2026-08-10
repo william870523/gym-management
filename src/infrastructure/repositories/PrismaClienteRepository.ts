@@ -314,6 +314,21 @@ export class PrismaClienteRepository implements ClienteRepository {
       const client = await tx.cliente.create({ data: {
         ci: data.ci,
         tipo_documento: data.tipo_documento,
+        // E0 y R5.3: los dos campos que este `create` tiraba al suelo.
+        //
+        // El caso de uso ya deriva la fecha del CI y trae la categoría, pero
+        // ninguna llegaba a Prisma: `fecha_nacimiento` es opcional en el
+        // esquema, así que quedaba NULL, y `categoria` tiene
+        // `@default("NUEVO")`, así que un socio VIEJO dado de alta **desde la
+        // web** se guardaba NUEVO —y la categoría decide el precio—. La
+        // respuesta devolvía NUEVO sin avisar de nada.
+        //
+        // Es el mismo defecto que se corrigió el 31-07 en `upsertFromSync` y
+        // que allí se quedó: se arregló la vía de sincronización y no la del
+        // alta normal. Observado el 10-08-2026 contra las dos APIs con el mismo
+        // cuerpo: escritorio guardó VIEJO y 1955-06-01; la web, NUEVO y NULL.
+        fecha_nacimiento: data.fecha_nacimiento ?? null,
+        categoria: data.categoria ?? "NUEVO",
         nombres: data.nombres,
         apellidos: data.apellidos,
         sexo: data.sexo,
@@ -447,6 +462,13 @@ export class PrismaClienteRepository implements ClienteRepository {
       const result = await tx.cliente.updateMany({
         where: { ci: id, gym_id: gymId, is_deleted: false },
         data: {
+        // E0 y R5.3, misma omisión que en `create`: la edición desde la web
+        // respondía 200 y no cambiaba ni la fecha ni la categoría. Se envían
+        // solo si vienen, para que editar un teléfono no pise lo demás.
+        ...(data.fecha_nacimiento === undefined
+          ? {}
+          : { fecha_nacimiento: data.fecha_nacimiento }),
+        ...(data.categoria === undefined ? {} : { categoria: data.categoria }),
         nombres: data.nombres,
         tipo_documento: data.tipo_documento,
         apellidos: data.apellidos,

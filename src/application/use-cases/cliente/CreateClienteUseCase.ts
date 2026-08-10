@@ -56,6 +56,9 @@ export class CreateClienteUseCase {
             activo: dto.id_planes_pago ? false : Boolean(dto.activo),
             id_horarios: dto.id_horarios,
             referencia_id: dto.referencia_id ?? null,
+            // R5.3 — la categoría decide el precio; si no viaja hasta aquí, el
+            // esquema pone «NUEVO» por defecto y el socio VIEJO se cobra mal.
+            categoria: dto.categoria ?? "NUEVO",
             gym_id: gymId,
             source_device: null,
             version: 1,

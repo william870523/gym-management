@@ -7,6 +7,7 @@ import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepo
 import { trustedClock } from "../../../config/trusted-clock";
 import { resolverFechaNacimiento } from "../../clients/client-birthdate";
 import { fechaNegocioDeSede } from "../../clients/business-date";
+import { quitarProyeccionesDeCliente } from "../sync/sync-event-contract";
 
 export class CreateClienteUseCase {
     constructor(
@@ -79,11 +80,14 @@ export class CreateClienteUseCase {
             entidadId: createdClient.ci,
             gymId: createdClient.gym_id ?? null,
             deviceId: "WEB_ADMIN",
-            payload: {
+            // `Cliente` admite la proyección de membresía, así que el payload
+            // se limpia aquí también aunque hoy `create` no la traiga: es el
+            // mismo campo que se cayó entre capas en `UpdateClienteUseCase`.
+            payload: quitarProyeccionesDeCliente({
                 ...createdClient,
                 nacionalidad_codigo_iso: creation.nationalityCode,
                 foto_cliente: createdClient.foto_cliente ? Buffer.from(createdClient.foto_cliente).toString('base64') : null
-            } as any
+            }) as any
         });
 
         if (creation.membership) {
@@ -162,11 +166,11 @@ export class CreateClienteUseCase {
                 entidadId: createdClient.ci,
                 gymId: createdClient.gym_id ?? null,
                 deviceId: "WEB_ADMIN",
-                payload: {
+                payload: quitarProyeccionesDeCliente({
                     ...createdClient,
                     nacionalidad_codigo_iso: creation.nationalityCode,
                     foto_cliente: createdClient.foto_cliente ? Buffer.from(createdClient.foto_cliente).toString('base64') : null
-                } as any
+                }) as any
             });
         }
 

@@ -13,6 +13,7 @@ import {
     type CategoriaCliente,
 } from "../../../domain/cliente-categoria-policy";
 import { prisma } from "../../../infrastructure/db/prismaClient";
+import { quitarProyeccionesDeCliente } from "../sync/sync-event-contract";
 
 export class UpdateClienteUseCase {
     constructor(
@@ -87,11 +88,15 @@ export class UpdateClienteUseCase {
                 entidadId: id,
                 gymId: updated.gym_id ?? null,
                 deviceId: "WEB_ADMIN",
-                payload: {
+                // `findById` devuelve la ficha CON la proyección de membresía
+                // encima, que no son columnas de `cliente`. Enviarlas tal cual
+                // hacía que el escritorio rechazara el evento y lo apartara en
+                // cuarentena: la edición hecha en la web no llegaba nunca.
+                payload: quitarProyeccionesDeCliente({
                     ...updated,
                     nacionalidad_codigo_iso: nationalityCode,
                     foto_cliente: updated.foto_cliente ? Buffer.from(updated.foto_cliente).toString('base64') : null
-                } as any
+                }) as any
             });
         }
 

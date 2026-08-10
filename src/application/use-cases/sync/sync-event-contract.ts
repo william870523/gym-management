@@ -45,6 +45,47 @@ export const GLOBAL_SYNC_ENTITIES = new Set<string>([
   "referencia",
 ]);
 
+/**
+ * Campos que la ficha de socio publica al LEERLA y que **no son columnas de
+ * `cliente`**: la membresía vigente proyectada sobre el socio
+ * (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
+ *
+ * Viajaban dentro de los eventos `cliente/UPDATE` que emite la web, porque el
+ * caso de uso reenviaba tal cual lo que devolvía `findById`. Prisma los rechaza
+ * con «Unknown argument `membresia_id`» y el evento terminaba en cuarentena: un
+ * socio editado en la web no llegaba nunca al escritorio.
+ *
+ * Se quitan en los DOS extremos a propósito. En el emisor, para que no vuelvan
+ * a salir. En el receptor, porque los eventos ya emitidos tienen su payload
+ * congelado y sin esto se quedarían en cuarentena para siempre, por mucho que
+ * se corrija el emisor.
+ *
+ * Solo se quitan estos nombres, que están declarados aquí. Cualquier otro campo
+ * desconocido sigue reventando a la vista: perder un campo en silencio entre
+ * capas es exactamente el defecto que esta lista existe para no repetir.
+ */
+export const CLIENTE_PROYECCIONES_NO_PERSISTIDAS = [
+  "membresia_id",
+  "membresia_estado",
+  "membresia_vigencia",
+  "membresia_dias_desde_vencimiento",
+  "membresia_cubre_hoy",
+  "membresia_precio",
+  "membresia_importe_pagado",
+  "membresia_saldo_pendiente",
+] as const;
+
+/** Devuelve una copia del payload sin las proyecciones de lectura. */
+export function quitarProyeccionesDeCliente<T extends Record<string, unknown>>(
+  payload: T,
+): T {
+  const limpio = { ...payload };
+  for (const campo of CLIENTE_PROYECCIONES_NO_PERSISTIDAS) {
+    delete (limpio as Record<string, unknown>)[campo];
+  }
+  return limpio;
+}
+
 export type SyncOperation = "INSERT" | "UPDATE" | "DELETE";
 
 type SyncTarget = {

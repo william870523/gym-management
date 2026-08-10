@@ -62,6 +62,11 @@ export const UpdateClienteSchema = z.object({
     // R5.3 — misma razón que en el alta: editar a VIEJO desde la web respondía
     // 200 y dejaba NUEVO.
     categoria: z.enum(["NUEVO", "VIEJO"]).optional(),
+    // R5.3 — motivo del cambio de categoría. Tiene que estar declarado aquí o
+    // zod lo descarta y la regla ve «sin motivo» aunque el operador lo haya
+    // escrito. Pasó: el formulario mandaba el motivo y el servidor respondía
+    // 400 pidiéndolo. Es la misma trampa que se tragaba `categoria`.
+    motivo_categoria: z.string().optional().nullable(),
 });
 
 export type UpdateClienteDTO = z.infer<typeof UpdateClienteSchema>;

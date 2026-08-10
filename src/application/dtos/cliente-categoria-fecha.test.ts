@@ -76,3 +76,27 @@ describe("DTO de cliente: categoría y fecha de nacimiento sobreviven al esquema
     expect(r.categoria).toBeUndefined();
   });
 });
+
+/**
+ * El motivo también tiene que sobrevivir al esquema.
+ *
+ * Se descubrió caminando el formulario en el navegador: el operador escribía el
+ * motivo, el servidor respondía 400 pidiéndolo, y nadie mentía. `zod` lo
+ * descartaba por no estar declarado —la misma trampa que se tragaba
+ * `categoria`—. Ninguna prueba de servidor lo habría visto: todas mandaban el
+ * cuerpo ya validado.
+ */
+describe("DTO de cliente: el motivo del cambio de categoría llega", () => {
+  test("la edición conserva motivo_categoria", () => {
+    const r = UpdateClienteSchema.parse({
+      categoria: "VIEJO",
+      motivo_categoria: "Volvió tras el cierre de la sede del Vedado.",
+    });
+
+    expect(r.motivo_categoria).toBe("Volvió tras el cierre de la sede del Vedado.");
+  });
+
+  test("sin motivo el campo queda ausente, no vacío", () => {
+    expect(UpdateClienteSchema.parse({ categoria: "VIEJO" }).motivo_categoria).toBeUndefined();
+  });
+});

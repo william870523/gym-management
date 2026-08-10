@@ -25,6 +25,7 @@ import { rateLimit, getClientIp } from "./middleware/rate-limit.middleware";
 import { authRoutes } from "./routes/auth.routes";
 import { syncRoutes } from "./routes/sync.routes";
 import { catalogsRoutes } from "./routes/catalogs.routes";
+import * as catalogs from "./controllers/catalogs.controller";
 import { gymsRoutes } from "./routes/gyms.routes";
 import { clientsRoutes } from "./routes/clients.routes";
 import { trainersRoutes } from "./routes/trainers.routes";
@@ -221,6 +222,30 @@ horariosProtected.use("*", requireAdminForWrites());
 horariosProtected.use("*", adminLimiter);
 horariosProtected.route("/", horarioRoutes);
 app.route("/horarios", horariosProtected);
+
+/**
+ * E0-b — motivos de baja, también en la raíz.
+ *
+ * De los nueve catálogos que sirve esta API, ocho responden en la raíz **y**
+ * bajo `/catalogs`; este solo respondía bajo `/catalogs`. El cliente Flutter
+ * —que es el mismo binario para escritorio y web— llama a `/motivos-baja`,
+ * así que la vista del catálogo funcionaba en escritorio y devolvía **404 en
+ * la web**: un flujo administrativo que no existía en el remoto, justo lo que
+ * la continuidad operativa no admite.
+ *
+ * Se reutilizan los mismos manejadores que `/catalogs/motivos-baja`; no hay
+ * lógica duplicada, solo el prefijo que faltaba.
+ */
+const motivosBajaProtected = new Hono();
+motivosBajaProtected.use("*", authUser());
+motivosBajaProtected.use("*", requireAdminForWrites());
+motivosBajaProtected.use("*", adminLimiter);
+motivosBajaProtected.get("/", catalogs.getMotivosBaja);
+motivosBajaProtected.get("/:id", catalogs.getMotivoBajaById);
+motivosBajaProtected.post("/", catalogs.createMotivoBaja);
+motivosBajaProtected.put("/:id", catalogs.updateMotivoBaja);
+motivosBajaProtected.delete("/:id", catalogs.deleteMotivoBaja);
+app.route("/motivos-baja", motivosBajaProtected);
 
 // R5.2 — cuotas del cliente. Va montado en la raíz porque sus rutas cuelgan de
 // dos prefijos (`/planes-pago/...` y `/membresias/...`), igual que en local.

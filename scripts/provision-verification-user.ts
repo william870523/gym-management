@@ -7,11 +7,20 @@
  * termina la verificación.
  *
  * Uso:
- *   bun run provision:verification-user
+ *   REMOTE_VERIFY_PASSWORD='...' bun run provision:verification-user
  *   bun run provision:verification-user -- --remove
  *
- * En producción no existe contraseña predeterminada: hay que declarar
- * `REMOTE_VERIFY_PASSWORD` expresamente.
+ * **`REMOTE_VERIFY_PASSWORD` es obligatorio para aprovisionar**, sin valor por
+ * defecto y en cualquier entorno.
+ *
+ * Antes había uno —`verificacion-admin-2026`— y solo se exigía la variable
+ * cuando `NODE_ENV === "production"`. Este repositorio es **público**, así que
+ * esa clave era legible por cualquiera: bastaba con que alguien ejecutara el
+ * script sin la variable, en una máquina alcanzable, para dejar una cuenta de
+ * administración con contraseña conocida. La comodidad no compensaba.
+ *
+ * Retirar la cuenta (`--remove`) **no** pide la contraseña: si retirarla
+ * costara un secreto, la cuenta se quedaría puesta el día que se pierda.
  */
 import bcrypt from "bcryptjs";
 import { trustedClock } from "../src/config/trusted-clock";
@@ -21,9 +30,35 @@ import { prisma } from "../src/infrastructure/db/prismaClient";
 const GYM_ID = process.env.REMOTE_VERIFY_GYM_ID ?? "local-gym-001";
 const USER_ID = process.env.REMOTE_VERIFY_USER_ID ?? "remote-verification-admin";
 const EMAIL = process.env.REMOTE_VERIFY_EMAIL ?? "verificacion.admin@gym.test";
-const DEFAULT_DEV_PASSWORD = "verificacion-admin-2026";
-const PASSWORD = process.env.REMOTE_VERIFY_PASSWORD ?? DEFAULT_DEV_PASSWORD;
 const MEMBERSHIP_ID = usuarioSedeId(USER_ID, GYM_ID);
+
+/** La que se retiró al hacer obligatoria la variable; no vuelve por la puerta de atrás. */
+const CLAVE_RETIRADA = "verificacion-admin-2026";
+
+/**
+ * La contraseña se resuelve **aquí y no al cargar el módulo**, para que
+ * `--remove` siga funcionando sin ella.
+ */
+function exigirPassword(): string {
+  const password = process.env.REMOTE_VERIFY_PASSWORD;
+  if (!password || !password.trim()) {
+    throw new Error(
+      "REMOTE_VERIFY_PASSWORD es obligatorio para aprovisionar la cuenta de " +
+        "verificación. No hay valor por defecto: este repositorio es público y " +
+        "una clave escrita aquí la puede leer cualquiera.\n" +
+        "  REMOTE_VERIFY_PASSWORD='...' bun run provision:verification-user\n" +
+        "Retirar la cuenta no la necesita: " +
+        "bun run provision:verification-user -- --remove",
+    );
+  }
+  if (password === CLAVE_RETIRADA) {
+    throw new Error(
+      `REMOTE_VERIFY_PASSWORD no puede ser «${CLAVE_RETIRADA}»: es la clave que ` +
+        "se retiró precisamente por estar publicada en este repositorio.",
+    );
+  }
+  return password;
+}
 
 async function remove() {
   const result = await prisma.$transaction(async (tx) => {
@@ -51,11 +86,9 @@ async function remove() {
 }
 
 async function provision() {
-  if (process.env.NODE_ENV === "production" && !process.env.REMOTE_VERIFY_PASSWORD) {
-    throw new Error(
-      "En producción REMOTE_VERIFY_PASSWORD es obligatorio; no se usa la clave de desarrollo.",
-    );
-  }
+  // Falla cerrada antes de tocar la base: si no hay contraseña declarada, no
+  // se crea ni se repara nada. Ya no depende de `NODE_ENV`.
+  const PASSWORD = exigirPassword();
 
   const gym = await prisma.gym.findFirst({
     where: { gym_id: GYM_ID, activo: true, deleted_at: null },
@@ -182,7 +215,10 @@ async function provision() {
 
   console.log(`Cuenta remota de verificación lista para ${gym.nombre} (${gym.gym_id}).`);
   console.log(`Email: ${EMAIL}`);
-  console.log(`Password: ${PASSWORD}`);
+  // La contraseña ya no se imprime. Antes era una constante conocida y daba
+  // igual; ahora es un secreto del operador, y la salida de estos guiones
+  // acaba redirigida a ficheros de evidencia.
+  console.log("Password: la declarada en REMOTE_VERIFY_PASSWORD.");
   console.log("Rol: admin · plataforma: no");
   console.log(
     userNeedsWrite || membershipNeedsWrite

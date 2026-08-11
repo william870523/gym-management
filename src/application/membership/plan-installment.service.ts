@@ -3,10 +3,13 @@ import { createHash, randomUUID } from "crypto";
 import { trustedClock } from "../../config/trusted-clock";
 import {
   buildInstallmentSchedule,
+  isMembershipAccessBlocked,
   PlanInstallmentPolicyError,
   type InstallmentSchemeInput,
 } from "../../domain/plan-installment-policy";
 import { serialize } from "../../shared/utils/serialize";
+import { datePartsInZone } from "../../config/tz";
+import { env } from "../../config/env";
 
 type Tx = Prisma.TransactionClient;
 
@@ -331,6 +334,72 @@ export class PlanInstallmentService {
       where: { membresia_id: membershipId, gym_id: gymId, is_deleted: false },
       orderBy: { numero_cuota: "asc" },
     });
+  }
+
+  /**
+   * Evalúa el acceso de una membresía con cuotas al día de negocio. Lee la
+   * gracia configurada y aplica la política de morosidad. Devuelve el estado
+   * legible y el motivo de bloqueo si aplica.
+   *
+   * Gemelo del que ya tenía el escritorio. Que existiera solo allí es la razón
+   * de que desde la web se pudiera entrar con la cuota vencida: la web no tenía
+   * con qué preguntarlo.
+   *
+   * La zona sale del `Gym` de ESA sede, no de una variable del proceso: el
+   * remoto es multi-sede (docs/TIME_CONTRACT.md).
+   */
+  async evaluateAccess(
+    tx: Tx,
+    input: { gymId: string; membershipId: string; nowUtc?: Date },
+  ) {
+    const now = input.nowUtc ?? trustedClock.nowUtc();
+    const [cuotas, gym] = await Promise.all([
+      tx.membresiaCuota.findMany({
+        where: {
+          membresia_id: input.membershipId,
+          gym_id: input.gymId,
+          is_deleted: false,
+        },
+        orderBy: { numero_cuota: "asc" },
+      }),
+      tx.gym.findUnique({
+        where: { gym_id: input.gymId },
+        select: { timezone: true },
+      }),
+    ]);
+    if (cuotas.length === 0) {
+      return { hasQuotas: false, blocked: false, blockingCuota: null, reason: null };
+    }
+    const parts = datePartsInZone(gym?.timezone?.trim() || env.defaultGymTimezone, now);
+    const businessDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+    const graceDays = await this.readGraceDays(tx, input.gymId);
+    const result = isMembershipAccessBlocked({
+      cuotas: cuotas.map((c) => ({
+        numeroCuota: c.numero_cuota,
+        estado: c.estado,
+        fechaCoberturaInicio: c.fecha_cobertura_inicio,
+        fechaCoberturaFinExclusive: c.fecha_cobertura_fin,
+      })),
+      businessDate,
+      graceDays,
+    });
+    return {
+      hasQuotas: true,
+      blocked: result.blocked,
+      blockingCuota: result.blockingCuota ?? null,
+      reason: result.reason ?? null,
+    };
+  }
+
+  /** Lee los días de gracia de mora configurados (default 0, rango 0-30). */
+  async readGraceDays(tx: Tx, gymId: string): Promise<number> {
+    const setting = await tx.configuracionSistema.findFirst({
+      where: { gym_id: gymId, clave: "MEMBRESIA_MORA_GRACIA_DIAS" },
+      select: { valor: true },
+    });
+    const parsed = Number(setting?.valor ?? "0");
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 30) return 0;
+    return parsed;
   }
 
   private async recordSync(

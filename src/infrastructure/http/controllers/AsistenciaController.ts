@@ -91,56 +91,50 @@ export class AsistenciaController {
             }
             const gymId = actor.gymId;
 
-            const memberships = await prisma.membresiaCliente.findMany({
-                where: {
-                    ci: validated.ci,
-                    gym_id: gymId,
-                    is_deleted: false,
-                    estado: { in: ["ACTIVA", "PAUSADA", "PENDIENTE_PAGO"] },
-                },
-                select: { estado: true },
-            });
-            const hasActiveMembership = memberships.some(
-                (membership) => membership.estado === "ACTIVA",
-            );
-            if (!hasActiveMembership && memberships.some(
-                (membership) => membership.estado === "PAUSADA",
-            )) {
-                return c.json({
-                    error: "La membresía está pausada. Reanúdala antes de registrar la entrada.",
-                }, 409);
-            }
-            if (!hasActiveMembership && memberships.some(
-                (membership) => membership.estado === "PENDIENTE_PAGO",
-            )) {
-                return c.json({
-                    error: "La membresía está pendiente de pago. Registra el cobro antes de permitir la entrada.",
-                }, 409);
-            }
-
+            // La regla de quién puede entrar estaba aquí, a medias y con otra
+            // redacción que la del escritorio: comprobaba pausa y pago
+            // pendiente, pero no la cuota vencida ni la entrada repetida. Ahora
+            // vive entera en la política de dominio gemela y la aplica el caso
+            // de uso, que es lo que garantiza que las dos superficies digan y
+            // hagan lo mismo.
+            //
             // El gimnasio proviene del JWT; nunca se acepta el gym_id libre
             // que pueda enviar el cliente HTTP.
-            const result = await this.createUseCase.execute(validated, gymId);
+            const { asistencia: result, creada } = await this.createUseCase.execute(
+                validated,
+                gymId,
+            );
 
-            await prisma.syncLog.create({
-                data: {
-                    event_id: crypto.randomUUID(),
-                    entidad: "asistencia",
-                    operacion: "INSERT",
-                    entidad_id: result.asistencia_id,
-                    gym_id: result.gym_id,
-                    device_id: null,
-                    payload_json: JSON.stringify(result),
-                },
-            });
+            // Repetir la entrada de quien ya está dentro devuelve su misma fila
+            // y NO vuelve a encolar: un INSERT de una fila existente acaba en
+            // cuarentena o duplica historia.
+            if (creada) {
+                await prisma.syncLog.create({
+                    data: {
+                        event_id: crypto.randomUUID(),
+                        entidad: "asistencia",
+                        operacion: "INSERT",
+                        entidad_id: result.asistencia_id,
+                        gym_id: result.gym_id,
+                        device_id: null,
+                        payload_json: JSON.stringify(result),
+                    },
+                });
+            }
 
-            return c.json(result, 201);
+            return c.json(result, creada ? 201 : 200);
         } catch (error: any) {
             if (error.name === 'ZodError') {
                 return c.json({ error: error.errors }, 400);
             }
             if (String(error.message).includes("no pertenece al gimnasio")) {
                 return c.json({ error: error.message }, 400);
+            }
+            // Rechazo de negocio, no avería: pausa, pago pendiente o mora.
+            // Devolverlo como 500 haría que el mostrador leyera «falló el
+            // sistema» donde el sistema está funcionando bien.
+            if (error?.status === 409) {
+                return c.json({ error: error.message }, 409);
             }
             return c.json({ error: "Internal Server Error" }, 500);
         }

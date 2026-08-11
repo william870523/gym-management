@@ -459,38 +459,54 @@ export class PrismaClienteRepository implements ClienteRepository {
         });
         if (!schedule) throw new Error("El horario seleccionado no pertenece al gimnasio autenticado.");
       }
+      // `undefined` es «no me lo mandaron» y `null` es «vacíalo». Aquí se
+      // confundían: `?? undefined` convertía el null explícito en «no tocar», y
+      // media ficha se volvía imposible de corregir DESDE LA WEB —dirección,
+      // teléfono, correo, objetivo, entrenador y referencia—, mientras que desde
+      // el escritorio sí se vaciaba. Es rotura de paridad, y de las caras: el
+      // remoto existe para que el gimnasio siga trabajando el día que falle el
+      // escritorio, y ese día no podría ni borrar un teléfono equivocado.
+      //
+      // Ahora cada campo se pone solo si vino, sea cual sea su valor, que es lo
+      // que ya hacían `fecha_nacimiento` y `categoria` por su cuenta después de
+      // que se cayeran en silencio ellas también.
+      const cambios: Record<string, unknown> = {};
+      const poner = (campo: string, valor: unknown) => {
+        if (valor !== undefined) cambios[campo] = valor;
+      };
+      poner("tipo_documento", data.tipo_documento);
+      poner("fecha_nacimiento", data.fecha_nacimiento);
+      poner("categoria", data.categoria);
+      poner("nombres", data.nombres);
+      poner("apellidos", data.apellidos);
+      poner("sexo", data.sexo);
+      // La foto se vacía con un null explícito. El caso de la cadena vacía —un
+      // formulario que no adjuntó archivo— ya lo resuelve el caso de uso antes
+      // de llegar aquí, dejándolo en `undefined`.
+      poner(
+        "foto_cliente",
+        data.foto_cliente == null ? data.foto_cliente : Buffer.from(data.foto_cliente),
+      );
+      poner("cliente_peso_id", data.cliente_peso_id);
+      poner("estatura_cliente", data.estatura_cliente);
+      poner("direccion", data.direccion);
+      poner("telefono", data.telefono);
+      poner("nacionalidad_id", data.nacionalidad_id);
+      poner("correo", data.correo);
+      poner("objetivo", data.objetivo);
+      poner("id_planes_pago", data.id_planes_pago);
+      poner("id_entrenador", data.id_entrenador);
+      poner("fecha_inicio", data.fecha_inicio);
+      poner("fecha_fin", data.fecha_fin);
+      poner("activo", data.activo);
+      poner("id_horarios", data.id_horarios);
+      poner("referencia_id", data.referencia_id);
+      cambios.version = { increment: 1 };
+      cambios.updated_at = trustedClock.nowUtc();
+
       const result = await tx.cliente.updateMany({
         where: { ci: id, gym_id: gymId, is_deleted: false },
-        data: {
-        // E0 y R5.3, misma omisión que en `create`: la edición desde la web
-        // respondía 200 y no cambiaba ni la fecha ni la categoría. Se envían
-        // solo si vienen, para que editar un teléfono no pise lo demás.
-        ...(data.fecha_nacimiento === undefined
-          ? {}
-          : { fecha_nacimiento: data.fecha_nacimiento }),
-        ...(data.categoria === undefined ? {} : { categoria: data.categoria }),
-        nombres: data.nombres,
-        tipo_documento: data.tipo_documento,
-        apellidos: data.apellidos,
-        sexo: data.sexo,
-        foto_cliente: data.foto_cliente ? Buffer.from(data.foto_cliente) : undefined,
-        cliente_peso_id: data.cliente_peso_id,
-        estatura_cliente: data.estatura_cliente,
-        direccion: data.direccion ?? undefined,
-        telefono: data.telefono ?? undefined,
-        nacionalidad_id: data.nacionalidad_id,
-        correo: data.correo ?? undefined,
-        objetivo: data.objetivo ?? undefined,
-        id_planes_pago: data.id_planes_pago,
-        id_entrenador: data.id_entrenador ?? undefined,
-        fecha_inicio: data.fecha_inicio,
-        fecha_fin: data.fecha_fin,
-        activo: data.activo,
-        id_horarios: data.id_horarios,
-        referencia_id: data.referencia_id ?? undefined,
-        version: { increment: 1 },
-        updated_at: trustedClock.nowUtc()
-        },
+        data: cambios,
       });
       if (result.count !== 1) throw new Error("Cliente not found");
     });

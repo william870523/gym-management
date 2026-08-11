@@ -49,7 +49,15 @@ export class UpdateClienteUseCase {
         const now = trustedClock.nowUtc();
         const updateData: Partial<Cliente> = {
             ...dto,
-            foto_cliente: dto.foto_cliente ? Buffer.from(dto.foto_cliente, 'base64') : undefined,
+            // Un null explícito vacía la foto; una cadena vacía es «no adjuntó
+            // archivo» y no toca nada. Antes ambas se volvían `undefined`, así
+            // que desde la web no había forma de quitar una foto equivocada.
+            foto_cliente:
+                dto.foto_cliente === undefined || dto.foto_cliente === ""
+                    ? undefined
+                    : dto.foto_cliente === null
+                        ? null
+                        : Buffer.from(dto.foto_cliente, 'base64'),
             fecha_inicio: dto.fecha_inicio ? new Date(dto.fecha_inicio) : undefined,
             fecha_fin: dto.fecha_fin ? new Date(dto.fecha_fin) : undefined,
             // E0 (§7-bis): el tipo efectivo es el que quede tras el cambio, y la

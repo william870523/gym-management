@@ -29,6 +29,10 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
     delegateKey: "tesoreriaCierrePeriodo",
     pk: "cierre_periodo_id",
   },
+  cliente_expediente_documento: {
+    delegateKey: "clienteExpedienteDocumento",
+    pk: "documento_id",
+  },
 } as const;
 
 export const PARITY_SYNC_ENTITIES = new Set<string>(

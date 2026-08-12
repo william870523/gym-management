@@ -23,7 +23,7 @@ export class PrismaClientePesoRepository implements ClientePesoRepository {
   // no expone `$transaction`.
   private runInClient<T>(work: (c: any) => Promise<T>): Promise<T> {
     return typeof this.client.$transaction === "function"
-      ? this.runInClient(work)
+      ? this.client.$transaction(work)
       : work(this.client);
   }
 

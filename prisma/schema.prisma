@@ -315,9 +315,9 @@ model PlanesPago {
   // Recargo por mora (docs/RECARGO_MORA.md). El administrador define, por plan,
   // uno de tres modos que se cobra al pagar con atraso. null/activo=false = sin
   // recargo. Importes como string decimal, no Float.
-  recargo_mora_modo         String?   // null | PORCENTAJE | MONTO_FIJO | POR_DIA
-  recargo_mora_valor        String?   // pct (0-100) o monto diario/fijo
-  recargo_mora_tope         String?   // solo POR_DIA; null = sin tope
+  recargo_mora_modo         String? // null | PORCENTAJE | MONTO_FIJO | POR_DIA
+  recargo_mora_valor        String? // pct (0-100) o monto diario/fijo
+  recargo_mora_tope         String? // solo POR_DIA; null = sin tope
   recargo_mora_activo       Boolean   @default(false)
   is_deleted                Boolean   @default(false)
   created_at                DateTime? @default(now())
@@ -862,6 +862,60 @@ model ClienteCredito {
   @@map("cliente_credito")
 }
 
+model ClienteExpedienteDocumento {
+  documento_id                String    @id
+  operacion_id                String    @unique(map: "uq_cli_exp_doc_operacion")
+  ci                          String
+  formato                     String
+  destino                     String
+  nombre_archivo              String
+  mime_type                   String
+  contenido                   Bytes     @db.LongBlob
+  tamano_bytes                Int
+  sha256                      String
+  filtros_json                String    @db.Text
+  emitido_por_user_id         String
+  emitido_por_nombre_snapshot String
+  emitido_por_rol_snapshot    String
+  emitido_por_origen          String
+  emitido_at                  DateTime  @db.DateTime(3)
+  is_deleted                  Boolean   @default(false)
+  created_at                  DateTime  @default(now()) @db.DateTime(3)
+  gym_id                      String
+  source_device               String?
+  version                     Int       @default(1)
+  updated_at                  DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                  DateTime? @db.DateTime(3)
+
+  @@index([gym_id, ci, emitido_at], map: "idx_cli_exp_doc_cliente_fecha")
+  @@index([gym_id, sha256], map: "idx_cli_exp_doc_hash")
+  @@map("cliente_expediente_documento")
+}
+
+model MembresiaCancelacionReversion {
+  reversion_id                   String    @id
+  ajuste_financiero_id           String    @unique(map: "uq_memb_cancel_rev_ajuste")
+  operacion_id                   String    @unique(map: "uq_memb_cancel_rev_operacion")
+  membresia_id                   String
+  credito_id                     String?
+  motivo                         String
+  estado_restaurado              String
+  fecha_fin_restaurada           DateTime  @db.Date
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String
+  registrada_at                  DateTime  @db.DateTime(3)
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now()) @db.DateTime(3)
+  gym_id                         String
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now()) @db.DateTime(3)
+  deleted_at                     DateTime? @db.DateTime(3)
+
+  @@index([gym_id, membresia_id, registrada_at], map: "idx_memb_cancel_rev_memb_fecha")
+  @@map("membresia_cancelacion_reversion")
+}
+
 model CreditoMembresiaAplicacion {
   aplicacion_id  String    @id
   credito_id     String
@@ -1092,23 +1146,23 @@ model TesoreriaOperacionManual {
 // Libro append-only de entradas y salidas reales. Las anulaciones no editan
 // el movimiento original: insertan un contramovimiento enlazado.
 model TesoreriaMovimiento {
-  movimiento_id          String    @id
-  clave_origen           String
-  origen_tipo            String
-  origen_id              String
-  origen_detalle_id      String?
-  direccion              String
-  concepto               String
-  cuenta_id              String?
-  moneda_id              String
-  tipo_pago_id           String?
-  monto                  Decimal
-  ocurrido_at            DateTime
-  fecha_negocio          DateTime
-  descripcion            String?
-  contramovimiento_de_id String?
-  requiere_revision      Boolean   @default(false)
-  revision_motivo        String?
+  movimiento_id               String    @id
+  clave_origen                String
+  origen_tipo                 String
+  origen_id                   String
+  origen_detalle_id           String?
+  direccion                   String
+  concepto                    String
+  cuenta_id                   String?
+  moneda_id                   String
+  tipo_pago_id                String?
+  monto                       Decimal
+  ocurrido_at                 DateTime
+  fecha_negocio               DateTime
+  descripcion                 String?
+  contramovimiento_de_id      String?
+  requiere_revision           Boolean   @default(false)
+  revision_motivo             String?
   // R5.6: copia auditable del cobrador del pago que originó el movimiento
   // (y de su contramovimiento, que netea ese mismo cobro). Nulo en
   // movimientos que no nacen de un cobro y en la historia previa al corte.
@@ -1116,13 +1170,13 @@ model TesoreriaMovimiento {
   cobrado_por_nombre_snapshot String?
   cobrado_por_rol_snapshot    String?
   cobrado_por_origen          String?
-  is_deleted             Boolean   @default(false)
-  created_at             DateTime  @default(now())
-  gym_id                 String
-  source_device          String?
-  version                Int       @default(1)
-  updated_at             DateTime  @default(now())
-  deleted_at             DateTime?
+  is_deleted                  Boolean   @default(false)
+  created_at                  DateTime  @default(now())
+  gym_id                      String
+  source_device               String?
+  version                     Int       @default(1)
+  updated_at                  DateTime  @default(now())
+  deleted_at                  DateTime?
 
   @@unique([gym_id, clave_origen], map: "uq_tes_mov_gym_origen")
   @@index([gym_id, fecha_negocio, cuenta_id], map: "idx_tes_mov_gym_dia_cuenta")
@@ -1199,12 +1253,12 @@ model TesoreriaCierreSolicitud {
   solicitada_por_user_id         String
   solicitada_por_nombre_snapshot String
   solicitada_por_rol_snapshot    String
-  solicitada_por_origen          String?  @db.VarChar(32)
+  solicitada_por_origen          String?   @db.VarChar(32)
   solicitada_at                  DateTime
   decidida_por_user_id           String?
   decidida_por_nombre_snapshot   String?
   decidida_por_rol_snapshot      String?
-  decidida_por_origen            String?  @db.VarChar(32)
+  decidida_por_origen            String?   @db.VarChar(32)
   decision_motivo                String?
   decidida_at                    DateTime?
   cierre_id                      String?
@@ -1303,35 +1357,35 @@ model TesoreriaCierreMensual {
 // R5.7: certificado flexible para día, semana o rango personalizado. Un mes
 // natural exacto delega en TesoreriaCierreMensual y nunca crea esta fila.
 model TesoreriaCierrePeriodo {
-  cierre_periodo_id               String    @id
-  operacion_id                    String    @unique(map: "uq_tes_cierre_periodo_operacion")
-  clave_periodo_activa            String?   @unique(map: "uq_tes_cierre_periodo_activa")
-  tipo_periodo                    String
-  fecha_inicio                    DateTime
-  fecha_fin_exclusiva             DateTime
-  ciclo_numero                    Int
-  estado                          String
-  motivo_cierre                   String
-  cerrado_por_user_id             String
-  cerrado_por_nombre_snapshot     String
-  cerrado_por_rol_snapshot        String
-  cerrado_at                      DateTime
-  reapertura_operacion_id         String?   @unique(map: "uq_tes_cierre_periodo_reapertura")
-  reapertura_motivo               String?   @db.Text
-  reabierto_por_user_id           String?
-  reabierto_por_nombre_snapshot   String?
-  reabierto_por_rol_snapshot      String?
-  reabierto_at                    DateTime?
-  snapshot_version                Int       @default(1)
-  snapshot_json                   String    @db.LongText
-  snapshot_sha256                 String
-  is_deleted                      Boolean   @default(false)
-  created_at                      DateTime  @default(now())
-  gym_id                          String
-  source_device                   String?
-  version                         Int       @default(1)
-  updated_at                      DateTime  @default(now())
-  deleted_at                      DateTime?
+  cierre_periodo_id             String    @id
+  operacion_id                  String    @unique(map: "uq_tes_cierre_periodo_operacion")
+  clave_periodo_activa          String?   @unique(map: "uq_tes_cierre_periodo_activa")
+  tipo_periodo                  String
+  fecha_inicio                  DateTime
+  fecha_fin_exclusiva           DateTime
+  ciclo_numero                  Int
+  estado                        String
+  motivo_cierre                 String
+  cerrado_por_user_id           String
+  cerrado_por_nombre_snapshot   String
+  cerrado_por_rol_snapshot      String
+  cerrado_at                    DateTime
+  reapertura_operacion_id       String?   @unique(map: "uq_tes_cierre_periodo_reapertura")
+  reapertura_motivo             String?   @db.Text
+  reabierto_por_user_id         String?
+  reabierto_por_nombre_snapshot String?
+  reabierto_por_rol_snapshot    String?
+  reabierto_at                  DateTime?
+  snapshot_version              Int       @default(1)
+  snapshot_json                 String    @db.LongText
+  snapshot_sha256               String
+  is_deleted                    Boolean   @default(false)
+  created_at                    DateTime  @default(now())
+  gym_id                        String
+  source_device                 String?
+  version                       Int       @default(1)
+  updated_at                    DateTime  @default(now())
+  deleted_at                    DateTime?
 
   @@index([gym_id, fecha_inicio, fecha_fin_exclusiva], map: "idx_tes_cierre_periodo_gym_rango")
   @@index([gym_id, estado, cerrado_at], map: "idx_tes_cierre_periodo_gym_estado")
@@ -1479,23 +1533,23 @@ model Asistencia {
 }
 
 model PagoCliente {
-  pago_cliente_id String    @id
-  ci              String
-  fecha           DateTime
-  monto_total     Float
-  id_entrenador   String?
-  id_planes_pago  String
-  moneda_id       String
+  pago_cliente_id                String    @id
+  ci                             String
+  fecha                          DateTime
+  monto_total                    Float
+  id_entrenador                  String?
+  id_planes_pago                 String
+  moneda_id                      String
   // R5.3: snapshot del descuento aplicado al cobrar (cliente VIEJO). El monto
   // cobrado vive en `monto_total`; estos tres campos permiten reconstruir el
   // descuento histórico sin perder el precio de lista (igual que tipo_cambio_id
   // congela el recargo R5.1). Null cuando no hubo descuento (cliente NUEVO).
-  precio_lista_snapshot    Float?
-  descuento_pct_snapshot   String?
-  descuento_monto_snapshot Float?
-  categoria_cliente_snapshot String?
-  plan_codigo_snapshot       String?
-  cuota_sufijo_snapshot      String?
+  precio_lista_snapshot          Float?
+  descuento_pct_snapshot         String?
+  descuento_monto_snapshot       Float?
+  categoria_cliente_snapshot     String?
+  plan_codigo_snapshot           String?
+  cuota_sufijo_snapshot          String?
   // Condonación del recargo por mora (docs/RECARGO_MORA.md §6-bis). El recargo
   // se aplica siempre que corresponda; perdonarlo exige motivo y deja rastro.
   // El importe es el que se HABRÍA cobrado, calculado por el servidor.
@@ -1508,17 +1562,17 @@ model PagoCliente {
   // servidor. `cobrado_por_origen`: LOCAL_USER | SYNCED_USER | REMOTE_USER.
   // No confundir con quien anula (PagoReversion) ni con quien cierra la caja
   // (TesoreriaCierre.cerrado_por_*).
-  cobrado_por_user_id         String?
-  cobrado_por_nombre_snapshot String?
-  cobrado_por_rol_snapshot    String?
-  cobrado_por_origen          String?
-  is_deleted      Boolean   @default(false)
-  created_at      DateTime? @default(now())
-  gym_id          String?
-  source_device   String?
-  version         Int       @default(1)
-  updated_at      DateTime  @default(now())
-  deleted_at      DateTime?
+  cobrado_por_user_id            String?
+  cobrado_por_nombre_snapshot    String?
+  cobrado_por_rol_snapshot       String?
+  cobrado_por_origen             String?
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime? @default(now())
+  gym_id                         String?
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
 
   cliente    Cliente       @relation(fields: [ci], references: [ci])
   entrenador Entrenador?   @relation(fields: [id_entrenador], references: [id_entrenador])
@@ -1532,13 +1586,13 @@ model PagoCliente {
 }
 
 model DetallePago {
-  detalle_pago_id String    @id
-  pago_cliente_id String
-  tipo_pago_id    String
-  moneda_id       String
-  cuenta_id       String?
-  cantidad        Float
-  tipo_cambio_id  String?
+  detalle_pago_id             String    @id
+  pago_cliente_id             String
+  tipo_pago_id                String
+  moneda_id                   String
+  cuenta_id                   String?
+  cantidad                    Float
+  tipo_cambio_id              String?
   // R5.1: snapshot autoritativo del recargo por método. Nulo en historia
   // anterior al corte y cuando no hay recargo configurado.
   recargo_metodo_base         String?
@@ -1555,13 +1609,13 @@ model DetallePago {
   recargo_mora_importe        String?
   recargo_mora_plan_valor     String?
   recargo_mora_plan_tope      String?
-  is_deleted      Boolean   @default(false)
-  created_at      DateTime? @default(now())
-  gym_id          String?
-  source_device   String?
-  version         Int       @default(1)
-  updated_at      DateTime  @default(now())
-  deleted_at      DateTime?
+  is_deleted                  Boolean   @default(false)
+  created_at                  DateTime? @default(now())
+  gym_id                      String?
+  source_device               String?
+  version                     Int       @default(1)
+  updated_at                  DateTime  @default(now())
+  deleted_at                  DateTime?
 
   pago_cliente PagoCliente @relation(fields: [pago_cliente_id], references: [pago_cliente_id])
   tipo_pago    TipoPago    @relation(fields: [tipo_pago_id], references: [tipo_pago_id])
@@ -1658,36 +1712,36 @@ model GastoProveedor {
 }
 
 model GastoGobernado {
-  gasto_id                String    @id
-  gym_id                  String
-  categoria_id            String
-  proveedor_id            String?
-  moneda_id               String
-  descripcion             String
-  monto                   Decimal
-  periodo_pertenencia_mes String // AAAA-MM, mes al que pertenece el gasto
-  fecha_pago              DateTime? // cuándo salió el dinero (nullable hasta pagar)
-  fecha_programada        DateTime // cuándo se espera pagar
-  recurrente_id           String? // plantilla que lo generó (null si es manual)
-  metodo_devengo          String    @default("MES_PERTENENCIA")
-  estado                  String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
-  pagado_acumulado        Decimal   @default(0)
-  comprobante_referencia  String?
+  gasto_id                       String    @id
+  gym_id                         String
+  categoria_id                   String
+  proveedor_id                   String?
+  moneda_id                      String
+  descripcion                    String
+  monto                          Decimal
+  periodo_pertenencia_mes        String // AAAA-MM, mes al que pertenece el gasto
+  fecha_pago                     DateTime? // cuándo salió el dinero (nullable hasta pagar)
+  fecha_programada               DateTime // cuándo se espera pagar
+  recurrente_id                  String? // plantilla que lo generó (null si es manual)
+  metodo_devengo                 String    @default("MES_PERTENENCIA")
+  estado                         String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
+  pagado_acumulado               Decimal   @default(0)
+  comprobante_referencia         String?
   // Actor congelado (paridad R5.6): quién lo registró viaja dentro del evento.
   // `registrada_por_origen`: LOCAL_USER | SYNCED_USER | REMOTE_USER. Un
   // LOCAL_USER puede no tener nunca fila aquí y aun así ser el autor, así que
   // la subida valida el actor congelado y no exige fila en `User`.
-  registrada_por_user_id  String
-  registrada_por_nombre_snapshot String? @db.VarChar(191)
-  registrada_por_rol_snapshot    String? @db.VarChar(80)
-  registrada_por_origen          String? @db.VarChar(32)
-  formula_snapshot_json   String    @db.LongText
-  is_deleted              Boolean   @default(false)
-  created_at              DateTime  @default(now())
-  source_device           String?
-  version                 Int       @default(1)
-  updated_at              DateTime  @default(now())
-  deleted_at              DateTime?
+  registrada_por_user_id         String
+  registrada_por_nombre_snapshot String?   @db.VarChar(191)
+  registrada_por_rol_snapshot    String?   @db.VarChar(80)
+  registrada_por_origen          String?   @db.VarChar(32)
+  formula_snapshot_json          String    @db.LongText
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  source_device                  String?
+  version                        Int       @default(1)
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
 
   // Una plantilla genera como mucho un gasto por mes de pertenencia: es lo que
   // hace idempotente la generación aunque se pulse dos veces.

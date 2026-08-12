@@ -3,7 +3,7 @@ import type { AsistenciaRepository } from "../../domain/repositories/AsistenciaR
 import { prisma } from "../db/prismaClient";
 import { type SyncTransactionContext } from "../../application/use-cases/sync/sync-transaction";
 import { trustedClock } from "../../config/trusted-clock";
-import { startOfDayInZone } from "../../config/tz";
+import { calendarDayBoundsInZone, startOfDayInZone } from "../../config/tz";
 import {
     softDeleteGymScopedSyncRecord,
     upsertGymScopedSyncRecord,
@@ -33,7 +33,7 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
   // no expone `$transaction`.
   private runInClient<T>(work: (c: any) => Promise<T>): Promise<T> {
     return typeof this.client.$transaction === "function"
-      ? this.runInClient(work)
+      ? this.client.$transaction(work)
       : work(this.client);
   }
 
@@ -89,11 +89,31 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
         skip: number = 0,
         take: number = 10,
         ci?: string,
+        calendarDate?: string,
     ): Promise<Asistencia[]> {
+        const gym = calendarDate
+            ? await this.client.gym.findUnique({
+                where: { gym_id: gymId },
+                select: { timezone: true },
+            })
+            : null;
+        if (calendarDate && !gym?.timezone) {
+            throw new Error("Gym timezone not found");
+        }
+        const bounds = calendarDate
+            ? calendarDayBoundsInZone(gym.timezone, calendarDate)
+            : null;
         const results = await this.client.asistencia.findMany({
             skip,
             take,
-            where: { gym_id: gymId, ci, is_deleted: false },
+            where: {
+                gym_id: gymId,
+                ci,
+                is_deleted: false,
+                ...(bounds
+                    ? { created_at: { gte: bounds.startUtc, lte: bounds.endUtc } }
+                    : {}),
+            },
             orderBy: { created_at: "desc" },
             include: { cliente: clienteSummary },
         });

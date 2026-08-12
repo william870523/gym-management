@@ -9,8 +9,15 @@ export class ListAsistenciasUseCase {
         page: number = 1,
         limit: number = 10,
         ci?: string,
+        calendarDate?: string,
     ): Promise<Asistencia[]> {
         const skip = (page - 1) * limit;
-        return this.asistenciaRepository.findAll(gymId, skip, limit, ci);
+        return this.asistenciaRepository.findAll(
+            gymId,
+            skip,
+            limit,
+            ci,
+            calendarDate,
+        );
     }
 }

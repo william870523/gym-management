@@ -17,6 +17,19 @@ import {
     MembershipPauseService,
 } from "../../../application/membership/membership-pause.service";
 import { getUserGymActor } from "../middleware/auth.middleware";
+import {
+    VoluntaryCancellationPreviewError,
+    VoluntaryCancellationPreviewService,
+} from "../../../application/membership/voluntary-cancellation-preview.service";
+import {
+    VoluntaryCancellationError,
+    VoluntaryCancellationService,
+} from "../../../application/membership/voluntary-cancellation.service";
+import {
+    ClientRecordDocumentError,
+    ClientRecordDocumentService,
+} from "../../../application/client/client-record-document.service";
+import { prisma } from "../../db/prismaClient";
 
 export class ClienteController {
     private createUseCase: CreateClienteUseCase;
@@ -26,13 +39,21 @@ export class ClienteController {
     private listUseCase: ListClientesUseCase;
     private recordUseCase: GetClienteExpedienteUseCase;
     private membershipPauseService: MembershipPauseService;
+    private voluntaryCancellationPreview: VoluntaryCancellationPreviewService;
+    private voluntaryCancellation: VoluntaryCancellationService;
+    private recordDocumentService: ClientRecordDocumentService;
 
     constructor() {
         const repository = new PrismaClienteRepository();
         const syncLogRepository = new PrismaSyncLogRepository();
         const clientePesoRepository = new PrismaClientePesoRepository();
 
-        this.createUseCase = new CreateClienteUseCase(repository, syncLogRepository, clientePesoRepository);
+        this.createUseCase = new CreateClienteUseCase(
+            repository,
+            syncLogRepository,
+            clientePesoRepository,
+            (work) => prisma.$transaction(work),
+        );
         this.updateUseCase = new UpdateClienteUseCase(repository, syncLogRepository);
         this.deleteUseCase = new DeleteClienteUseCase(repository, syncLogRepository);
         this.getUseCase = new GetClienteUseCase(repository);
@@ -41,6 +62,125 @@ export class ClienteController {
             new PrismaClienteExpedienteRepository(),
         );
         this.membershipPauseService = new MembershipPauseService();
+        this.voluntaryCancellationPreview = new VoluntaryCancellationPreviewService();
+        this.voluntaryCancellation = new VoluntaryCancellationService();
+        this.recordDocumentService = new ClientRecordDocumentService();
+    }
+
+    async registerRecordDocument(c: Context) {
+        const auth = c.get("auth");
+        if (!auth?.gymId || !auth?.sub) return c.json({ error: "La sesión no identifica gimnasio y operador." }, 403);
+        try {
+            const body = await c.req.json();
+            return c.json(serialize(await this.recordDocumentService.register({
+                gymId: auth.gymId,
+                clientId: c.req.param("id"),
+                operationId: body.operation_id,
+                format: body.formato,
+                destination: body.destino,
+                fileName: body.nombre_archivo,
+                contentBase64: body.contenido_base64,
+                filters: body.filtros,
+                userId: auth.sub,
+            })), 201);
+        } catch (error) {
+            if (error instanceof ClientRecordDocumentError) {
+                return c.json({ error: error.message }, error.status as 400 | 403 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async listRecordDocuments(c: Context) {
+        const gymId = c.get("auth")?.gymId;
+        if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            return c.json(serialize(await this.recordDocumentService.list(gymId, c.req.param("id"))));
+        } catch (error) {
+            if (error instanceof ClientRecordDocumentError) {
+                return c.json({ error: error.message }, error.status as 400 | 403 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async getRecordDocument(c: Context) {
+        const gymId = c.get("auth")?.gymId;
+        if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            return c.json(serialize(await this.recordDocumentService.getContent(
+                gymId,
+                c.req.param("id"),
+                c.req.param("documentId"),
+            )));
+        } catch (error) {
+            if (error instanceof ClientRecordDocumentError) {
+                return c.json({ error: error.message }, error.status as 400 | 403 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async executeVoluntaryCancellation(c: Context) {
+        const auth = c.get("auth");
+        if (!auth?.gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            const body = await c.req.json();
+            const result = await this.voluntaryCancellation.execute({
+                gymId: auth.gymId,
+                clientId: c.req.param("id"),
+                membershipId: c.req.param("membershipId"),
+                operationId: String(body.operation_id ?? ""),
+                type: body.tipo_resolucion,
+                reason: body.motivo,
+                userId: auth.sub,
+            });
+            return c.json(serialize(result), 201);
+        } catch (error) {
+            if (error instanceof VoluntaryCancellationError) {
+                return c.json({ error: error.message }, error.status as 400 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async reverseVoluntaryCancellation(c: Context) {
+        const auth = c.get("auth");
+        if (!auth?.gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            const body = await c.req.json();
+            const result = await this.voluntaryCancellation.reverse({
+                gymId: auth.gymId,
+                clientId: c.req.param("id"),
+                membershipId: c.req.param("membershipId"),
+                operationId: String(body.operation_id ?? ""),
+                reason: body.motivo,
+                userId: auth.sub,
+            });
+            return c.json(serialize(result));
+        } catch (error) {
+            if (error instanceof VoluntaryCancellationError) {
+                return c.json({ error: error.message }, error.status as 400 | 404 | 409);
+            }
+            throw error;
+        }
+    }
+
+    async previewVoluntaryCancellation(c: Context) {
+        const gymId = c.get("auth")?.gymId;
+        if (!gymId) return c.json({ error: "El token no identifica un gimnasio." }, 403);
+        try {
+            return c.json(serialize(await this.voluntaryCancellationPreview.preview(
+                gymId,
+                c.req.param("id"),
+                c.req.param("membershipId"),
+            )));
+        } catch (error) {
+            if (error instanceof VoluntaryCancellationPreviewError) {
+                return c.json({ error: error.message }, error.status as 400 | 404 | 409);
+            }
+            throw error;
+        }
     }
 
     async pauseMembership(c: Context) {

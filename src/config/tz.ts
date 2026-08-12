@@ -117,6 +117,72 @@ export function startOfDayInZone(
 }
 
 /**
+ * Convierte un día de calendario `YYYY-MM-DD` visto en una zona IANA al
+ * intervalo UTC exacto que debe usarse en consultas. El fin es inclusivo.
+ *
+ * A diferencia de sumar 24 horas, calcula también la medianoche del día
+ * siguiente; por eso respeta días de 23/25 horas durante cambios DST.
+ */
+export function calendarDayBoundsInZone(
+  timeZone: string,
+  calendarDate: string,
+): { startUtc: Date; endUtc: Date } {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(calendarDate);
+  if (!match) throw new Error("La fecha debe usar el formato YYYY-MM-DD");
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const canonical = new Date(Date.UTC(year, month - 1, day));
+  if (
+    canonical.getUTCFullYear() !== year ||
+    canonical.getUTCMonth() !== month - 1 ||
+    canonical.getUTCDate() !== day
+  ) {
+    throw new Error("La fecha de calendario no es válida");
+  }
+
+  const atWallMidnight = (y: number, m: number, d: number): Date => {
+    const wanted = Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+    let candidate = wanted;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const seen = datePartsInZone(timeZone, new Date(candidate));
+      const seenAsUtc = Date.UTC(
+        seen.year,
+        seen.month - 1,
+        seen.day,
+        seen.hour,
+        seen.minute,
+      );
+      const correction = wanted - seenAsUtc;
+      candidate += correction;
+      if (correction === 0) break;
+    }
+    const result = new Date(candidate);
+    const seen = datePartsInZone(timeZone, result);
+    if (
+      seen.year !== y ||
+      seen.month !== m ||
+      seen.day !== d ||
+      seen.hour !== 0 ||
+      seen.minute !== 0
+    ) {
+      throw new Error(`El día ${calendarDate} no tiene una medianoche válida en ${timeZone}`);
+    }
+    return result;
+  };
+
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  const startUtc = atWallMidnight(year, month, day);
+  const nextStartUtc = atWallMidnight(
+    next.getUTCFullYear(),
+    next.getUTCMonth() + 1,
+    next.getUTCDate(),
+  );
+  return { startUtc, endUtc: new Date(nextStartUtc.getTime() - 1) };
+}
+
+/**
  * Formatea una fecha en una zona IANA usando Intl. Opciones estándar de
  * Intl.DateTimeFormat (p.ej. { dateStyle: 'short', timeStyle: 'short' }).
  */

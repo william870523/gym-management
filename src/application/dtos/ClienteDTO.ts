@@ -11,8 +11,10 @@ export const CreateClienteSchema = z.object({
     sexo: z.string(),
     foto_cliente: z.any().optional().nullable(), // Base64 or Buffer
     cliente_peso_id: z.string().optional().nullable(),
-    peso: z.any().optional(), // Allow numeric or string peso
-    estatura_cliente: z.any(), // Allow string from multipart
+    peso: z.coerce.number().positive().optional().nullable(),
+    // La columna es obligatoria en SQLite y MariaDB. Aceptar `null` aquí
+    // convertía un campo visualmente opcional en un P2011/500 de Prisma.
+    estatura_cliente: z.coerce.number().positive(),
     direccion: z.string().optional().nullable(),
     telefono: z.any().optional().nullable(),
     nacionalidad_id: z.string().min(1),
@@ -43,7 +45,7 @@ export const UpdateClienteSchema = z.object({
     foto_cliente: z.any().optional().nullable(), // Base64 or Buffer
     cliente_peso_id: z.string().optional().nullable(),
     peso: z.any().optional(),
-    estatura_cliente: z.any().optional(),
+    estatura_cliente: z.coerce.number().positive().optional(),
     direccion: z.string().optional().nullable(),
     telefono: z.any().optional().nullable(),
     nacionalidad_id: z.string().min(1).optional(),

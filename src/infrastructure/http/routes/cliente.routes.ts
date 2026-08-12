@@ -7,6 +7,12 @@ const controller = new ClienteController();
 
 clienteRoutes.get("/", (c) => controller.list(c));
 clienteRoutes.get("/:id/expediente", (c) => controller.getRecord(c));
+clienteRoutes.get("/:id/expediente/documentos", (c) => controller.listRecordDocuments(c));
+clienteRoutes.get("/:id/expediente/documentos/:documentId", (c) => controller.getRecordDocument(c));
+clienteRoutes.post("/:id/expediente/documentos", (c) => controller.registerRecordDocument(c));
+clienteRoutes.get("/:id/membresias/:membershipId/cancelacion-voluntaria/previsualizacion", (c) => controller.previewVoluntaryCancellation(c));
+clienteRoutes.post("/:id/membresias/:membershipId/cancelacion-voluntaria", requireAdmin(), (c) => controller.executeVoluntaryCancellation(c));
+clienteRoutes.post("/:id/membresias/:membershipId/cancelacion-voluntaria/revertir", requireAdmin(), (c) => controller.reverseVoluntaryCancellation(c));
 // Pausar y reanudar una membresía es administración; recepción lo pide por
 // `/membresias/solicitudes`, que es justo lo que ofrece su expediente.
 clienteRoutes.post("/:id/membresias/:membershipId/pausar", requireAdmin(), (c) => controller.pauseMembership(c));

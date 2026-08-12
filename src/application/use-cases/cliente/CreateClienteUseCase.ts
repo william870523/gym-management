@@ -8,12 +8,21 @@ import { trustedClock } from "../../../config/trusted-clock";
 import { resolverFechaNacimiento } from "../../clients/client-birthdate";
 import { fechaNegocioDeSede } from "../../clients/business-date";
 import { quitarProyeccionesDeCliente } from "../sync/sync-event-contract";
+import type {
+    SyncTransactionContext,
+    SyncTransactionRunner,
+} from "../sync/sync-transaction";
 
 export class CreateClienteUseCase {
     constructor(
         private readonly clienteRepository: ClienteRepository,
         private readonly syncLogRepository: SyncLogRepository,
-        private readonly clientePesoRepository: ClientePesoRepository
+        private readonly clientePesoRepository: ClientePesoRepository,
+        private readonly runTransaction: SyncTransactionRunner,
+        private readonly businessDateForGym: (
+            gymId: string,
+            instant: Date,
+        ) => Promise<Date> = fechaNegocioDeSede,
     ) { }
 
     async execute(dto: CreateClienteDTO, gymId: string): Promise<Cliente & {
@@ -30,7 +39,7 @@ export class CreateClienteUseCase {
             tipoDocumento: dto.tipo_documento,
             ci: dto.ci,
             fechaNacimientoEntrante: dto.fecha_nacimiento,
-            fechaNegocio: await fechaNegocioDeSede(gymId, now),
+            fechaNegocio: await this.businessDateForGym(gymId, now),
             esAlta: true,
         });
         const newCliente: Cliente = {
@@ -69,127 +78,123 @@ export class CreateClienteUseCase {
             is_deleted: false
         };
 
-        const creation = await this.clienteRepository.create(newCliente);
-        const createdClient = creation.client;
+        // La mutación y todos sus eventos de descarga son una sola unidad. Antes
+        // de este corte el repositorio confirmaba cliente/membresía/asignación y
+        // solo después se escribía `sync_log`: un fallo en el log dejaba una
+        // alta visible en web que nunca podía llegar al escritorio.
+        return this.runTransaction(async (tx: SyncTransactionContext) => {
+            const clienteRepository = this.clienteRepository.withTransaction(tx);
+            const clientePesoRepository = this.clientePesoRepository.withTransaction(tx);
+            const creation = await clienteRepository.create(newCliente);
+            const createdClient = creation.client;
 
-        // Record for sync (Cliente Link)
-        await this.syncLogRepository.register({
-            eventId: randomUUID(),
-            entidad: "cliente",
-            operacion: "INSERT",
-            entidadId: createdClient.ci,
-            gymId: createdClient.gym_id ?? null,
-            deviceId: "WEB_ADMIN",
-            // `Cliente` admite la proyección de membresía, así que el payload
-            // se limpia aquí también aunque hoy `create` no la traiga: es el
-            // mismo campo que se cayó entre capas en `UpdateClienteUseCase`.
-            payload: quitarProyeccionesDeCliente({
-                ...createdClient,
-                nacionalidad_codigo_iso: creation.nationalityCode,
-                foto_cliente: createdClient.foto_cliente ? Buffer.from(createdClient.foto_cliente).toString('base64') : null
-            }) as any
-        });
-
-        if (creation.membership) {
-            await this.syncLogRepository.register({
-                eventId: randomUUID(),
-                entidad: "membresia_cliente",
-                operacion: "INSERT",
-                entidadId: creation.membership.membresia_id,
-                gymId: creation.membership.gym_id,
-                deviceId: "WEB_ADMIN",
-                payload: creation.membership as any,
-            });
-        }
-        if (creation.assignment) {
-            await this.syncLogRepository.register({
-                eventId: randomUUID(),
-                entidad: "membresia_entrenador_asignacion",
-                operacion: "INSERT",
-                entidadId: creation.assignment.asignacion_id,
-                gymId: creation.assignment.gym_id,
-                deviceId: "WEB_ADMIN",
-                payload: creation.assignment as any,
-            });
-        }
-
-        // Handle Weight Logic
-        if (dto.peso !== undefined && dto.peso !== null) {
-            const pesoId = randomUUID();
-            const pesoRecord = {
-                cliente_peso_id: pesoId,
-                ci: createdClient.ci,
-                peso: Number(dto.peso),
-                fecha: createdClient.fecha_inicio,
-                gym_id: createdClient.gym_id ?? null,
-                source_device: "WEB_ADMIN",
-                version: 1,
-                created_at: now,
-                updated_at: now,
-                deleted_at: null,
-                is_deleted: false,
-                sync_status: 'pending' // Optional depending on entity definition
-            };
-
-            // 1. Create Weight
-            await this.clientePesoRepository.create(pesoRecord);
-
-            // 2. Sync Weight
-            await this.syncLogRepository.register({
-                eventId: randomUUID(),
-                entidad: "cliente_peso",
-                operacion: "INSERT",
-                entidadId: pesoId,
-                gymId: newCliente.gym_id ?? null,
-                deviceId: "WEB_ADMIN",
-                payload: {
-                    ...pesoRecord,
-                    fecha: pesoRecord.fecha.toISOString(),
-                    created_at: pesoRecord.created_at.toISOString(),
-                    updated_at: pesoRecord.updated_at.toISOString(),
-                } as any
-            });
-
-            // 3. Update Client with Weight ID
-            createdClient.cliente_peso_id = pesoId;
-            await this.clienteRepository.update(
-                createdClient.ci,
-                gymId,
-                { cliente_peso_id: pesoId },
-            );
-
-            // 4. Sync Client Update
             await this.syncLogRepository.register({
                 eventId: randomUUID(),
                 entidad: "cliente",
-                operacion: "UPDATE",
+                operacion: "INSERT",
                 entidadId: createdClient.ci,
                 gymId: createdClient.gym_id ?? null,
                 deviceId: "WEB_ADMIN",
                 payload: quitarProyeccionesDeCliente({
                     ...createdClient,
                     nacionalidad_codigo_iso: creation.nationalityCode,
-                    foto_cliente: createdClient.foto_cliente ? Buffer.from(createdClient.foto_cliente).toString('base64') : null
-                }) as any
-            });
-        }
+                    foto_cliente: createdClient.foto_cliente
+                        ? Buffer.from(createdClient.foto_cliente).toString("base64")
+                        : null,
+                }) as any,
+            }, tx);
 
-        // La vigencia la deriva el repositorio, que es quien conoce la zona
-        // horaria de la sede. Se relee la ficha recién creada en vez de repetir
-        // el cálculo aquí: si el alta y el listado lo resolvieran por separado,
-        // acabarían discrepando (docs/DEMO_MEMBERSHIP_VIGENCIA.md).
-        const proyeccion = creation.membership
-            ? await this.clienteRepository.findById(createdClient.ci, gymId)
-            : null;
-        return {
-            ...createdClient,
-            membresia_id: creation.membership?.membresia_id ?? null,
-            membresia_estado: creation.membership?.estado ?? null,
-            membresia_vigencia: proyeccion?.membresia_vigencia ?? "SIN_MEMBRESIA",
-            membresia_dias_desde_vencimiento:
-                proyeccion?.membresia_dias_desde_vencimiento ?? null,
-            membresia_cubre_hoy: proyeccion?.membresia_cubre_hoy ?? false,
-        };
+            if (creation.membership) {
+                await this.syncLogRepository.register({
+                    eventId: randomUUID(),
+                    entidad: "membresia_cliente",
+                    operacion: "INSERT",
+                    entidadId: creation.membership.membresia_id,
+                    gymId: creation.membership.gym_id,
+                    deviceId: "WEB_ADMIN",
+                    payload: creation.membership as any,
+                }, tx);
+            }
+            if (creation.assignment) {
+                await this.syncLogRepository.register({
+                    eventId: randomUUID(),
+                    entidad: "membresia_entrenador_asignacion",
+                    operacion: "INSERT",
+                    entidadId: creation.assignment.asignacion_id,
+                    gymId: creation.assignment.gym_id,
+                    deviceId: "WEB_ADMIN",
+                    payload: creation.assignment as any,
+                }, tx);
+            }
+
+            if (dto.peso !== undefined && dto.peso !== null) {
+                const pesoId = randomUUID();
+                const pesoRecord = {
+                    cliente_peso_id: pesoId,
+                    ci: createdClient.ci,
+                    peso: Number(dto.peso),
+                    fecha: createdClient.fecha_inicio,
+                    gym_id: createdClient.gym_id ?? null,
+                    source_device: "WEB_ADMIN",
+                    version: 1,
+                    created_at: now,
+                    updated_at: now,
+                    deleted_at: null,
+                    is_deleted: false,
+                    sync_status: "pending",
+                };
+                await clientePesoRepository.create(pesoRecord);
+                await this.syncLogRepository.register({
+                    eventId: randomUUID(),
+                    entidad: "cliente_peso",
+                    operacion: "INSERT",
+                    entidadId: pesoId,
+                    gymId: newCliente.gym_id ?? null,
+                    deviceId: "WEB_ADMIN",
+                    payload: {
+                        ...pesoRecord,
+                        fecha: pesoRecord.fecha.toISOString(),
+                        created_at: pesoRecord.created_at.toISOString(),
+                        updated_at: pesoRecord.updated_at.toISOString(),
+                    } as any,
+                }, tx);
+
+                createdClient.cliente_peso_id = pesoId;
+                await clienteRepository.update(createdClient.ci, gymId, {
+                    cliente_peso_id: pesoId,
+                });
+                await this.syncLogRepository.register({
+                    eventId: randomUUID(),
+                    entidad: "cliente",
+                    operacion: "UPDATE",
+                    entidadId: createdClient.ci,
+                    gymId: createdClient.gym_id ?? null,
+                    deviceId: "WEB_ADMIN",
+                    payload: quitarProyeccionesDeCliente({
+                        ...createdClient,
+                        nacionalidad_codigo_iso: creation.nationalityCode,
+                        foto_cliente: createdClient.foto_cliente
+                            ? Buffer.from(createdClient.foto_cliente).toString("base64")
+                            : null,
+                    }) as any,
+                }, tx);
+            }
+
+            // Se relee dentro de la misma transacción: la respuesta no puede
+            // fallar después del commit ni discrepar de la ficha/listado.
+            const proyeccion = creation.membership
+                ? await clienteRepository.findById(createdClient.ci, gymId)
+                : null;
+            return {
+                ...createdClient,
+                membresia_id: creation.membership?.membresia_id ?? null,
+                membresia_estado: creation.membership?.estado ?? null,
+                membresia_vigencia:
+                    proyeccion?.membresia_vigencia ?? "SIN_MEMBRESIA",
+                membresia_dias_desde_vencimiento:
+                    proyeccion?.membresia_dias_desde_vencimiento ?? null,
+                membresia_cubre_hoy: proyeccion?.membresia_cubre_hoy ?? false,
+            };
+        });
     }
 }
-

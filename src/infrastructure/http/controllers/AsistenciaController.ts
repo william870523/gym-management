@@ -8,19 +8,22 @@ import { DeleteAsistenciaUseCase } from "../../../application/use-cases/asistenc
 import { GetAsistenciaUseCase } from "../../../application/use-cases/asistencia/GetAsistenciaUseCase";
 import { ListAsistenciasUseCase } from "../../../application/use-cases/asistencia/ListAsistenciasUseCase";
 import { CreateAsistenciaSchema, UpdateAsistenciaSchema } from "../../../application/dtos/AsistenciaDTO";
-import { trustedClock } from "../../../config/trusted-clock";
 import { getUserGymActor } from "../middleware/auth.middleware";
+import { AsistenciaElegibilidadService } from "../../../application/asistencia/asistencia-elegibilidad.service";
+import {
+    AsistenciaPermanenciaError,
+    AsistenciaPermanenciaService,
+} from "../../../application/asistencia/asistencia-permanencia.service";
 
 export class AsistenciaController {
-    private createUseCase: CreateAsistenciaUseCase;
     private updateUseCase: UpdateAsistenciaUseCase;
     private deleteUseCase: DeleteAsistenciaUseCase;
     private getUseCase: GetAsistenciaUseCase;
     private listUseCase: ListAsistenciasUseCase;
+    private permanenciaService = new AsistenciaPermanenciaService();
 
     constructor() {
         const repository = new PrismaAsistenciaRepository();
-        this.createUseCase = new CreateAsistenciaUseCase(repository);
         this.updateUseCase = new UpdateAsistenciaUseCase(repository);
         this.deleteUseCase = new DeleteAsistenciaUseCase(repository);
         this.getUseCase = new GetAsistenciaUseCase(repository);
@@ -31,12 +34,28 @@ export class AsistenciaController {
         try {
             const actor = getUserGymActor(c);
             if (!actor) return c.json({ error: "Gym scope required" }, 403);
-            const page = Number(c.req.query("page")) || 1;
-            const limit = Math.min(Number(c.req.query("limit")) || 10, 200);
+            const page = Math.max(1, Math.trunc(Number(c.req.query("page")) || 1));
+            const limit = Math.min(
+                Math.max(1, Math.trunc(Number(c.req.query("limit")) || 10)),
+                200,
+            );
             const ci = c.req.param("ci") || c.req.query("ci");
-            const result = await this.listUseCase.execute(actor.gymId, page, limit, ci);
+            const date = c.req.query("date")?.trim() || undefined;
+            if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                return c.json({ error: "La fecha debe usar el formato YYYY-MM-DD" }, 400);
+            }
+            const result = await this.listUseCase.execute(
+                actor.gymId,
+                page,
+                limit,
+                ci,
+                date,
+            );
             return c.json(result);
         } catch (error) {
+            if (String((error as Error)?.message ?? "").includes("fecha")) {
+                return c.json({ error: (error as Error).message }, 400);
+            }
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }
@@ -100,27 +119,30 @@ export class AsistenciaController {
             //
             // El gimnasio proviene del JWT; nunca se acepta el gym_id libre
             // que pueda enviar el cliente HTTP.
-            const { asistencia: result, creada } = await this.createUseCase.execute(
-                validated,
-                gymId,
-            );
+            const { asistencia: result, creada } = await prisma.$transaction(async (tx) => {
+                const useCase = new CreateAsistenciaUseCase(
+                    new PrismaAsistenciaRepository(tx),
+                    new AsistenciaElegibilidadService(tx),
+                );
+                const response = await useCase.execute(validated, gymId);
 
-            // Repetir la entrada de quien ya está dentro devuelve su misma fila
-            // y NO vuelve a encolar: un INSERT de una fila existente acaba en
-            // cuarentena o duplica historia.
-            if (creada) {
-                await prisma.syncLog.create({
-                    data: {
-                        event_id: crypto.randomUUID(),
-                        entidad: "asistencia",
-                        operacion: "INSERT",
-                        entidad_id: result.asistencia_id,
-                        gym_id: result.gym_id,
-                        device_id: null,
-                        payload_json: JSON.stringify(result),
-                    },
-                });
-            }
+                // Repetir la entrada de quien ya está dentro devuelve su misma
+                // fila y NO vuelve a encolar. Alta y evento comparten tx.
+                if (response.creada) {
+                    await tx.syncLog.create({
+                        data: {
+                            event_id: crypto.randomUUID(),
+                            entidad: "asistencia",
+                            operacion: "INSERT",
+                            entidad_id: response.asistencia.asistencia_id,
+                            gym_id: response.asistencia.gym_id,
+                            device_id: null,
+                            payload_json: JSON.stringify(response.asistencia),
+                        },
+                    });
+                }
+                return response;
+            });
 
             return c.json(result, creada ? 201 : 200);
         } catch (error: any) {
@@ -145,28 +167,46 @@ export class AsistenciaController {
             const id = c.req.param("id");
             const actor = getUserGymActor(c);
             if (!actor) return c.json({ error: "Gym scope required" }, 403);
-            const repository = new PrismaAsistenciaRepository();
-            const existing = await repository.findById(id, actor.gymId);
-            if (!existing) {
-                return c.json({ error: "Asistencia not found" }, 404);
-            }
-
-            const result = await repository.finalize(id, actor.gymId, trustedClock.nowUtc());
-
-            await prisma.syncLog.create({
-                data: {
-                    event_id: crypto.randomUUID(),
-                    entidad: "asistencia",
-                    operacion: "UPDATE",
-                    entidad_id: result.asistencia_id,
-                    gym_id: result.gym_id,
-                    device_id: null,
-                    payload_json: JSON.stringify(result),
-                },
-            });
-
+            const result = await this.permanenciaService.finalize(actor.gymId, id);
             return c.json(result);
-        } catch (error) {
+        } catch (error: any) {
+            if (error instanceof AsistenciaPermanenciaError) {
+                return c.json({ error: error.message }, error.status);
+            }
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async pause(c: Context) {
+        try {
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.permanenciaService.pause(
+                actor.gymId,
+                c.req.param("id"),
+            );
+            return c.json(result);
+        } catch (error: any) {
+            if (error instanceof AsistenciaPermanenciaError) {
+                return c.json({ error: error.message }, error.status);
+            }
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+
+    async resume(c: Context) {
+        try {
+            const actor = getUserGymActor(c);
+            if (!actor) return c.json({ error: "Gym scope required" }, 403);
+            const result = await this.permanenciaService.resume(
+                actor.gymId,
+                c.req.param("id"),
+            );
+            return c.json(result);
+        } catch (error: any) {
+            if (error instanceof AsistenciaPermanenciaError) {
+                return c.json({ error: error.message }, error.status);
+            }
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }

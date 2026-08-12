@@ -3,7 +3,7 @@ import type { Asistencia } from "../entities/Asistencia";
 
 export interface AsistenciaRepository extends SyncTransactionalRepository<AsistenciaRepository> {
     upsertAsistencia(data: Asistencia): Promise<void>;
-    findAll(gymId: string, skip?: number, take?: number, ci?: string): Promise<Asistencia[]>;
+    findAll(gymId: string, skip?: number, take?: number, ci?: string, calendarDate?: string): Promise<Asistencia[]>;
     findActive(gymId: string, skip?: number, take?: number): Promise<Asistencia[]>;
     findToday(gymId: string): Promise<Asistencia[]>;
     findById(id: string, gymId: string): Promise<Asistencia | null>;

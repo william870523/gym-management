@@ -164,19 +164,21 @@ export class TreasuryRefundService {
         data: { estado: "APLICADA", version: { increment: 1 }, updated_at: now },
       });
       await this.recordSync(tx, RESOLUTION_ENTITY, "UPDATE", input.gymId, resolution.ajuste_financiero_id, resolution);
-      const decision = await tx.entrenadorBajaDecision.update({
-        where: { decision_id: context.decision.decision_id },
-        data: {
-          estado_ejecucion: "APLICADA", ejecutada_at: now,
-          ejecucion_resultado_json: JSON.stringify({
-            resolucion_financiera_id: resolution.ajuste_financiero_id,
-            reembolso_id: refund.reembolso_id, resultado_tesoreria: refund.estado,
-            importe: Number(refund.monto), credito_id: creditId,
-          }),
-          version: { increment: 1 }, updated_at: now,
-        },
-      });
-      await this.recordSync(tx, "entrenador_baja_decision", "UPDATE", input.gymId, decision.decision_id, decision);
+      if (context.decision) {
+        const decision = await tx.entrenadorBajaDecision.update({
+          where: { decision_id: context.decision.decision_id },
+          data: {
+            estado_ejecucion: "APLICADA", ejecutada_at: now,
+            ejecucion_resultado_json: JSON.stringify({
+              resolucion_financiera_id: resolution.ajuste_financiero_id,
+              reembolso_id: refund.reembolso_id, resultado_tesoreria: refund.estado,
+              importe: Number(refund.monto), credito_id: creditId,
+            }),
+            version: { increment: 1 }, updated_at: now,
+          },
+        });
+        await this.recordSync(tx, "entrenador_baja_decision", "UPDATE", input.gymId, decision.decision_id, decision);
+      }
       return refund.reembolso_id;
     });
     return this.receipt(input.gymId, refundId);
@@ -219,15 +221,17 @@ export class TreasuryRefundService {
       await this.recordSync(tx, REFUND_ENTITY, "UPDATE", input.gymId, updatedRefund.reembolso_id, updatedRefund);
       const updatedResolution = await tx.membresiaAjusteFinanciero.update({ where: { ajuste_financiero_id: resolution.ajuste_financiero_id }, data: { estado: "PENDIENTE_TESORERIA", version: { increment: 1 }, updated_at: now } });
       await this.recordSync(tx, RESOLUTION_ENTITY, "UPDATE", input.gymId, updatedResolution.ajuste_financiero_id, updatedResolution);
-      const decision = await tx.entrenadorBajaDecision.update({
-        where: { decision_id: resolution.decision_id },
-        data: {
-          estado_ejecucion: "ESPERA_TESORERIA", ejecutada_at: null,
-          ejecucion_resultado_json: JSON.stringify({ resolucion_financiera_id: resolution.ajuste_financiero_id, reembolso_anulado_id: refund.reembolso_id, reversion_id: reversal.reversion_id }),
-          version: { increment: 1 }, updated_at: now,
-        },
-      });
-      await this.recordSync(tx, "entrenador_baja_decision", "UPDATE", input.gymId, decision.decision_id, decision);
+      if (!resolution.expediente_id.startsWith("CANCELACION_VOLUNTARIA:")) {
+        const decision = await tx.entrenadorBajaDecision.update({
+          where: { decision_id: resolution.decision_id },
+          data: {
+            estado_ejecucion: "ESPERA_TESORERIA", ejecutada_at: null,
+            ejecucion_resultado_json: JSON.stringify({ resolucion_financiera_id: resolution.ajuste_financiero_id, reembolso_anulado_id: refund.reembolso_id, reversion_id: reversal.reversion_id }),
+            version: { increment: 1 }, updated_at: now,
+          },
+        });
+        await this.recordSync(tx, "entrenador_baja_decision", "UPDATE", input.gymId, decision.decision_id, decision);
+      }
     });
     return this.receipt(input.gymId, input.refundId);
   }
@@ -261,7 +265,9 @@ export class TreasuryRefundService {
       tx.entrenadorBajaDecision.findFirst({ where: { decision_id: resolution.decision_id, gym_id: gymId, is_deleted: false } }),
       tx.membresiaCliente.findFirst({ where: { membresia_id: resolution.membresia_origen_id, gym_id: gymId, is_deleted: false } }),
     ]);
-    if (!decision || !membership) throw new TreasuryRefundError("La solicitud perdió su contexto operativo.", 409);
+    if (!membership || (!decision && !resolution.expediente_id.startsWith("CANCELACION_VOLUNTARIA:"))) {
+      throw new TreasuryRefundError("La solicitud perdió su contexto operativo.", 409);
+    }
     return { resolution, decision, membership };
   }
 

@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import type { Moneda } from "../../domain/entities/Moneda";
 import type { MonedaRepository } from "../../domain/repositories/MonedaRepository";
 import { prisma } from "../db/prismaClient";
@@ -16,9 +15,16 @@ export class PrismaMonedaRepository implements MonedaRepository {
   // si ya es el cliente de una transacción (upload), la reutiliza en vez de
   // anidar otra —Prisma no soporta transacciones anidadas y un TransactionClient
   // no expone `$transaction`.
+  //
+  // Ojo con la línea de abajo: hasta el 12-08-2026 decía `this.runInClient(work)`
+  // en vez de `this.client.$transaction(work)`. Se llamaba a sí misma, así que
+  // con el prisma raíz —que es el caso normal— reventaba la pila en la primera
+  // llamada. Los otros cinco repositorios que copian este helper lo tienen bien;
+  // a este se le pasó, y no saltó porque las monedas se siembran directamente y
+  // nadie las crea por esta ruta.
   private runInClient<T>(work: (c: any) => Promise<T>): Promise<T> {
     return typeof this.client.$transaction === "function"
-      ? this.runInClient(work)
+      ? this.client.$transaction(work)
       : work(this.client);
   }
 
@@ -87,24 +93,12 @@ export class PrismaMonedaRepository implements MonedaRepository {
                     is_deleted: false
                 }
             });
-
-            await tx.syncLog.create({
-                data: {
-                    event_id: randomUUID(),
-                    entidad: "monedas",
-                    operacion: "INSERT",
-                    entidad_id: data.moneda_id,
-                    payload_json: JSON.stringify(data),
-                    gym_id: null,
-                    device_id: null
-                }
-            });
         });
     }
 
     async update(id: string, data: Partial<Moneda>): Promise<void> {
         await this.runInClient(async (tx) => {
-            const updated = await tx.moneda.update({
+            await tx.moneda.update({
                 where: { moneda_id: id },
                 data: {
                     moneda_nombre: data.moneda_nombre,
@@ -115,41 +109,17 @@ export class PrismaMonedaRepository implements MonedaRepository {
                     updated_at: new Date()
                 }
             });
-
-            await tx.syncLog.create({
-                data: {
-                    event_id: randomUUID(),
-                    entidad: "monedas",
-                    operacion: "UPDATE",
-                    entidad_id: id,
-                    payload_json: JSON.stringify(updated),
-                    gym_id: null,
-                    device_id: null
-                }
-            });
         });
     }
 
     async softDelete(id: string): Promise<void> {
         await this.runInClient(async (tx) => {
-            const deleted = await tx.moneda.update({
+            await tx.moneda.update({
                 where: { moneda_id: id },
                 data: {
                     is_deleted: true,
                     deleted_at: new Date(),
                     updated_at: new Date()
-                }
-            });
-
-            await tx.syncLog.create({
-                data: {
-                    event_id: randomUUID(),
-                    entidad: "monedas",
-                    operacion: "DELETE",
-                    entidad_id: id,
-                    payload_json: JSON.stringify(deleted),
-                    gym_id: null,
-                    device_id: null
                 }
             });
         });

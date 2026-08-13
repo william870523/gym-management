@@ -12,6 +12,7 @@ import {
     CategoriaCambioError,
     type CategoriaCliente,
 } from "../../../domain/cliente-categoria-policy";
+import { exigirFlujoFormal } from "../../../domain/cliente-condiciones-contractuales";
 import { prisma } from "../../../infrastructure/db/prismaClient";
 import { quitarProyeccionesDeCliente } from "../sync/sync-event-contract";
 import type { SyncTransactionRunner } from "../sync/sync-transaction";
@@ -43,6 +44,16 @@ export class UpdateClienteUseCase {
         if (!existing) {
             throw new Error("Cliente not found");
         }
+
+        // Las condiciones del contrato no se cambian editando la ficha. El
+        // entrenador, el plan y las fechas de cobertura mueven comisiones,
+        // precios y acceso, y cada uno tiene su flujo formal. La regla compara
+        // contra lo almacenado porque el formulario reenvía el modelo entero:
+        // sin eso, guardar un teléfono fallaría por un plan que nadie tocó.
+        exigirFlujoFormal({
+            entrante: dto as unknown as Record<string, unknown>,
+            almacenado: existing as unknown as Record<string, unknown>,
+        });
 
         // R5.3 — cambiar la categoría de un socio ya registrado es de
         // administración y exige motivo: mueve el precio de todos sus cobros

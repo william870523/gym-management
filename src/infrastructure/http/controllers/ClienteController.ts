@@ -366,6 +366,10 @@ export class ClienteController {
             if (error.name === "CategoriaCambioError") {
                 return c.json({ error: error.message }, error.status);
             }
+            // 409: el dato no es inválido, es que ese cambio no se hace por aquí.
+            if (error.name === "CondicionContractualError") {
+                return c.json({ error: error.message }, 409);
+            }
             if (String(error.message).includes("no pertenece al gimnasio")) {
                 return c.json({ error: error.message }, 400);
             }

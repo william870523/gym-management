@@ -95,14 +95,24 @@ describe("cliente · vaciar un campo desde la web", () => {
     await prisma.cliente.deleteMany({ where: { ci: CI } });
   });
 
-  test("un null explícito vacía el campo, en los seis que lo perdían", async () => {
+  /**
+   * Eran seis; son cinco desde el 12-08-2026.
+   *
+   * `id_entrenador` salió de la lista: quitarle el entrenador a un socio no es
+   * vaciar un dato personal, es una condición del contrato. Tiene su flujo
+   * formal —`POST /membresias/:id/cambiar-entrenador`, que además **libera el
+   * tramo futuro de comisión**— y hacerlo desde la ficha dejaba las cuotas
+   * colgando del entrenador que salía. El arreglo del 10-08 acertó en el
+   * mecanismo (un null vacía, no significa «no tocar») y se llevó por delante un
+   * campo que no era personal.
+   */
+  test("un null explícito vacía el campo, en los cinco personales", async () => {
     await sembrar();
     await editar({
       direccion: null,
       telefono: null,
       correo: null,
       objetivo: null,
-      id_entrenador: null,
       referencia_id: null,
     });
 
@@ -111,8 +121,15 @@ describe("cliente · vaciar un campo desde la web", () => {
     expect(fila?.telefono).toBeNull();
     expect(fila?.correo).toBeNull();
     expect(fila?.objetivo).toBeNull();
-    expect(fila?.id_entrenador).toBeNull();
     expect(fila?.referencia_id).toBeNull();
+  });
+
+  test("quitar el entrenador desde la ficha se rechaza y dice por dónde", async () => {
+    await sembrar();
+
+    await expect(editar({ id_entrenador: null })).rejects.toThrow(
+      /Cambiar entrenador/,
+    );
   });
 
   test("lo que no viene no se toca: editar el teléfono no borra la dirección", async () => {

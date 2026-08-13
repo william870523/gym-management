@@ -22,7 +22,15 @@ const GYM = "local-gym-001";
 /** Cliente mínimo: todas las referencias existen y el mes está abierto. */
 function stubClient() {
   return {
-    gastoCategoria: { findFirst: async () => ({ categoria_id: "cat-1" }) },
+    // Nulable a propósito: `findFirst` de Prisma devuelve `T | null`, y hay una
+    // prueba que sustituye este doble por uno que no encuentra nada. Sin el tipo
+    // explícito, TypeScript infería «siempre encuentra» y esa sustitución no
+    // compilaba —era uno de los errores heredados de la deuda—.
+    gastoCategoria: {
+      findFirst: async (): Promise<{ categoria_id: string } | null> => ({
+        categoria_id: "cat-1",
+      }),
+    },
     gastoProveedor: { findFirst: async () => ({ proveedor_id: "prov-1" }) },
     moneda: { findFirst: async () => ({ moneda_id: "cup" }) },
     gastoRecurrente: { findFirst: async () => ({ recurrente_id: "rec-1" }) },

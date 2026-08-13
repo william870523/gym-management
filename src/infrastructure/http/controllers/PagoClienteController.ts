@@ -28,6 +28,19 @@ import { trustedClock } from "../../../config/trusted-clock";
 import { ClientDiscountQuoteService } from "../../../application/payment/client-discount-quote.service";
 
 const ProcessPaymentSchema = CreatePagoClienteSchema.extend({
+    // Divergencia con el gemelo local, cerrada el 12-08-2026. El remoto exigía
+    // las dos y el local ninguna:
+    //
+    // `fecha` se pedía obligatoria y **se tiraba**: el caso de uso sella
+    // `trustedClock.nowUtc()`, como manda `docs/TIME_CONTRACT.md`. Exigirle al
+    // cliente un dato que el servidor ignora solo sirve para que alguien crea
+    // que su reloj cuenta.
+    //
+    // `moneda_id` sí se usaba, y ese era el problema: la moneda del cobro salía
+    // de quien llamaba. La del plan es la única correcta —el proyecto prohíbe
+    // sumar monedas distintas—, así que ahora se deriva y el campo sobra.
+    fecha: z.string().datetime().optional(),
+    moneda_id: z.string().uuid().optional(),
     detalles: z.array(CreateDetallePagoSchema.omit({ pago_cliente_id: true })),
     membresia_id: z.string().uuid().optional().nullable(),
     // Recargo por mora: se aplica siempre que corresponda. Condonarlo exige

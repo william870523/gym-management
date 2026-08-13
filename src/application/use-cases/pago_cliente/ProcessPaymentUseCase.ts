@@ -29,7 +29,16 @@ export type ClientDiscountQuoteResolver = (
     input: { gymId: string; ci: string; planId: string },
 ) => Promise<ClientDiscountQuote>;
 
-export interface ProcessPaymentInput extends CreatePagoClienteDTO {
+export interface ProcessPaymentInput
+    extends Omit<CreatePagoClienteDTO, "fecha" | "moneda_id"> {
+    /**
+     * Las dos son opcionales y el servidor las ignora: la fecha la sella
+     * `trustedClock` (docs/TIME_CONTRACT.md) y la moneda sale del plan. Se
+     * aceptan por compatibilidad con clientes que sigan mandándolas —el
+     * escritorio serializa su modelo entero— pero no deciden nada.
+     */
+    fecha?: string;
+    moneda_id?: string;
     detalles: Omit<CreateDetallePagoDTO, 'pago_cliente_id'>[];
     membresia_id?: string | null;
     /**
@@ -168,7 +177,11 @@ export class ProcessPaymentUseCase {
                 + recargoMora,
             id_entrenador: input.id_entrenador ?? null,
             id_planes_pago: input.id_planes_pago,
-            moneda_id: input.moneda_id,
+            // La moneda es la del plan, no la que mande quien llama. Antes se
+            // tomaba de `input`, así que un cuerpo con otra moneda registraba un
+            // cobro que no casaba con su plan —y aquí no se pueden sumar monedas
+            // distintas—. El gemelo local ya la derivaba.
+            moneda_id: plan.moneda_id,
             precio_lista_snapshot: Number(
                 discountQuote?.precio_lista ?? plan.importe_plan_pago,
             ),

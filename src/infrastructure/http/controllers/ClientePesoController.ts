@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { PrismaClientePesoRepository } from "../../repositories/PrismaClientePesoRepository";
+import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 import { prisma } from "../../db/prismaClient";
 import * as crypto from "crypto";
 import { CreateClientePesoUseCase } from "../../../application/use-cases/cliente_peso/CreateClientePesoUseCase";
@@ -19,7 +20,12 @@ export class ClientePesoController {
 
     constructor() {
         const repository = new PrismaClientePesoRepository();
-        this.createUseCase = new CreateClientePesoUseCase(repository);
+        // El evento del alta lo emite ahora el caso de uso, dentro de la misma
+        // transacción que la fila.
+        this.createUseCase = new CreateClientePesoUseCase(
+            repository,
+            new PrismaSyncLogRepository(),
+        );
         this.updateUseCase = new UpdateClientePesoUseCase(repository);
         this.deleteUseCase = new DeleteClientePesoUseCase(repository);
         this.getUseCase = new GetClientePesoUseCase(repository);
@@ -64,17 +70,6 @@ export class ClientePesoController {
             const validated = CreateClientePesoSchema.parse(body);
             const result = await this.createUseCase.execute(validated, actor.gymId);
 
-            await prisma.syncLog.create({
-                data: {
-                    event_id: crypto.randomUUID(),
-                    entidad: "cliente_peso",
-                    operacion: "INSERT",
-                    entidad_id: result.cliente_peso_id,
-                    gym_id: result.gym_id,
-                    device_id: null,
-                    payload_json: JSON.stringify(result),
-                },
-            });
 
             return c.json(result, 201);
         } catch (error: any) {

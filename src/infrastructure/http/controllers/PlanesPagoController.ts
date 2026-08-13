@@ -9,6 +9,7 @@ import { CreatePlanesPagoSchema, UpdatePlanesPagoSchema } from "../../../applica
 import { PrismaSyncLogRepository } from "../../repositories/PrismaSyncLogRepository";
 import type { PlanesPagoRepository } from "../../../domain/repositories/PlanesPagoRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import type { SyncTransactionRunner } from "../../../application/use-cases/sync/sync-transaction";
 
 export class PlanesPagoController {
     private createUseCase: CreatePlanesPagoUseCase;
@@ -20,10 +21,14 @@ export class PlanesPagoController {
     constructor(
         repository: PlanesPagoRepository = new PrismaPlanesPagoRepository(),
         syncLogRepository: SyncLogRepository = new PrismaSyncLogRepository(),
+        // Se propaga para que las pruebas puedan dar un ejecutor de mentira. Sin
+        // esto, un test con repositorios dobles caería en el de producción y
+        // abriría una transacción real de Prisma.
+        enTransaccion?: SyncTransactionRunner,
     ) {
-        this.createUseCase = new CreatePlanesPagoUseCase(repository, syncLogRepository);
-        this.updateUseCase = new UpdatePlanesPagoUseCase(repository, syncLogRepository);
-        this.deleteUseCase = new DeletePlanesPagoUseCase(repository, syncLogRepository);
+        this.createUseCase = new CreatePlanesPagoUseCase(repository, syncLogRepository, enTransaccion);
+        this.updateUseCase = new UpdatePlanesPagoUseCase(repository, syncLogRepository, enTransaccion);
+        this.deleteUseCase = new DeletePlanesPagoUseCase(repository, syncLogRepository, enTransaccion);
         this.getUseCase = new GetPlanesPagoUseCase(repository);
         this.listUseCase = new ListPlanesPagosUseCase(repository);
     }

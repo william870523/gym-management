@@ -11,6 +11,7 @@ import {
 } from "../../../application/validation/users.schemas";
 import type { UserRepository } from "../../../domain/repositories/UserRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import type { SyncTransactionRunner } from "../../../application/use-cases/sync/sync-transaction";
 
 export class UserController {
     private listUseCase: ListUsersUseCase;
@@ -22,12 +23,17 @@ export class UserController {
     constructor(
         repository: UserRepository = new PrismaUserRepository(),
         syncLogRepository: SyncLogRepository = new PrismaSyncLogRepository(),
+        // Se propaga para que las pruebas puedan dar un ejecutor de mentira. Sin
+        // esto, un test con repositorios dobles caería en el de producción y
+        // abriría una transacción real de Prisma.
+        enTransaccion?: SyncTransactionRunner,
     ) {
         this.listUseCase = new ListUsersUseCase(repository);
         this.getUseCase = new GetUserUseCase(repository);
-        this.createUseCase = new CreateUserUseCase(repository, syncLogRepository);
-        this.updateUseCase = new UpdateUserUseCase(repository, syncLogRepository);
-        this.deleteUseCase = new DeleteUserUseCase(repository, syncLogRepository);
+        // Pasar `undefined` deja actuar al valor por defecto del caso de uso.
+        this.createUseCase = new CreateUserUseCase(repository, syncLogRepository, enTransaccion);
+        this.updateUseCase = new UpdateUserUseCase(repository, syncLogRepository, enTransaccion);
+        this.deleteUseCase = new DeleteUserUseCase(repository, syncLogRepository, enTransaccion);
     }
 
     async getUsers(c: Context) {

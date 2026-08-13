@@ -3,39 +3,51 @@ import type { UpdateReferenciaDTO } from "../../dtos/ReferenciaDTO";
 import type { Referencia } from "../../../domain/entities/Referencia";
 import type { ReferenciaRepository } from "../../../domain/repositories/ReferenciaRepository";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
+import { prisma } from "../../../infrastructure/db/prismaClient";
+import type { SyncTransactionRunner } from "../sync/sync-transaction";
 
 export class UpdateReferenciaUseCase {
     constructor(
         private readonly referenciaRepository: ReferenciaRepository,
-        private readonly syncLogRepository: SyncLogRepository
+        private readonly syncLogRepository: SyncLogRepository,
+        // Inyectable a propósito: es lo que hace verificable el rollback sin
+        // sustituir el módulo de Prisma para toda la suite (mock.module en Bun
+        // es global y tira las pruebas ajenas).
+        private readonly enTransaccion: SyncTransactionRunner =
+            ((fn: any) => prisma.$transaction(fn)) as SyncTransactionRunner,
     ) { }
 
     async execute(id: string, dto: UpdateReferenciaDTO): Promise<void> {
-        const existing = await this.referenciaRepository.findById(id);
-        if (!existing) {
-            throw new Error("Referencia not found");
-        }
+        // La fila y su evento, en la MISMA transacción. Sueltos, un fallo
+        // entre los dos `await` deja la fila escrita sin evento que la
+        // anuncie: el escritorio no se entera nunca y nada lo delata.
+        return this.enTransaccion(async (tx) => {
+            const existing = await this.referenciaRepository.withTransaction(tx).findById(id);
+            if (!existing) {
+                throw new Error("Referencia not found");
+            }
 
-        const updateData: Partial<Referencia> = {
-            ...dto,
-            updated_at: new Date(),
-            version: (existing.version ?? 0) + 1
-        };
+            const updateData: Partial<Referencia> = {
+                ...dto,
+                updated_at: new Date(),
+                version: (existing.version ?? 0) + 1
+            };
 
-        await this.referenciaRepository.update(id, updateData);
+            await this.referenciaRepository.withTransaction(tx).update(id, updateData);
 
-        const updated = await this.referenciaRepository.findById(id);
-        if (updated) {
-            await this.syncLogRepository.register({
-                eventId: randomUUID(),
-                entidad: "referencia",
-                operacion: "UPDATE",
-                entidadId: id,
-                gymId: null,
-                deviceId: "WEB_ADMIN",
-                payload: updated as any
-            });
-        }
+            const updated = await this.referenciaRepository.withTransaction(tx).findById(id);
+            if (updated) {
+                await this.syncLogRepository.register({
+                    eventId: randomUUID(),
+                    entidad: "referencia",
+                    operacion: "UPDATE",
+                    entidadId: id,
+                    gymId: null,
+                    deviceId: "WEB_ADMIN",
+                    payload: updated as any
+                }, tx);
+            }
+        });
     }
 }
 

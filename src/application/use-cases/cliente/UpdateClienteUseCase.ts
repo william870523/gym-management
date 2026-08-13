@@ -14,11 +14,17 @@ import {
 } from "../../../domain/cliente-categoria-policy";
 import { prisma } from "../../../infrastructure/db/prismaClient";
 import { quitarProyeccionesDeCliente } from "../sync/sync-event-contract";
+import type { SyncTransactionRunner } from "../sync/sync-transaction";
 
 export class UpdateClienteUseCase {
     constructor(
         private readonly clienteRepository: ClienteRepository,
-        private readonly syncLogRepository: SyncLogRepository
+        private readonly syncLogRepository: SyncLogRepository,
+        // Inyectable a propósito: es lo que hace verificable el rollback sin
+        // sustituir el módulo de Prisma para toda la suite (mock.module en Bun
+        // es global y tira las pruebas ajenas).
+        private readonly enTransaccion: SyncTransactionRunner =
+            ((fn: any) => prisma.$transaction(fn)) as SyncTransactionRunner,
     ) { }
 
     async execute(
@@ -27,7 +33,13 @@ export class UpdateClienteUseCase {
         gymId: string,
         actor?: { userId: string | null; nombre?: string | null; role?: string | null },
     ): Promise<void> {
-        const existing = await this.clienteRepository.findById(id, gymId);
+        // La ficha, su evento y el aviso de categoría, en la MISMA transacción.
+        // Sueltos, un fallo entre medias dejaba al socio editado sin evento que
+        // lo anunciara —el escritorio no se enteraba nunca— o con el aviso
+        // escrito y sin su fila de sync, que es la mitad inversa del mismo daño.
+        return this.enTransaccion(async (tx) => {
+        const clienteRepo = this.clienteRepository.withTransaction(tx);
+        const existing = await clienteRepo.findById(id, gymId);
         if (!existing) {
             throw new Error("Cliente not found");
         }
@@ -79,11 +91,11 @@ export class UpdateClienteUseCase {
             version: (existing.version ?? 0) + 1
         };
 
-        await this.clienteRepository.update(id, gymId, updateData);
+        await clienteRepo.update(id, gymId, updateData);
 
-        const updated = await this.clienteRepository.findById(id, gymId);
+        const updated = await clienteRepo.findById(id, gymId);
         if (updated) {
-            const nationalityCode = await this.clienteRepository.findNationalityCode(
+            const nationalityCode = await clienteRepo.findNationalityCode(
                 updated.nacionalidad_id,
             );
             if (!nationalityCode) {
@@ -105,7 +117,7 @@ export class UpdateClienteUseCase {
                     nacionalidad_codigo_iso: nationalityCode,
                     foto_cliente: updated.foto_cliente ? Buffer.from(updated.foto_cliente).toString('base64') : null
                 }) as any
-            });
+            }, tx);
         }
 
         // R5.3 — el cambio de categoría deja rastro donde administración ya
@@ -121,13 +133,13 @@ export class UpdateClienteUseCase {
             // verdad hubo cambio. Un aviso que dice «lo hizo alguien» no sirve
             // para lo que existe la bandeja.
             const autor = actor?.userId
-                ? await prisma.user.findUnique({
+                ? await tx.user.findUnique({
                       where: { user_id: actor.userId },
                       select: { user_nombre: true },
                   })
                 : null;
             const avisoId = randomUUID();
-            const aviso = await prisma.avisoAdministracion.create({
+            const aviso = await tx.avisoAdministracion.create({
                 data: {
                     aviso_id: avisoId,
                     gym_id: gymId,
@@ -159,8 +171,9 @@ export class UpdateClienteUseCase {
                 gymId,
                 deviceId: "WEB_ADMIN",
                 payload: aviso as any,
-            });
+            }, tx);
         }
+        });
     }
 }
 

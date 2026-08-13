@@ -42,7 +42,10 @@ describe("aislamiento JWT de /users", () => {
       updated_at: new Date("2026-07-21T00:00:00.000Z"),
       deleted_at: null,
     };
-    const repository = {
+    const repository: any = {
+        // El caso de uso entra en transacción: el doble se devuelve a sí mismo
+        // y el ejecutor de mentira solo llama al trabajo.
+        withTransaction() { return repository; },
       async findAll(...args: unknown[]) {
         calls.push({ method: "findAll", args });
         return [existing];
@@ -81,7 +84,7 @@ describe("aislamiento JWT de /users", () => {
         return [];
       },
     };
-    const controller = new UserController(repository as any, syncLog as any);
+    const controller = new UserController(repository as any, syncLog as any, (fn: any) => fn({ transaccionDeMentira: true }));
     const base = { gymId: "gym-auth", id: "user-1" };
 
     await controller.getUsers(context(base));
@@ -129,7 +132,7 @@ describe("aislamiento JWT de /users", () => {
         };
       },
     });
-    const controller = new UserController(repository as any, repository as any);
+    const controller = new UserController(repository as any, repository as any, (fn: any) => fn({ transaccionDeMentira: true }));
     const invalidRole = await controller.createUser(context({
       gymId: "gym-auth",
       body: {

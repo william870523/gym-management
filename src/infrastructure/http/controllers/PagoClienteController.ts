@@ -87,35 +87,12 @@ export class PagoClienteController {
 
     // ... existing methods ...
 
-    async create(c: Context) {
-        // ... existing create implementation ...
-        try {
-            const body = await c.req.json();
-            const actor = getUserGymActor(c);
-            if (!actor) return c.json({ error: "Gym scope required" }, 403);
-            const validated = CreatePagoClienteSchema.parse(body);
-            const result = await this.createUseCase.execute(validated, actor.gymId);
-
-            await prisma.syncLog.create({
-                data: {
-                    event_id: crypto.randomUUID(),
-                    entidad: "pago_cliente",
-                    operacion: "INSERT",
-                    entidad_id: result.pago_cliente_id,
-                    gym_id: result.gym_id,
-                    device_id: null,
-                    payload_json: JSON.stringify(result),
-                },
-            });
-
-            return c.json(result, 201);
-        } catch (error: any) {
-            if (error.name === 'ZodError') {
-                return c.json({ error: error.errors }, 400);
-            }
-            return c.json({ error: "Internal Server Error" }, 500);
-        }
-    }
+    // `create` se retiró el 12-08-2026. Su ruta responde 410 desde antes
+    // (`paymentWriteGone`), así que el método estaba muerto; y además escribía
+    // la fila y su evento por separado, sin transacción. Un cobro no atómico
+    // esperando a que alguien volviera a enrutarlo es exactamente lo que el
+    // comentario de ese guarda dice querer evitar. Para crear un cobro:
+    // `POST /pagos/process`.
 
     /**
      * Cotización autoritativa del recargo por mora (docs/RECARGO_MORA.md).

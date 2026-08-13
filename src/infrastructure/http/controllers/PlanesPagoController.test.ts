@@ -42,7 +42,10 @@ describe("aislamiento JWT de /planes-pago", () => {
       version: 1,
       is_deleted: false,
     };
-    const repository = {
+    const repository: any = {
+        // El caso de uso entra en transacción: el doble se devuelve a sí mismo
+        // y el ejecutor de mentira solo llama al trabajo.
+        withTransaction() { return repository; },
       async findAll(...args: unknown[]) {
         calls.push({ method: "findAll", args });
         return [existing];
@@ -73,7 +76,7 @@ describe("aislamiento JWT de /planes-pago", () => {
         return [];
       },
     };
-    const controller = new PlanesPagoController(repository as any, syncLog as any);
+    const controller = new PlanesPagoController(repository as any, syncLog as any, (fn: any) => fn({ transaccionDeMentira: true }));
     const base = { gymId: "gym-auth", id: "plan-1" };
 
     await controller.list(context(base));
@@ -120,7 +123,7 @@ describe("aislamiento JWT de /planes-pago", () => {
         };
       },
     });
-    const controller = new PlanesPagoController(repository as any, repository as any);
+    const controller = new PlanesPagoController(repository as any, repository as any, (fn: any) => fn({ transaccionDeMentira: true }));
     const response = await controller.list(context({}));
     expect(response.status).toBe(403);
     expect(touched).toBe(false);

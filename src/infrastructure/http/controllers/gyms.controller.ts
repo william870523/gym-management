@@ -26,6 +26,30 @@ const CAMPOS_SEDE = {
     activo: true,
 } as const;
 
+/**
+ * Un dato opcional de la sede, tal como debe quedar guardado.
+ *
+ * «Sin país» tiene que escribirse de UNA sola forma en las dos bases, y esa
+ * forma es `null`. El formulario manda cadena vacía cuando el desplegable está
+ * en «Sin definir», y `?? null` no la ve —solo mira `undefined`—, así que la
+ * cadena vacía se guardaba tal cual. Al viajar por sincronización, el receptor
+ * la normaliza a `null` (`ApplyGymEventUseCase`), y la misma sede acababa
+ * diciendo `""` en una base y `NULL` en la otra: divergencia de contenido, que
+ * es fallo del gate de paridad.
+ *
+ * - clave ausente → `undefined`, que en una edición significa «no tocar»;
+ * - clave presente y en blanco → `null`, que significa «vaciar»;
+ * - texto → recortado.
+ *
+ * **Gemela de la de `gym-local-api`. Si cambia una, cambia la otra.**
+ */
+export const textoOpcionalDeSede = (valor: unknown): string | null | undefined => {
+    if (valor === undefined) return undefined;
+    if (valor === null) return null;
+    const texto = String(valor).trim();
+    return texto.length > 0 ? texto : null;
+};
+
 const actorOrForbidden = (c: Context) => {
     const actor = getUserGymActor(c);
     if (!actor) {
@@ -107,11 +131,11 @@ export const createGym = async (c: Context) => {
                     gym_id: uuidv4(),
                     codigo,
                     nombre,
-                    direccion: body.direccion ?? null,
-                    ciudad: body.ciudad ?? null,
-                    provincia: body.provincia ?? null,
-                    pais: body.pais ?? null,
-                    codigo_postal: body.codigo_postal ?? null,
+                    direccion: textoOpcionalDeSede(body.direccion) ?? null,
+                    ciudad: textoOpcionalDeSede(body.ciudad) ?? null,
+                    provincia: textoOpcionalDeSede(body.provincia) ?? null,
+                    pais: textoOpcionalDeSede(body.pais) ?? null,
+                    codigo_postal: textoOpcionalDeSede(body.codigo_postal) ?? null,
                     timezone,
                     activo: body.activo ?? true,
                     created_at: trustedClock.nowUtc(),
@@ -230,11 +254,11 @@ export const updateGym = async (c: Context) => {
                 data: {
                     nombre: body.nombre,
                     codigo: body.codigo,
-                    direccion: body.direccion,
-                    ciudad: body.ciudad,
-                    provincia: body.provincia,
-                    pais: body.pais,
-                    codigo_postal: body.codigo_postal,
+                    direccion: textoOpcionalDeSede(body.direccion),
+                    ciudad: textoOpcionalDeSede(body.ciudad),
+                    provincia: textoOpcionalDeSede(body.provincia),
+                    pais: textoOpcionalDeSede(body.pais),
+                    codigo_postal: textoOpcionalDeSede(body.codigo_postal),
                     timezone: body.timezone,
                     updated_at: trustedClock.nowUtc(),
                 }

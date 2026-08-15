@@ -518,13 +518,13 @@ export class TrainerOffboardingExecutionService {
       const type = input.targetTrainerId ? "TRANSFERIR" : "ANULAR";
       const splitCurrentPeriod = installment.periodo_inicio.getTime()
         < input.offboardingCase.fecha_efectiva.getTime();
-      let adjustmentAmount = installment.monto;
+      let adjustmentAmount = Number(installment.monto);
       let adjustmentStart = installment.periodo_inicio;
       let destinationInstallmentId: string | null = null;
       let updated;
       if (splitCurrentPeriod) {
         const split = splitCommissionInstallmentAtDate({
-          amountMinor: Math.round(installment.monto * 100),
+          amountMinor: Math.round(Number(installment.monto) * 100),
           periodStart: installment.periodo_inicio,
           periodEnd: installment.periodo_fin,
           effectiveDate: input.offboardingCase.fecha_efectiva,

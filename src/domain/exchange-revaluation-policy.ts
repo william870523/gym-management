@@ -2,6 +2,7 @@ import {
   treasuryMinorToMoney,
   treasuryMoneyToMinor,
 } from "./treasury-ledger-policy";
+import { decimalToUnits, type DecimalInput } from "./money";
 
 /**
  * R5.5 — Revaluación cambiaria (pérdida/ganancia por devaluación).
@@ -32,7 +33,7 @@ export class ExchangeRevaluationPolicyError extends Error {
 export interface RevaluationRateRef {
   monedaIdBase: string;
   monedaIdTarget: string;
-  exchangeRate: number;
+  exchangeRate: DecimalInput;
 }
 
 /**
@@ -45,7 +46,7 @@ export function baseFactor(
   baseCurrencyId: string,
 ): number {
   if (weakCurrencyId === baseCurrencyId) return 1;
-  const value = rate.exchangeRate;
+  const value = Number(rate.exchangeRate);
   if (!Number.isFinite(value) || value <= 0) {
     throw new ExchangeRevaluationPolicyError(
       "La tasa de cambio debe ser un número positivo.",
@@ -76,8 +77,23 @@ function toBaseMinor(
   baseCurrencyId: string,
 ): bigint {
   const weakMinor = treasuryMoneyToMinor(amount);
-  const factor = baseFactor(rate, weakCurrencyId, baseCurrencyId);
-  return BigInt(Math.round(Number(weakMinor) * factor));
+  baseFactor(rate, weakCurrencyId, baseCurrencyId);
+  const rateUnits = decimalToUnits(rate.exchangeRate, 8);
+  const scale = 100_000_000n;
+  const roundHalfUp = (numerator: bigint, denominator: bigint) => {
+    const negative = numerator < 0n;
+    const absolute = negative ? -numerator : numerator;
+    const result = absolute / denominator +
+      (absolute % denominator * 2n >= denominator ? 1n : 0n);
+    return negative ? -result : result;
+  };
+  if (
+    rate.monedaIdBase === baseCurrencyId &&
+    rate.monedaIdTarget === weakCurrencyId
+  ) {
+    return roundHalfUp(weakMinor * scale, rateUnits);
+  }
+  return roundHalfUp(weakMinor * rateUnits, scale);
 }
 
 export interface RevaluationLineInput {

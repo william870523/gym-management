@@ -101,7 +101,11 @@
     "verify:recargos-condonados": "bun --preload ./src/config/tz-preload.ts scripts/verify-recargos-condonados.ts",
     "demo:trainer-change": "bun --preload ./src/config/tz-preload.ts scripts/demo-trainer-change.ts",
     "verify:trainer-change-fixture": "bun ../scripts/verify-r54-dependent-fixture.ts",
-    "migrate:roles-global": "bun --preload ./src/config/tz-preload.ts scripts/migrate-roles-global.ts"
+    "migrate:roles-global": "bun --preload ./src/config/tz-preload.ts scripts/migrate-roles-global.ts",
+    "migrate:money-decimal": "bun --preload ./src/config/tz-preload.ts scripts/migrate-money-decimal.ts",
+    "demo:money-decimal": "bun --preload ./src/config/tz-preload.ts scripts/demo-money-decimal.ts",
+    "demo:usuario-sede-m2": "bun --preload ./src/config/tz-preload.ts scripts/demo-usuario-sede-m2.ts",
+    "demo:catalog-scope-m3": "bun --preload ./src/config/tz-preload.ts scripts/demo-catalog-scope-m3.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

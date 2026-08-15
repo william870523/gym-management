@@ -223,7 +223,7 @@ model TipoCambio {
   tipo_cambio_id   String    @id
   moneda_id_base   String
   moneda_id_target String
-  exchange_rate    Float
+  exchange_rate    Decimal   @db.Decimal(24, 8)
   recargos_json    String?
   fecha_inicio     DateTime
   fecha_expiracion DateTime?
@@ -296,13 +296,13 @@ model Horario {
 model PlanesPago {
   id_planes_pago            String    @id
   nombre_plan_pago          String?
-  importe_plan_pago         Float
+  importe_plan_pago         Decimal   @db.Decimal(18, 2)
   duracion_plan_pago        Int
   activo                    Boolean   @default(true)
   moneda_id                 String
   incluye_entrenador        Boolean   @default(false)
   comision_entrenador_tipo  String    @default("NONE") // NONE, PERCENTAGE, FIXED_AMOUNT
-  comision_entrenador_valor Float?
+  comision_entrenador_valor Decimal?  @db.Decimal(18, 6)
   // R5.2: indica si el plan admite pago por cuotas. El esquema real vive en
   // plan_cuota_esquema. false (por defecto) = pago único, comportamiento actual.
   acepta_cuotas             Boolean   @default(false)
@@ -311,7 +311,7 @@ model PlanesPago {
   codigo                    String?
   // R5.3: precio fijo para cliente VIEJO. Si es null, se aplica el % global
   // (DESCUENTO_CLIENTE_VIEJO_PCT); si está seteado, anula el % para este plan.
-  precio_viejo_excepcion    Float?
+  precio_viejo_excepcion    Decimal?  @db.Decimal(18, 2)
   // Recargo por mora (docs/RECARGO_MORA.md). El administrador define, por plan,
   // uno de tres modos que se cobra al pagar con atraso. null/activo=false = sin
   // recargo. Importes como string decimal, no Float.
@@ -551,7 +551,7 @@ model PagoReversion {
   motivo                         String    @db.Text
   ci                             String
   membresia_id                   String?
-  monto_total                    Float
+  monto_total                    Decimal   @db.Decimal(18, 2)
   moneda_id                      String
   registrada_por_user_id         String
   registrada_por_nombre_snapshot String
@@ -575,7 +575,7 @@ model EntrenadorComisionRegla {
   id_entrenador  String?
   id_planes_pago String
   tipo_calculo   String // PERCENTAGE, FIXED_AMOUNT
-  valor_calculo  Float
+  valor_calculo  Decimal   @db.Decimal(18, 6)
   activo         Boolean   @default(true)
   fecha_inicio   DateTime  @default(now())
   fecha_fin      DateTime?
@@ -600,10 +600,10 @@ model EntrenadorComisionDevengo {
   id_entrenador          String
   id_planes_pago         String
   moneda_id              String
-  monto_base             Float
+  monto_base             Decimal   @db.Decimal(18, 2)
   tipo_calculo           String
-  valor_calculo          Float
-  monto_total            Float
+  valor_calculo          Decimal   @db.Decimal(18, 6)
+  monto_total            Decimal   @db.Decimal(18, 2)
   cuotas_total           Int
   cuotas_pagadas         Int       @default(0)
   estado                 String    @default("PENDIENTE") // PENDIENTE, PAGADO, ANULADO
@@ -774,7 +774,7 @@ model EntrenadorBajaComisionAjuste {
   id_entrenador_origen           String
   id_entrenador_destino          String?
   moneda_id                      String
-  monto                          Float
+  monto                          Decimal   @db.Decimal(18, 2)
   periodo_inicio                 DateTime
   periodo_fin                    DateTime
   estado_anterior                String
@@ -995,7 +995,7 @@ model EntrenadorComisionCuota {
   periodo_inicio   DateTime
   periodo_fin      DateTime
   fecha_programada DateTime
-  monto            Float
+  monto            Decimal   @db.Decimal(18, 2)
   estado           String    @default("PENDIENTE") // PENDIENTE, PARCIAL, PAGADO, ANULADO
   fecha_pago       DateTime?
   cuenta_id        String?
@@ -1536,7 +1536,7 @@ model PagoCliente {
   pago_cliente_id                String    @id
   ci                             String
   fecha                          DateTime
-  monto_total                    Float
+  monto_total                    Decimal   @db.Decimal(18, 2)
   id_entrenador                  String?
   id_planes_pago                 String
   moneda_id                      String
@@ -1544,9 +1544,9 @@ model PagoCliente {
   // cobrado vive en `monto_total`; estos tres campos permiten reconstruir el
   // descuento histórico sin perder el precio de lista (igual que tipo_cambio_id
   // congela el recargo R5.1). Null cuando no hubo descuento (cliente NUEVO).
-  precio_lista_snapshot          Float?
+  precio_lista_snapshot          Decimal?  @db.Decimal(18, 2)
   descuento_pct_snapshot         String?
-  descuento_monto_snapshot       Float?
+  descuento_monto_snapshot       Decimal?  @db.Decimal(18, 2)
   categoria_cliente_snapshot     String?
   plan_codigo_snapshot           String?
   cuota_sufijo_snapshot          String?
@@ -1591,7 +1591,7 @@ model DetallePago {
   tipo_pago_id                String
   moneda_id                   String
   cuenta_id                   String?
-  cantidad                    Float
+  cantidad                    Decimal   @db.Decimal(18, 2)
   tipo_cambio_id              String?
   // R5.1: snapshot autoritativo del recargo por método. Nulo en historia
   // anterior al corte y cuando no hay recargo configurado.

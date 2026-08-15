@@ -2,6 +2,7 @@ import type { SyncTransactionContext } from "./sync-transaction";
 import type { DetallePago } from "../../../domain/entities/DetallePago";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { DetallePagoRepository } from "../../../domain/repositories/DetallePagoRepository";
+import { normalizeMoney } from "../../../domain/money";
 
 export interface ApplyDetallePagoEventInput {
     eventId: string;
@@ -43,7 +44,7 @@ export class ApplyDetallePagoEventUseCase {
             tipo_pago_id: String(payload.tipo_pago_id),
             moneda_id: String(payload.moneda_id),
             cuenta_id: (payload.cuenta_id as string | null) ?? null,
-            cantidad: Number(payload.cantidad),
+            cantidad: normalizeMoney(payload.cantidad as any),
             tipo_cambio_id: payload.tipo_cambio_id ? String(payload.tipo_cambio_id) : null,
             recargo_metodo_base: payload.recargo_metodo_base == null
                 ? null : String(payload.recargo_metodo_base),

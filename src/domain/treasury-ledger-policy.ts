@@ -1,6 +1,13 @@
-export class TreasuryLedgerPolicyError extends Error {}
+import {
+  decimalToUnits,
+  MoneyContractError,
+  unitsToDecimal,
+  type DecimalInput,
+} from "./money";
 
-export type MoneyInput = string | number | bigint | null | undefined;
+export class TreasuryLedgerPolicyError extends MoneyContractError {}
+
+export type MoneyInput = DecimalInput;
 export type TreasuryManualKind =
   | "GASTO"
   | "RETIRO"
@@ -43,23 +50,17 @@ const treasuryManualKinds = new Set<TreasuryManualKind>([
 
 export function treasuryMoneyToMinor(value: MoneyInput): bigint {
   if (typeof value === "bigint") return value;
-  const text = String(value ?? "").trim().replace(",", ".");
-  if (!/^-?\d+(?:\.\d{1,2})?$/.test(text)) {
-    throw new TreasuryLedgerPolicyError("El importe debe tener hasta dos decimales.");
+  try {
+    return decimalToUnits(value, 2);
+  } catch (error) {
+    throw new TreasuryLedgerPolicyError(
+      error instanceof Error ? error.message : "El importe no es válido.",
+    );
   }
-  const negative = text.startsWith("-");
-  const unsigned = negative ? text.slice(1) : text;
-  const [whole, decimal = ""] = unsigned.split(".");
-  const minor = BigInt(whole) * 100n + BigInt(decimal.padEnd(2, "0"));
-  return negative ? -minor : minor;
 }
 
 export function treasuryMinorToMoney(value: bigint): string {
-  const negative = value < 0n;
-  const absolute = negative ? -value : value;
-  const whole = absolute / 100n;
-  const decimal = String(absolute % 100n).padStart(2, "0");
-  return `${negative ? "-" : ""}${whole}.${decimal}`;
+  return unitsToDecimal(value, 2);
 }
 
 export function normalizeTreasuryRole(value: unknown): string {

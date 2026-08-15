@@ -1,10 +1,12 @@
+import type { DecimalValue } from "../money";
+
 export interface DetallePago {
     detalle_pago_id: string;
     pago_cliente_id: string;
     tipo_pago_id: string;
     moneda_id: string;
     cuenta_id?: string | null;
-    cantidad: number;
+    cantidad: DecimalValue;
     tipo_cambio_id?: string | null;
     recargo_metodo_base?: string | number | null;
     recargo_metodo_pct?: string | null;

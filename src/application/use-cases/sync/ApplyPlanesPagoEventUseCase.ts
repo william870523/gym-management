@@ -2,6 +2,10 @@ import type { SyncTransactionContext } from "./sync-transaction";
 import type { PlanesPago } from "../../../domain/entities/PlanesPago";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { PlanesPagoRepository } from "../../../domain/repositories/PlanesPagoRepository";
+import { decimalToUnits, normalizeMoney, unitsToDecimal } from "../../../domain/money";
+
+const normalizeCalculation = (value: unknown) =>
+    unitsToDecimal(decimalToUnits(value as any, 6), 6);
 
 export interface ApplyPlanesPagoEventInput {
     eventId: string;
@@ -40,7 +44,7 @@ export class ApplyPlanesPagoEventUseCase {
         return {
             id_planes_pago: input.entidadId,
             nombre_plan_pago: (payload.nombre_plan_pago as string | null) ?? null,
-            importe_plan_pago: Number(payload.importe_plan_pago),
+            importe_plan_pago: normalizeMoney(payload.importe_plan_pago as any),
             duracion_plan_pago: Number(payload.duracion_plan_pago),
             activo: Boolean(payload.activo),
             moneda_id: String(payload.moneda_id),
@@ -48,7 +52,7 @@ export class ApplyPlanesPagoEventUseCase {
             comision_entrenador_tipo: String(payload.comision_entrenador_tipo ?? "NONE"),
             comision_entrenador_valor: payload.comision_entrenador_valor === null || payload.comision_entrenador_valor === undefined
                 ? null
-                : Number(payload.comision_entrenador_valor),
+                : normalizeCalculation(payload.comision_entrenador_valor),
             // R5.2 (deuda alineada)
             acepta_cuotas: Boolean(payload.acepta_cuotas ?? false),
             // R5.3
@@ -57,7 +61,7 @@ export class ApplyPlanesPagoEventUseCase {
                 : String(payload.codigo),
             precio_viejo_excepcion: payload.precio_viejo_excepcion === null || payload.precio_viejo_excepcion === undefined
                 ? null
-                : Number(payload.precio_viejo_excepcion),
+                : normalizeMoney(payload.precio_viejo_excepcion as any),
             // Recargo por mora (docs/RECARGO_MORA.md). Importes como string
             // decimal; sin modo el plan queda sin recargo.
             recargo_mora_modo: payload.recargo_mora_modo == null

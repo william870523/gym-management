@@ -7,6 +7,7 @@ import {
     collectorColumns,
     frozenActorFromSyncPayload,
 } from "../../payment/payment-actor";
+import { normalizeMoney } from "../../../domain/money";
 
 /** Actor congelado del payload, o los cuatro nulos si el cobro es histórico. */
 function frozenCollectorColumns(payload: Record<string, unknown>) {
@@ -51,18 +52,18 @@ export class ApplyPagoClienteEventUseCase {
             pago_cliente_id: input.entidadId,
             ci: String(payload.ci),
             fecha: new Date(String(payload.fecha)),
-            monto_total: Number(payload.monto_total),
+            monto_total: normalizeMoney(payload.monto_total as any),
             id_entrenador: (payload.id_entrenador as string | null) ?? null,
             id_planes_pago: String(payload.id_planes_pago),
             moneda_id: String(payload.moneda_id),
             // R5.3: snapshot del descuento (tolera null/payloads legacy).
             precio_lista_snapshot: payload.precio_lista_snapshot === null || payload.precio_lista_snapshot === undefined
                 ? null
-                : Number(payload.precio_lista_snapshot),
+                : normalizeMoney(payload.precio_lista_snapshot as any),
             descuento_pct_snapshot: (payload.descuento_pct_snapshot as string | null) ?? null,
             descuento_monto_snapshot: payload.descuento_monto_snapshot === null || payload.descuento_monto_snapshot === undefined
                 ? null
-                : Number(payload.descuento_monto_snapshot),
+                : normalizeMoney(payload.descuento_monto_snapshot as any),
             categoria_cliente_snapshot:
                 (payload.categoria_cliente_snapshot as string | null) ?? null,
             plan_codigo_snapshot:

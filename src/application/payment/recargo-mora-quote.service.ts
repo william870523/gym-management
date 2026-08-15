@@ -61,7 +61,7 @@ export class RecargoMoraQuoteService {
         });
 
         const today = trustedClock.nowUtc();
-        let base = plan.importe_plan_pago;
+        let base = Number(plan.importe_plan_pago);
         let dueDate: Date | null = (cliente as any).fecha_fin ?? null;
 
         const numero = Number(input.numeroCuota ?? 0);

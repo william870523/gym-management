@@ -77,6 +77,10 @@ const authenticatedInput = {
     fecha_fin: "2026-08-21T12:00:00.000Z",
     fecha_incio_entrenador: "2026-07-21T12:00:00.000Z",
     created_at: "2026-07-21T12:00:00.000Z",
+    monto_total: "0.30",
+    cantidad: "0.30",
+    importe_plan_pago: "0.30",
+    duracion_plan_pago: 30,
   },
 };
 

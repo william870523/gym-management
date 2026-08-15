@@ -2,6 +2,7 @@ import type { SyncTransactionContext } from "./sync-transaction";
 import type { TipoCambio } from "../../../domain/entities/TipoCambio";
 import type { SyncEventPayload, SyncOperacion } from "../../../domain/entities/SyncEvent";
 import type { TipoCambioRepository } from "../../../domain/repositories/TipoCambioRepository";
+import { normalizeRate } from "../../../domain/money";
 
 export interface ApplyTipoCambioEventInput {
     eventId: string;
@@ -41,7 +42,7 @@ export class ApplyTipoCambioEventUseCase {
             tipo_cambio_id: input.entidadId,
             moneda_id_base: String(payload.moneda_id_base),
             moneda_id_target: String(payload.moneda_id_target),
-            exchange_rate: Number(payload.exchange_rate),
+            exchange_rate: normalizeRate(payload.exchange_rate as any),
             recargos_json: payload.recargos_json != null
                 ? String(payload.recargos_json)
                 : null,

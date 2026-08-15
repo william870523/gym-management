@@ -1,16 +1,18 @@
+import type { DecimalInput, DecimalValue } from "../money";
+
 export interface PagoCliente {
     pago_cliente_id: string;
     ci: string;
     fecha: Date;
-    monto_total: number;
+    monto_total: DecimalValue;
     id_entrenador?: string | null;
     id_planes_pago: string;
     moneda_id: string;
     // R5.3: snapshot del descuento aplicado al cobrar (cliente VIEJO). Null
     // cuando no hubo descuento (cliente NUEVO o sin descuento vigente).
-    precio_lista_snapshot?: number | null;
+    precio_lista_snapshot?: DecimalInput;
     descuento_pct_snapshot?: string | null;
-    descuento_monto_snapshot?: number | null;
+    descuento_monto_snapshot?: DecimalInput;
     categoria_cliente_snapshot?: string | null;
     plan_codigo_snapshot?: string | null;
     cuota_sufijo_snapshot?: string | null;

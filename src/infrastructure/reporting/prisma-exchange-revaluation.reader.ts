@@ -239,12 +239,12 @@ export class PrismaExchangeRevaluationReader
 function toRateRef(row: {
   moneda_id_base: string;
   moneda_id_target: string;
-  exchange_rate: number;
+  exchange_rate: { toString(): string };
 }): RevaluationRateRef {
   return {
     monedaIdBase: row.moneda_id_base,
     monedaIdTarget: row.moneda_id_target,
-    exchangeRate: row.exchange_rate,
+    exchangeRate: row.exchange_rate.toString(),
   };
 }
 

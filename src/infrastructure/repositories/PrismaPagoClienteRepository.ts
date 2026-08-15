@@ -437,7 +437,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                         `${recargoCobrado > 0 ? ` (incluye recargo por mora ${installmentMora?.quote?.recargo})` : ""}.`,
                     );
                 }
-            } else if (!isFullPayment(pago.monto_total, cashRequired)) {
+            } else if (!isFullPayment(Number(pago.monto_total), cashRequired)) {
                 throw new PaymentRuleError(
                     `El cobro pendiente requiere ${cashRequired.toFixed(2)} ${membership.moneda_id}.`,
                 );
@@ -1029,7 +1029,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     tipo_pago_id: d.tipo_pago_id,
                     moneda_id: d.moneda_id,
                     cuenta_id: d.cuenta_id ?? null,
-                    cantidad: d.cantidad,
+                    cantidad: String(d.cantidad),
                     tipo_cambio_id: d.tipo_cambio_id ?? null,
                     recargo_mora_modo_snapshot: appliedMora?.modo ?? null,
                     recargo_mora_dias_atraso: appliedMora?.dias_atraso ?? null,

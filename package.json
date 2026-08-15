@@ -63,6 +63,7 @@
     "demo:management-margin": "bun --preload ./src/config/tz-preload.ts scripts/demo-management-margin.ts",
     "migrate:admin-notices": "bun --preload ./src/config/tz-preload.ts scripts/migrate-admin-notices.ts",
     "migrate:exchange-rate-surcharges": "bun --preload ./src/config/tz-preload.ts scripts/migrate-exchange-rate-surcharges.ts",
+    "migrate:catalog-scope-m3": "bun --preload ./src/config/tz-preload.ts scripts/migrate-catalog-scope-m3.ts",
     "migrate:recargo-mora": "bun --preload ./src/config/tz-preload.ts scripts/migrate-recargo-mora.ts",
     "demo:recargo-mora": "bun --preload ./src/config/tz-preload.ts scripts/demo-recargo-mora.ts",
     "verify:payment-collector-sync": "bun --preload ./src/config/tz-preload.ts scripts/verify-payment-collector-sync.ts",

@@ -1952,6 +1952,37 @@ export class UploadEventsUseCase {
     // Las referencias se validan con el mismo cliente que escribe la entidad.
     const client: any = tx ?? prisma;
 
+    if (entity === "tipo_cambio_recargo") {
+      const rateId = String(record.tipo_cambio_id ?? "").trim();
+      const paymentTypeId = String(record.tipo_pago_id ?? "").trim();
+      const percentage = Number(record.porcentaje);
+      const [rate, paymentType] = await Promise.all([
+        client.tipoCambio.findFirst({
+          where: { tipo_cambio_id: rateId, is_deleted: false },
+          select: { tipo_cambio_id: true },
+        }),
+        client.tipoPago.findFirst({
+          where: { tipo_pago_id: paymentTypeId, is_deleted: false, activo: true },
+          select: { tipo_pago_id: true },
+        }),
+      ]);
+      if (
+        !rate ||
+        !paymentType ||
+        !Number.isFinite(percentage) ||
+        percentage < 0 ||
+        percentage > 100 ||
+        String(record.gym_id ?? "") !== gymId ||
+        String(entityId) !== surchargeScopeId(rateId, paymentTypeId, gymId)
+      ) {
+        throw new Error(
+          `No se puede sincronizar el recargo ${entityId}: ` +
+            "tasa, método, porcentaje, sede o identidad determinista inválidos.",
+        );
+      }
+      return;
+    }
+
     if (entity === "gasto_categoria") {
       const nature = String(record.naturaleza ?? "")
         .trim()

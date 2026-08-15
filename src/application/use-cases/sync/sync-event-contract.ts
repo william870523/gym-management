@@ -34,6 +34,10 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
     delegateKey: "clienteExpedienteDocumento",
     pk: "documento_id",
   },
+  tipo_cambio_recargo: {
+    delegateKey: "tipoCambioRecargo",
+    pk: "tipo_cambio_recargo_id",
+  },
 } as const;
 
 export const PARITY_SYNC_ENTITIES = new Set<string>(

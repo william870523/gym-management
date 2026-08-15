@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { MethodSurchargeError, quoteMethodSurcharge } from "./method-surcharge.service";
 
-function database(overrides: { rateVersion?: number; accountGym?: string } = {}) {
+function database(overrides: { rateVersion?: number; accountGym?: string; sitePct?: string } = {}) {
   return {
     cuenta: { findFirst: async ({ where }: any) =>
       where.gym_id === (overrides.accountGym ?? "gym-a")
@@ -20,6 +20,11 @@ function database(overrides: { rateVersion?: number; accountGym?: string } = {})
       is_deleted: false,
       version: overrides.rateVersion ?? 3,
     }) },
+    tipoCambioRecargo: { findMany: async () => overrides.sitePct == null ? [] : [{
+      tipo_cambio_recargo_id: "site-row", tipo_cambio_id: "rate",
+      tipo_pago_id: "transfer", gym_id: "gym-a", porcentaje: overrides.sitePct,
+      is_deleted: false, version: 2, created_at: new Date(), updated_at: new Date(),
+    }] },
   };
 }
 
@@ -76,5 +81,13 @@ describe("R5.1 method surcharge quote", () => {
 
   test("una cuenta de otra sede falla cerrada", async () => {
     await expect(quoteMethodSurcharge(database({ accountGym: "gym-b" }), input, "gym-a", new Date("2026-07-01T00:00:00Z"))).rejects.toMatchObject({ status: 403 });
+  });
+
+  test("M3 cotiza la excepción de sede y congela su versión efectiva", async () => {
+    const quote = await quoteMethodSurcharge(
+      database({ sitePct: "8.00" }), input, "gym-a", new Date("2026-07-01T00:00:00Z"),
+    );
+    expect(quote).toMatchObject({ porcentaje: "8.00", recargo_fuente: "SEDE", tipo_cambio_version: 3000002 });
+    expect(quote.snapshot.recargo_metodo_tasa_version).toBe(3000002);
   });
 });

@@ -241,6 +241,28 @@ model TipoCambio {
   @@map("tipo_cambio")
 }
 
+/// M3 — recargo porcentual por método con valor global y excepción por sede.
+/// `gym_id = "GLOBAL"` representa el valor por defecto de plataforma; cualquier
+/// otro valor es una excepción de esa sede. No se declara FK a Gym porque el
+/// scope GLOBAL es deliberado y no representa una sede física.
+model TipoCambioRecargo {
+  tipo_cambio_recargo_id String   @id
+  tipo_cambio_id         String
+  tipo_pago_id           String
+  gym_id                 String   @default("GLOBAL")
+  porcentaje             Decimal  @db.Decimal(5, 2)
+  source_device          String?
+  is_deleted             Boolean  @default(false)
+  created_at             DateTime @default(now())
+  version                Int      @default(1)
+  updated_at             DateTime @default(now())
+  deleted_at             DateTime?
+
+  @@unique([tipo_cambio_id, tipo_pago_id, gym_id])
+  @@index([gym_id, tipo_cambio_id, is_deleted])
+  @@map("tipo_cambio_recargo")
+}
+
 model ConfiguracionSistema {
   configuracion_id String    @id
   clave            String

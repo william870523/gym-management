@@ -1,8 +1,11 @@
 import {
-  parseExchangeRateSurcharges,
   surchargeBreakdown,
   surchargeBreakdownFromTotal,
 } from "../../domain/exchange-rate-surcharge-policy";
+import {
+  effectiveSurchargeVersion,
+  readRateSurchargeScope,
+} from "./rate-surcharge-scope.service";
 import {
   treasuryMinorToMoney,
   treasuryMoneyToMinor,
@@ -98,7 +101,15 @@ export async function quoteMethodSurcharge(
     throw new MethodSurchargeError("Un detalle 1:1 no debe enviar una tasa de cambio.");
   }
 
-  const surcharges = parseExchangeRateSurcharges(rate?.recargos_json ?? null);
+  const scoped = rate
+    ? await readRateSurchargeScope(tx, rate, gymId)
+    : {
+        effective: {} as Record<string, string>,
+        sources: {} as Record<string, "SEDE" | "GLOBAL">,
+        versions: {} as Record<string, number>,
+        source: "NINGUNO" as const,
+      };
+  const surcharges = scoped.effective;
   const breakdown = input.receivedAmount !== undefined
     ? surchargeBreakdownFromTotal(
         money(input.receivedAmount, "El total recibido"),
@@ -115,11 +126,14 @@ export async function quoteMethodSurcharge(
     throw new MethodSurchargeError("La base del recargo debe ser mayor que cero.");
   }
   const hasSurcharge = breakdown.recargo_pct !== null;
+  const quotedVersion = rate
+    ? effectiveSurchargeVersion(Number(rate.version), scoped.versions[input.paymentTypeId])
+    : null;
   if (input.confirmation && hasSurcharge) {
     if (input.exchangeRateVersion == null) {
       throw new MethodSurchargeError("La confirmación exige la versión cotizada de la tasa.", 409);
     }
-    if (Number(input.exchangeRateVersion) !== Number(rate.version)) {
+    if (Number(input.exchangeRateVersion) !== quotedVersion) {
       throw new MethodSurchargeError("La tasa o sus recargos cambiaron; solicite una nueva cotización.", 409);
     }
   }
@@ -142,7 +156,9 @@ export async function quoteMethodSurcharge(
     moneda_pago_id: input.paymentCurrencyId,
     moneda_plan_id: input.planCurrencyId,
     tipo_cambio_id: rate?.tipo_cambio_id ?? null,
-    tipo_cambio_version: rate?.version ?? null,
+    tipo_cambio_version: quotedVersion,
+    recargo_fuente: scoped.sources[input.paymentTypeId] ?? "NINGUNO",
+    recargo_ambito_gym_id: scoped.sources[input.paymentTypeId] === "SEDE" ? gymId : null,
     operacion: operation,
     tasa: rate ? String(rate.exchange_rate) : "1",
     base: breakdown.base,
@@ -158,7 +174,8 @@ export async function quoteMethodSurcharge(
           recargo_metodo_importe: breakdown.recargo,
           recargo_metodo_total: breakdown.total,
           recargo_metodo_politica: METHOD_SURCHARGE_POLICY,
-          recargo_metodo_tasa_version: Number(rate.version),
+          // Desde M3 esta columna congela la versión efectiva tasa+política.
+          recargo_metodo_tasa_version: quotedVersion,
         }
       : {
           recargo_metodo_base: null,

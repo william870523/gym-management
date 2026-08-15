@@ -24,30 +24,58 @@ const desdeIndex = process.argv.indexOf("--desde");
 const DESDE = desdeIndex >= 0 ? Number(process.argv[desdeIndex + 1]) : 0;
 
 const existe: Record<string, (id: string) => Promise<boolean>> = {
-  cliente: async (id) => Boolean(await prisma.cliente.findUnique({ where: { ci: id } })),
+  cliente: async (id) =>
+    Boolean(await prisma.cliente.findUnique({ where: { ci: id } })),
   pago_cliente: async (id) =>
-    Boolean(await prisma.pagoCliente.findUnique({ where: { pago_cliente_id: id } })),
+    Boolean(
+      await prisma.pagoCliente.findUnique({ where: { pago_cliente_id: id } }),
+    ),
   detalle_pago: async (id) =>
-    Boolean(await prisma.detallePago.findUnique({ where: { detalle_pago_id: id } })),
+    Boolean(
+      await prisma.detallePago.findUnique({ where: { detalle_pago_id: id } }),
+    ),
   membresia_cliente: async (id) =>
-    Boolean(await prisma.membresiaCliente.findUnique({ where: { membresia_id: id } })),
+    Boolean(
+      await prisma.membresiaCliente.findUnique({ where: { membresia_id: id } }),
+    ),
   membresia_cuota: async (id) =>
-    Boolean(await prisma.membresiaCuota.findUnique({ where: { cuota_instancia_id: id } })),
+    Boolean(
+      await prisma.membresiaCuota.findUnique({
+        where: { cuota_instancia_id: id },
+      }),
+    ),
   plan_cuota_esquema: async (id) =>
-    Boolean(await prisma.planCuotaEsquema.findUnique({ where: { esquema_id: id } })),
+    Boolean(
+      await prisma.planCuotaEsquema.findUnique({ where: { esquema_id: id } }),
+    ),
   planes_pago: async (id) =>
-    Boolean(await prisma.planesPago.findUnique({ where: { id_planes_pago: id } })),
+    Boolean(
+      await prisma.planesPago.findUnique({ where: { id_planes_pago: id } }),
+    ),
   tesoreria_movimiento: async (id) =>
-    Boolean(await prisma.tesoreriaMovimiento.findUnique({ where: { movimiento_id: id } })),
+    Boolean(
+      await prisma.tesoreriaMovimiento.findUnique({
+        where: { movimiento_id: id },
+      }),
+    ),
   pago_membresia_aplicacion: async (id) =>
-    Boolean(await prisma.pagoMembresiaAplicacion.findUnique({ where: { aplicacion_id: id } })),
+    Boolean(
+      await prisma.pagoMembresiaAplicacion.findUnique({
+        where: { aplicacion_id: id },
+      }),
+    ),
   membresia_entrenador_asignacion: async (id) =>
     Boolean(
       await prisma.membresiaEntrenadorAsignacion.findUnique({
         where: { asignacion_id: id },
       }),
     ),
-  user: async (id) => Boolean(await prisma.user.findUnique({ where: { user_id: id } })),
+  user: async (id) =>
+    Boolean(await prisma.user.findUnique({ where: { user_id: id } })),
+  usuario_sede: async (id) =>
+    Boolean(
+      await prisma.usuarioSede.findUnique({ where: { usuario_sede_id: id } }),
+    ),
 };
 
 const pendientes = await prisma.syncLog.findMany({
@@ -76,7 +104,8 @@ for (const ev of pendientes) {
 }
 
 const porEntidad = new Map<string, number>();
-for (const h of huerfanos) porEntidad.set(h.entidad, (porEntidad.get(h.entidad) ?? 0) + 1);
+for (const h of huerfanos)
+  porEntidad.set(h.entidad, (porEntidad.get(h.entidad) ?? 0) + 1);
 
 console.log(`desde el cursor          : ${DESDE}`);
 console.log(`eventos por descargar    : ${pendientes.length}`);
@@ -85,11 +114,15 @@ for (const [entidad, n] of [...porEntidad].sort()) {
   console.log(`  ${entidad.padEnd(32)} ${n}`);
 }
 if (sinComprobar.size) {
-  console.log(`entidades no comprobadas : ${[...sinComprobar].sort().join(", ")}`);
+  console.log(
+    `entidades no comprobadas : ${[...sinComprobar].sort().join(", ")}`,
+  );
 }
 if (huerfanos.length) {
   console.log(`primero                  : ${huerfanos[0]!.id}`);
-  console.log(`último                   : ${huerfanos[huerfanos.length - 1]!.id}`);
+  console.log(
+    `último                   : ${huerfanos[huerfanos.length - 1]!.id}`,
+  );
 }
 
 // El manifiesto se escribe SIEMPRE, también en simulación: es lo que permite
@@ -104,8 +137,14 @@ if (huerfanos.length) {
     ["id,entidad,operacion,entidad_id,gym_id,created_at"]
       .concat(
         huerfanos.map((h) =>
-          [h.id, h.entidad, h.operacion, h.entidad_id, h.gym_id ?? "", h.created_at?.toISOString() ?? ""]
-            .join(","),
+          [
+            h.id,
+            h.entidad,
+            h.operacion,
+            h.entidad_id,
+            h.gym_id ?? "",
+            h.created_at?.toISOString() ?? "",
+          ].join(","),
         ),
       )
       .join("\n"),

@@ -46,6 +46,10 @@ describe("contrato fail-closed de upload", () => {
       delegateKey: "clienteExpedienteDocumento",
       pk: "documento_id",
     });
+    expect(PARITY_SYNC_TARGET_DEFINITIONS.tipo_cambio_recargo).toEqual({
+      delegateKey: "tipoCambioRecargo",
+      pk: "tipo_cambio_recargo_id",
+    });
   });
 
   it("rechaza operación, entidad_id y target ausentes", () => {

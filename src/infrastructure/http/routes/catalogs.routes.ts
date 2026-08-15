@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import * as catalogs from "../controllers/catalogs.controller";
+import { requirePlatformAuthority } from "./global-catalog-authority";
 
 export function catalogsRoutes() {
     const app = new Hono();
@@ -7,37 +8,37 @@ export function catalogsRoutes() {
     // Moneda
     app.get("/monedas", catalogs.getMonedas);
     app.get("/monedas/:id", catalogs.getMonedaById);
-    app.post("/monedas", catalogs.createMoneda);
-    app.put("/monedas/:id", catalogs.updateMoneda);
-    app.delete("/monedas/:id", catalogs.deleteMoneda);
+    app.post("/monedas", requirePlatformAuthority, catalogs.createMoneda);
+    app.put("/monedas/:id", requirePlatformAuthority, catalogs.updateMoneda);
+    app.delete("/monedas/:id", requirePlatformAuthority, catalogs.deleteMoneda);
 
     // Nacionalidad
     app.get("/nacionalidades", catalogs.getNacionalidades);
     app.get("/nacionalidades/:id", catalogs.getNacionalidadById);
-    app.post("/nacionalidades", catalogs.createNacionalidad);
-    app.put("/nacionalidades/:id", catalogs.updateNacionalidad);
-    app.delete("/nacionalidades/:id", catalogs.deleteNacionalidad);
+    app.post("/nacionalidades", requirePlatformAuthority, catalogs.createNacionalidad);
+    app.put("/nacionalidades/:id", requirePlatformAuthority, catalogs.updateNacionalidad);
+    app.delete("/nacionalidades/:id", requirePlatformAuthority, catalogs.deleteNacionalidad);
 
     // TipoPago
     app.get("/tipos-pago", catalogs.getTiposPago);
     app.get("/tipos-pago/:id", catalogs.getTipoPagoById);
-    app.post("/tipos-pago", catalogs.createTipoPago);
-    app.put("/tipos-pago/:id", catalogs.updateTipoPago);
-    app.delete("/tipos-pago/:id", catalogs.deleteTipoPago);
+    app.post("/tipos-pago", requirePlatformAuthority, catalogs.createTipoPago);
+    app.put("/tipos-pago/:id", requirePlatformAuthority, catalogs.updateTipoPago);
+    app.delete("/tipos-pago/:id", requirePlatformAuthority, catalogs.deleteTipoPago);
 
     // TipoCambio
     app.get("/tipos-cambio", catalogs.getTiposCambio);
     app.get("/tipos-cambio/:id", catalogs.getTipoCambioById);
-    app.post("/tipos-cambio", catalogs.createTipoCambio);
-    app.put("/tipos-cambio/:id", catalogs.updateTipoCambio);
-    app.delete("/tipos-cambio/:id", catalogs.deleteTipoCambio);
+    app.post("/tipos-cambio", requirePlatformAuthority, catalogs.createTipoCambio);
+    app.put("/tipos-cambio/:id", requirePlatformAuthority, catalogs.updateTipoCambio);
+    app.delete("/tipos-cambio/:id", requirePlatformAuthority, catalogs.deleteTipoCambio);
 
     // Referencia
     app.get("/referencias", catalogs.getReferencias);
     app.get("/referencias/:id", catalogs.getReferenciaById);
-    app.post("/referencias", catalogs.createReferencia);
-    app.put("/referencias/:id", catalogs.updateReferencia);
-    app.delete("/referencias/:id", catalogs.deleteReferencia);
+    app.post("/referencias", requirePlatformAuthority, catalogs.createReferencia);
+    app.put("/referencias/:id", requirePlatformAuthority, catalogs.updateReferencia);
+    app.delete("/referencias/:id", requirePlatformAuthority, catalogs.deleteReferencia);
 
     // MotivoBaja (E0-b) — acotado por sede desde el token.
     app.get("/motivos-baja", catalogs.getMotivosBaja);

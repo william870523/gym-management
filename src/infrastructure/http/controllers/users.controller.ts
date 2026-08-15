@@ -19,6 +19,7 @@ export class UserController {
     private createUseCase: CreateUserUseCase;
     private updateUseCase: UpdateUserUseCase;
     private deleteUseCase: DeleteUserUseCase;
+    private repository: UserRepository;
 
     constructor(
         repository: UserRepository = new PrismaUserRepository(),
@@ -28,6 +29,7 @@ export class UserController {
         // abriría una transacción real de Prisma.
         enTransaccion?: SyncTransactionRunner,
     ) {
+        this.repository = repository;
         this.listUseCase = new ListUsersUseCase(repository);
         this.getUseCase = new GetUserUseCase(repository);
         // Pasar `undefined` deja actuar al valor por defecto del caso de uso.
@@ -88,7 +90,7 @@ export class UserController {
             const id = c.req.param("id");
             const body = await c.req.json().catch(() => null);
             const parsed = UpdateUserSchema.parse(body);
-            const gymId = this.gymId(c);
+            const gymId = await this.mutationGymId(c, id);
             if (!gymId) return c.json({ error: "Gym scope required" }, 403);
             const result = await this.updateUseCase.execute(id, parsed, gymId);
             const { password, ...sanitized } = result;
@@ -107,7 +109,7 @@ export class UserController {
     async deleteUser(c: Context) {
         try {
             const id = c.req.param("id");
-            const gymId = this.gymId(c);
+            const gymId = await this.mutationGymId(c, id);
             if (!gymId) return c.json({ error: "Gym scope required" }, 403);
             await this.deleteUseCase.execute(id, gymId);
             return c.json({ ok: true });
@@ -122,6 +124,17 @@ export class UserController {
     private gymId(c: Context): string | null {
         const auth = c.get("auth");
         return auth?.gymId?.trim() || null;
+    }
+
+    private async mutationGymId(c: Context, userId: string): Promise<string | null> {
+        const auth = c.get("auth");
+        if (auth?.esPlataforma === true) {
+            // El dueño puede estar situado en una sede secundaria. La cuenta
+            // se muta en su sede principal resuelta desde la base; nunca se
+            // acepta un gym_id libre del body.
+            return await this.repository.findPrimaryGymId(userId);
+        }
+        return this.gymId(c);
     }
 }
 

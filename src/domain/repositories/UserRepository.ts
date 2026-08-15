@@ -5,10 +5,10 @@ export interface UserRepository extends SyncTransactionalRepository<UserReposito
     findAll(gymId: string): Promise<User[]>;
     findByEmail(email: string): Promise<User | null>;
     findById(id: string, gymId: string): Promise<User | null>;
+    findPrimaryGymId(id: string): Promise<string | null>;
     create(data: Partial<User>, gymId: string): Promise<User>;
     update(id: string, gymId: string, data: Partial<User>): Promise<User>;
     upsertFromSync(data: User): Promise<User>;
     softDelete(id: string, gymId: string): Promise<void>;
 }
-
 

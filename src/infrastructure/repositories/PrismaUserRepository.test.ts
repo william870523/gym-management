@@ -31,7 +31,18 @@ describe("persistencia CRUD de usuarios", () => {
         return { count: 1 };
       },
     };
-    const repository = new PrismaUserRepository(delegate);
+    const membershipCalls: Array<{ method: string; args: any }> = [];
+    const membershipDelegate = {
+      async findMany(args: any) {
+        membershipCalls.push({ method: "findMany", args });
+        return [];
+      },
+      async findFirst(args: any) {
+        membershipCalls.push({ method: "findFirst", args });
+        return null;
+      },
+    };
+    const repository = new PrismaUserRepository(delegate, membershipDelegate);
 
     await repository.findAll("gym-auth");
     await repository.findById("user-1", "gym-auth");
@@ -49,11 +60,25 @@ describe("persistencia CRUD de usuarios", () => {
     });
     await repository.softDelete("user-1", "gym-auth");
 
-    expect(calls[0].args.where).toEqual({ gym_id: "gym-auth", is_deleted: false });
-    expect(calls[1].args.where).toEqual({
+    expect(membershipCalls[0].args.where).toEqual({
+      gym_id: "gym-auth",
+      activo: true,
+      is_deleted: false,
+    });
+    expect(calls[0].args.where).toEqual({
+      is_deleted: false,
+      OR: [{ gym_id: "gym-auth" }, { user_id: { in: [] } }],
+    });
+    expect(membershipCalls[1].args.where).toEqual({
       user_id: "user-1",
       gym_id: "gym-auth",
+      activo: true,
       is_deleted: false,
+    });
+    expect(calls[1].args.where).toEqual({
+      user_id: "user-1",
+      is_deleted: false,
+      OR: [{ gym_id: "gym-auth" }],
     });
     expect(calls[2].args.data.gym_id).toBe("gym-auth");
     expect(calls[3].args.where).toEqual({

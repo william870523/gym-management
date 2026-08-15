@@ -45,6 +45,9 @@ import type {
   SyncTransactionRunner,
 } from "./sync-transaction";
 import { delegateFor } from "./sync-transaction";
+import { usuarioSedeId } from "../../auth/usuario-sede";
+import { canonicalRole } from "../../../infrastructure/auth/permissions";
+import { surchargeScopeId } from "../../payment/rate-surcharge-scope.service";
 
 /**
  * Resultado explícito del upload — Unidad 01, paso 4.
@@ -562,6 +565,8 @@ export class UploadEventsUseCase {
         "membresia_cuota",
         "aviso_administracion",
         "cliente_expediente_documento",
+        "usuario_sede",
+        "tipo_cambio_recargo",
       ].includes(ev.entidad)
     ) {
       await this.applyPrismaMappedEvent(
@@ -898,6 +903,10 @@ export class UploadEventsUseCase {
         delegate: client.avisoAdministracion,
         pk: "aviso_id",
       },
+      usuario_sede: {
+        delegate: client.usuarioSede,
+        pk: "usuario_sede_id",
+      },
       ...Object.fromEntries(
         Object.entries(PARITY_SYNC_TARGET_DEFINITIONS).map(
           ([entityName, definition]) => [
@@ -1003,6 +1012,27 @@ export class UploadEventsUseCase {
       gymId,
       existingRecord: existingOwnedRecord,
     });
+
+    if (ev.entidad === "usuario_sede") {
+      const userId = String(record.user_id ?? "").trim();
+      const role = canonicalRole(record.rol);
+      const expectedId = usuarioSedeId(userId, gymId);
+      const parent = userId
+        ? await client.user.findFirst({
+            where: { user_id: userId, is_deleted: false },
+            select: { user_id: true },
+          })
+        : null;
+      if (!parent || String(primaryKey) !== expectedId || !role) {
+        throw new Error(
+          "La asignación usuario_sede no conserva usuario, rol o identidad determinista dentro del gimnasio autenticado.",
+        );
+      }
+      record.user_id = userId;
+      record.rol = role;
+      // `gym_id` y `source_device` ya fueron reemplazados por el mapper con
+      // los valores del dispositivo autenticado; nunca manda el payload.
+    }
 
     // R5.4 — convergencia del aviso de administración: **«leído» gana y nunca
     // retrocede**. Gemela de la regla del worker local. Sin ella, un aviso que

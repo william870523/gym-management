@@ -16,8 +16,9 @@ import {
 } from "./sync-event-contract";
 
 describe("contrato fail-closed de upload", () => {
-  it("declara las nueve entidades con pertenencia estricta", () => {
+  it("declara las once entidades con pertenencia estricta", () => {
     expect([...PARITY_SYNC_ENTITIES]).toEqual([
+      "usuario_sede",
       "gasto_categoria",
       "gasto_proveedor",
       "gasto_gobernado",
@@ -27,7 +28,12 @@ describe("contrato fail-closed de upload", () => {
       "membresia_cuota",
       "tesoreria_cierre_periodo",
       "cliente_expediente_documento",
+      "tipo_cambio_recargo",
     ]);
+    expect(PARITY_SYNC_TARGET_DEFINITIONS.usuario_sede).toEqual({
+      delegateKey: "usuarioSede",
+      pk: "usuario_sede_id",
+    });
     expect(PARITY_SYNC_TARGET_DEFINITIONS.membresia_cuota).toEqual({
       delegateKey: "membresiaCuota",
       pk: "cuota_instancia_id",

@@ -9,19 +9,40 @@ import {
 } from "./gym-scoped-sync-write";
 
 export class PrismaUserRepository implements UserRepository {
-    constructor(private readonly userDelegate: any = prisma.user) {}
+    constructor(
+        private readonly userDelegate: any = prisma.user,
+        private readonly usuarioSedeDelegate: any = prisma.usuarioSede,
+    ) {}
 
     withTransaction(tx: SyncTransactionContext): PrismaUserRepository {
-        return new PrismaUserRepository(delegateFor(tx, "user", this.userDelegate));
+        return new PrismaUserRepository(
+            delegateFor(tx, "user", this.userDelegate),
+            delegateFor(tx, "usuarioSede", this.usuarioSedeDelegate),
+        );
     }
 
     async findAll(gymId: string): Promise<User[]> {
-        return this.userDelegate.findMany({
+        const scopedGymId = this.requireGymId(gymId);
+        const memberships = await this.usuarioSedeDelegate.findMany({
+            where: { gym_id: scopedGymId, activo: true, is_deleted: false },
+            select: { user_id: true, rol: true },
+        });
+        const roleByUser = new Map<string, string>(
+            memberships.map((membership: any) => [membership.user_id, membership.rol]),
+        );
+        const users = await this.userDelegate.findMany({
             where: {
-                gym_id: this.requireGymId(gymId),
                 is_deleted: false,
+                OR: [
+                    { gym_id: scopedGymId },
+                    { user_id: { in: [...roleByUser.keys()] } },
+                ],
             }
         });
+        return users.map((user: User) => ({
+            ...user,
+            rol_sede: roleByUser.get(user.user_id) ?? user.role,
+        })) as User[];
     }
 
     async findByEmail(email: string): Promise<User | null> {
@@ -31,13 +52,37 @@ export class PrismaUserRepository implements UserRepository {
     }
 
     async findById(id: string, gymId: string): Promise<User | null> {
-        return this.userDelegate.findFirst({
+        const scopedGymId = this.requireGymId(gymId);
+        const membership = await this.usuarioSedeDelegate.findFirst({
             where: {
                 user_id: id,
-                gym_id: this.requireGymId(gymId),
+                gym_id: scopedGymId,
+                activo: true,
                 is_deleted: false,
+            },
+            select: { rol: true },
+        });
+        const user = await this.userDelegate.findFirst({
+            where: {
+                user_id: id,
+                is_deleted: false,
+                OR: [
+                    { gym_id: scopedGymId },
+                    ...(membership ? [{ user_id: id }] : []),
+                ],
             }
         });
+        return user
+            ? ({ ...user, rol_sede: membership?.rol ?? user.role } as User)
+            : null;
+    }
+
+    async findPrimaryGymId(id: string): Promise<string | null> {
+        const user = await this.userDelegate.findUnique({
+            where: { user_id: id },
+            select: { gym_id: true },
+        });
+        return user?.gym_id?.trim() || null;
     }
 
     async create(data: Partial<User>, gymId: string): Promise<User> {

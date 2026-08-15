@@ -12,6 +12,7 @@
  * Hay una prueba que falla si alguien los añade.
  */
 export const PARITY_SYNC_TARGET_DEFINITIONS = {
+  usuario_sede: { delegateKey: "usuarioSede", pk: "usuario_sede_id" },
   gasto_categoria: { delegateKey: "gastoCategoria", pk: "categoria_id" },
   gasto_proveedor: { delegateKey: "gastoProveedor", pk: "proveedor_id" },
   gasto_gobernado: { delegateKey: "gastoGobernado", pk: "gasto_id" },

@@ -8,6 +8,7 @@ import { JwtService } from "../../auth/jwt.service";
 import { auditSecurityEvent } from "../../logging/audit-logger";
 import { getClientIp } from "../middleware/rate-limit.middleware";
 import { IpBlocker } from "../middleware/ip-block.middleware";
+import { permissionsForRole } from "../../auth/permissions";
 
 const extractRetryAfterSeconds = (message: string): number | null => {
     const match = message.match(/(\d+)\s+seconds?/i);
@@ -73,7 +74,12 @@ export class AuthController {
             // 2. Login exitoso -> Resetear intentos
             IpBlocker.resetAttempts(c);
 
-            return c.json({ ok: true, token, ...user });
+            return c.json({
+                ok: true,
+                token,
+                ...user,
+                permissions: [...permissionsForRole(user.role)].sort(),
+            });
         } catch (error: any) {
             // 3. Registrar intento fallido (si no fue bloqueo previo)
             if (!error.message.includes("Too many failed attempts")) {

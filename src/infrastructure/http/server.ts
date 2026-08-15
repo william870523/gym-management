@@ -19,6 +19,9 @@ import {
   authDevice,
   authUser,
   requireAdminForWrites,
+  requireAnyPermission,
+  requirePermission,
+  requirePermissionByMethod,
   requireStaff,
 } from "./middleware/auth.middleware";
 import { rateLimit, getClientIp } from "./middleware/rate-limit.middleware";
@@ -138,7 +141,7 @@ app.route("/sync", syncProtected);
 // un cobro, borrar) llevan `requireAdmin()` en su propia ruta.
 const catalogsProtected = new Hono();
 catalogsProtected.use("*", authUser());
-catalogsProtected.use("*", requireAdminForWrites());
+catalogsProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 catalogsProtected.use("*", adminLimiter);
 catalogsProtected.route("/", catalogsRoutes());
 app.route("/catalogs", catalogsProtected);
@@ -149,76 +152,77 @@ app.route("/catalogs", catalogsProtected);
 // tiene por qué ser administración de una sede concreta.
 const gymsProtected = new Hono();
 gymsProtected.use("*", authUser());
-gymsProtected.use("*", requireStaff());
+gymsProtected.use("*", requirePermission("clientes.leer"));
 gymsProtected.use("*", adminLimiter);
 gymsProtected.route("/", gymsRoutes());
 app.route("/gyms", gymsProtected);
 
 const clientsProtected = new Hono();
 clientsProtected.use("*", authUser());
-clientsProtected.use("*", requireStaff());
+clientsProtected.use("*", requirePermissionByMethod("clientes.leer", "clientes.escribir"));
 clientsProtected.use("*", adminLimiter);
 clientsProtected.route("/", clientsRoutes());
 app.route("/clients", clientsProtected);
 
 const trainersProtected = new Hono();
 trainersProtected.use("*", authUser());
-trainersProtected.use("*", requireAdminForWrites());
+trainersProtected.use("*", requirePermissionByMethod("clientes.leer", "entrenadores.gestionar"));
 trainersProtected.use("*", adminLimiter);
 trainersProtected.route("/", trainersRoutes());
 app.route("/trainers", trainersProtected);
 
 const paymentsProtected = new Hono();
 paymentsProtected.use("*", authUser());
-paymentsProtected.use("*", requireAdminForWrites());
+paymentsProtected.use("*", requirePermissionByMethod("clientes.leer", "cobros.registrar"));
 paymentsProtected.use("*", adminLimiter);
 paymentsProtected.route("/", paymentsRoutes());
 app.route("/payments", paymentsProtected);
 
 const usersProtected = new Hono();
-usersProtected.use("*", authAdmin());
+usersProtected.use("*", authUser());
+usersProtected.use("*", requirePermission("configuracion.escribir"));
 usersProtected.use("*", adminLimiter);
 usersProtected.route("/", usersRoutes());
 app.route("/users", usersProtected);
 
 const nacionalidadesProtected = new Hono();
 nacionalidadesProtected.use("*", authUser());
-nacionalidadesProtected.use("*", requireAdminForWrites());
+nacionalidadesProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 nacionalidadesProtected.use("*", adminLimiter);
 nacionalidadesProtected.route("/", nacionalidadRoutes);
 app.route("/nacionalidades", nacionalidadesProtected);
 
 const monedasProtected = new Hono();
 monedasProtected.use("*", authUser());
-monedasProtected.use("*", requireAdminForWrites());
+monedasProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 monedasProtected.use("*", adminLimiter);
 monedasProtected.route("/", monedaRoutes);
 app.route("/monedas", monedasProtected);
 
 const tiposPagoProtected = new Hono();
 tiposPagoProtected.use("*", authUser());
-tiposPagoProtected.use("*", requireAdminForWrites());
+tiposPagoProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 tiposPagoProtected.use("*", adminLimiter);
 tiposPagoProtected.route("/", tipoPagoRoutes);
 app.route("/tipos-pago", tiposPagoProtected);
 
 const tiposCambioProtected = new Hono();
 tiposCambioProtected.use("*", authUser());
-tiposCambioProtected.use("*", requireAdminForWrites());
+tiposCambioProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 tiposCambioProtected.use("*", adminLimiter);
 tiposCambioProtected.route("/", tipoCambioRoutes);
 app.route("/tipos-cambio", tiposCambioProtected);
 
 const referenciasProtected = new Hono();
 referenciasProtected.use("*", authUser());
-referenciasProtected.use("*", requireAdminForWrites());
+referenciasProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 referenciasProtected.use("*", adminLimiter);
 referenciasProtected.route("/", referenciaRoutes);
 app.route("/referencias", referenciasProtected);
 
 const horariosProtected = new Hono();
 horariosProtected.use("*", authUser());
-horariosProtected.use("*", requireAdminForWrites());
+horariosProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 horariosProtected.use("*", adminLimiter);
 horariosProtected.route("/", horarioRoutes);
 app.route("/horarios", horariosProtected);
@@ -238,7 +242,7 @@ app.route("/horarios", horariosProtected);
  */
 const motivosBajaProtected = new Hono();
 motivosBajaProtected.use("*", authUser());
-motivosBajaProtected.use("*", requireAdminForWrites());
+motivosBajaProtected.use("*", requirePermissionByMethod("estadisticas.leer", "configuracion.escribir"));
 motivosBajaProtected.use("*", adminLimiter);
 motivosBajaProtected.get("/", catalogs.getMotivosBaja);
 motivosBajaProtected.get("/:id", catalogs.getMotivoBajaById);
@@ -257,56 +261,56 @@ app.route("/motivos-baja", motivosBajaProtected);
 // comprueba dentro del handler.
 const planCuotaProtected = new Hono();
 planCuotaProtected.use("*", authUser());
-planCuotaProtected.use("*", requireStaff());
+planCuotaProtected.use("*", requirePermission("clientes.leer"));
 planCuotaProtected.use("*", adminLimiter);
 planCuotaProtected.route("/", planCuotaRoutes);
 app.route("/", planCuotaProtected);
 
 const planesPagoProtected = new Hono();
 planesPagoProtected.use("*", authUser());
-planesPagoProtected.use("*", requireAdminForWrites());
+planesPagoProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 planesPagoProtected.use("*", adminLimiter);
 planesPagoProtected.route("/", planesPagoRoutes);
 app.route("/planes-pago", planesPagoProtected);
 
 const cuentasProtected = new Hono();
 cuentasProtected.use("*", authUser());
-cuentasProtected.use("*", requireAdminForWrites());
+cuentasProtected.use("*", requirePermissionByMethod("clientes.leer", "configuracion.escribir"));
 cuentasProtected.use("*", adminLimiter);
 cuentasProtected.route("/", cuentaRoutes);
 app.route("/cuentas", cuentasProtected);
 
 const entrenadoresProtected = new Hono();
 entrenadoresProtected.use("*", authUser());
-entrenadoresProtected.use("*", requireAdminForWrites());
+entrenadoresProtected.use("*", requirePermissionByMethod("clientes.leer", "entrenadores.gestionar"));
 entrenadoresProtected.use("*", adminLimiter);
 entrenadoresProtected.route("/", entrenadorRoutes);
 app.route("/entrenadores", entrenadoresProtected);
 
 const clientesProtectedRoutes = new Hono();
 clientesProtectedRoutes.use("*", authUser());
-clientesProtectedRoutes.use("*", requireStaff());
+clientesProtectedRoutes.use("*", requirePermissionByMethod("clientes.leer", "clientes.escribir"));
 clientesProtectedRoutes.use("*", adminLimiter);
 clientesProtectedRoutes.route("/", clienteRoutes);
 app.route("/clientes", clientesProtectedRoutes);
 
 const clientesPesoProtected = new Hono();
 clientesPesoProtected.use("*", authUser());
-clientesPesoProtected.use("*", requireStaff());
+clientesPesoProtected.use("*", requirePermissionByMethod("clientes.leer", "clientes.escribir"));
 clientesPesoProtected.use("*", adminLimiter);
 clientesPesoProtected.route("/", clientePesoRoutes);
 app.route("/cliente-pesos", clientesPesoProtected);
 
 const asistenciasProtected = new Hono();
 asistenciasProtected.use("*", authUser());
-asistenciasProtected.use("*", requireStaff());
+asistenciasProtected.use("*", requirePermissionByMethod("clientes.leer", "clientes.escribir"));
 asistenciasProtected.use("*", adminLimiter);
 asistenciasProtected.route("/", asistenciaRoutes);
 app.route("/asistencias", asistenciasProtected);
 
 const pagosClienteProtected = new Hono();
 pagosClienteProtected.use("*", authUser());
-pagosClienteProtected.use("*", requireStaff());
+pagosClienteProtected.use("*", requirePermissionByMethod("clientes.leer", "cobros.registrar"));
 pagosClienteProtected.use("*", adminLimiter);
 pagosClienteProtected.route("/", pagoClienteRoutes);
 app.route("/pagos-cliente", pagosClienteProtected);
@@ -320,30 +324,35 @@ detallesPagoProtected.route("/", detallePagoRoutes);
 app.route("/detalles-pago", detallesPagoProtected);
 
 const configuracionProtected = new Hono();
-configuracionProtected.use("*", authAdmin());
+configuracionProtected.use("*", authUser());
+configuracionProtected.use("*", requirePermission("configuracion.escribir"));
 configuracionProtected.use("*", adminLimiter);
 configuracionProtected.route("/", configuracionRoutes);
 app.route("/configuracion", configuracionProtected);
 
-// Contabilidad ya distingue por dentro: `gymIdentity` exige administración para
-// firmar, cerrar y liquidar, y `accountingIdentity` deja consultar al resto.
+// Cada handler contable vuelve a exigir el permiso exacto; este guard exterior
+// solo descarta de entrada los roles sin ninguna capacidad contable.
 const accountingProtected = new Hono();
 accountingProtected.use("*", authUser());
-accountingProtected.use("*", requireStaff());
+accountingProtected.use("*", requireAnyPermission(
+  "tesoreria.cerrar",
+  "gastos.gobernar",
+  "estadisticas.leer",
+));
 accountingProtected.use("*", adminLimiter);
 accountingProtected.route("/", accountingRoutes);
 app.route("/contabilidad", accountingProtected);
 
 const membershipRequestsProtected = new Hono();
 membershipRequestsProtected.use("*", authUser());
-membershipRequestsProtected.use("*", requireStaff());
+membershipRequestsProtected.use("*", requirePermissionByMethod("clientes.leer", "clientes.escribir"));
 membershipRequestsProtected.use("*", adminLimiter);
 membershipRequestsProtected.route("/", membershipRequestRoutes);
 app.route("/membresias/solicitudes", membershipRequestsProtected);
 
 const retentionProtected = new Hono();
 retentionProtected.use("*", authUser());
-retentionProtected.use("*", requireStaff());
+retentionProtected.use("*", requirePermission("estadisticas.leer"));
 retentionProtected.use("*", adminLimiter);
 retentionProtected.route("/", retentionRoutes);
 app.route("/retencion", retentionProtected);
@@ -352,7 +361,7 @@ app.route("/retencion", retentionProtected);
 // `authUser`; los handlers consumen exclusivamente `auth.gymId`.
 const estadisticasProtected = new Hono();
 estadisticasProtected.use("*", authUser());
-estadisticasProtected.use("*", requireStaff());
+estadisticasProtected.use("*", requirePermission("estadisticas.leer"));
 estadisticasProtected.use("*", adminLimiter);
 estadisticasProtected.route("/", estadisticasRoutes);
 app.route("/estadisticas", estadisticasProtected);

@@ -126,9 +126,23 @@ function gymIdentity(c: any) {
 }
 
 function accountingIdentity(c: any) {
+  return permissionIdentity(c, "tesoreria.cerrar")
+    ?? permissionIdentity(c, "gastos.gobernar");
+}
+
+function accountingReportIdentity(c: any) {
+  return permissionIdentity(c, "estadisticas.leer") && accountingIdentity(c);
+}
+
+function permissionIdentity(c: any, action: string) {
   const auth = c.get("auth") as
-    { sub?: string; role?: string; gymId?: string } | undefined;
-  return auth?.sub && auth.gymId && auth.role !== "device" ? auth : null;
+    { sub?: string; role?: string; gymId?: string; esPlataforma?: boolean } | undefined;
+  const permissions = c.get("permissions") as Set<string> | undefined;
+  return auth?.sub &&
+    auth.gymId &&
+    (auth.esPlataforma === true || permissions?.has(action))
+    ? auth
+    : null;
 }
 
 function handleRuleError(c: any, error: unknown) {
@@ -208,9 +222,9 @@ function handleRecurringExpenseError(c: any, error: unknown) {
 }
 
 accountingRoutes.get("/summary", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = accountingIdentity(c);
   if (!auth?.gymId) {
-    return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
+    return c.json({ error: "Se requiere acceso contable del gimnasio." }, 403);
   }
   const now = trustedClock.nowUtc();
   const [pending, paid, rules, profiles, fixedPending] = await Promise.all([
@@ -360,9 +374,9 @@ accountingRoutes.get("/trainer-liquidations", async (c) => {
 });
 
 accountingRoutes.get("/trainer-payables", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = accountingIdentity(c);
   if (!auth?.gymId) {
-    return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
+    return c.json({ error: "Se requiere acceso contable del gimnasio." }, 403);
   }
   try {
     return c.json(await trainerSettlements.listPayables(
@@ -482,7 +496,7 @@ accountingRoutes.post("/treasury-refunds/:id/reverse", async (c) => {
 });
 
 accountingRoutes.get("/treasury-ledger", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   try {
     const approvals = new TreasuryCloseApprovalService(auth.gymId);
@@ -498,7 +512,7 @@ accountingRoutes.get("/treasury-ledger", async (c) => {
 });
 
 accountingRoutes.get("/treasury-close-policy", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   }
@@ -523,7 +537,7 @@ accountingRoutes.put("/treasury-close-policy", async (c) => {
 });
 
 accountingRoutes.get("/treasury-monthly-summary", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) {
     return c.json(
       { error: "El token no identifica un gimnasio administrador." },
@@ -543,7 +557,7 @@ accountingRoutes.get("/treasury-monthly-summary", async (c) => {
 });
 
 accountingRoutes.get("/treasury-period-summary", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   const requestedGym = c.req.query("gym_id");
   if (requestedGym && requestedGym !== auth.gymId) return c.json({ error: "No se encontró el período solicitado." }, 404);
@@ -552,14 +566,14 @@ accountingRoutes.get("/treasury-period-summary", async (c) => {
 });
 
 accountingRoutes.get("/treasury-period-closes", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   try { return c.json(await treasuryPeriodCloses.list({ gymId: auth.gymId, desde: c.req.query("desde"), hasta: c.req.query("hasta") })); }
   catch (error) { return handleTreasuryLedgerError(c, error); }
 });
 
 accountingRoutes.post("/treasury-period-closes", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   const body = await c.req.json();
   if (body.gym_id && body.gym_id !== auth.gymId) return c.json({ error: "No se encontró el período solicitado." }, 404);
@@ -568,7 +582,7 @@ accountingRoutes.post("/treasury-period-closes", async (c) => {
 });
 
 accountingRoutes.post("/treasury-period-closes/:id/reopen", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.reabrir");
   if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   const body = await c.req.json();
   if (body.gym_id && body.gym_id !== auth.gymId) return c.json({ error: "No se encontró el cierre solicitado." }, 404);
@@ -577,7 +591,7 @@ accountingRoutes.post("/treasury-period-closes/:id/reopen", async (c) => {
 });
 
 accountingRoutes.get("/operational-results", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor) return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   try {
     return c.json(await operationalResults.get({
@@ -590,7 +604,7 @@ accountingRoutes.get("/operational-results", async (c) => {
 });
 
 accountingRoutes.get("/operational-results/annual", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor) return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   try {
     return c.json(await operationalResults.getAnnual({
@@ -603,7 +617,7 @@ accountingRoutes.get("/operational-results/annual", async (c) => {
 });
 
 accountingRoutes.get("/exchange-revaluation", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = accountingReportIdentity(c);
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -620,7 +634,7 @@ accountingRoutes.get("/exchange-revaluation", async (c) => {
 });
 
 accountingRoutes.get("/membership-revenue", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor) return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   try {
     return c.json(await membershipRevenue.get({
@@ -633,7 +647,7 @@ accountingRoutes.get("/membership-revenue", async (c) => {
 });
 
 accountingRoutes.get("/trainer-service-cost", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor?.gymId) {
     return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   }
@@ -648,7 +662,7 @@ accountingRoutes.get("/trainer-service-cost", async (c) => {
 });
 
 accountingRoutes.get("/management-margin", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor?.gymId) {
     return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   }
@@ -663,7 +677,7 @@ accountingRoutes.get("/management-margin", async (c) => {
 });
 
 accountingRoutes.get("/accrual-operating-result", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor?.gymId) {
     return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   }
@@ -678,7 +692,7 @@ accountingRoutes.get("/accrual-operating-result", async (c) => {
 });
 
 accountingRoutes.get("/management-margin/annual", async (c) => {
-  const actor = accountingIdentity(c);
+  const actor = accountingReportIdentity(c);
   if (!actor?.gymId) {
     return c.json({ error: "Se requiere una cuenta operadora." }, 403);
   }
@@ -693,7 +707,7 @@ accountingRoutes.get("/management-margin/annual", async (c) => {
 });
 
 accountingRoutes.post("/treasury-monthly-closes", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   }
@@ -713,7 +727,7 @@ accountingRoutes.post("/treasury-monthly-closes", async (c) => {
 });
 
 accountingRoutes.post("/treasury-monthly-closes/reopen", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.reabrir");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   }
@@ -777,7 +791,7 @@ accountingRoutes.post("/treasury-manual-operations", async (c) => {
 });
 
 accountingRoutes.post("/treasury-closes", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "tesoreria.cerrar");
   if (!auth?.gymId) return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   const body = await c.req.json();
   try {
@@ -810,7 +824,7 @@ accountingRoutes.post("/treasury-closes", async (c) => {
 });
 
 accountingRoutes.post("/treasury-close-requests/:id/decision", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = gymIdentity(c);
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica una cuenta operadora del gimnasio." }, 403);
   }
@@ -929,7 +943,7 @@ function handleGovernedExpenseError(c: any, error: unknown) {
 
 // R4.7 Gastos recurrentes (plantillas y generación mensual)
 accountingRoutes.get("/recurring-expenses", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio." }, 403);
   }
@@ -937,7 +951,7 @@ accountingRoutes.get("/recurring-expenses", async (c) => {
 });
 
 accountingRoutes.post("/recurring-expenses", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -952,7 +966,7 @@ accountingRoutes.post("/recurring-expenses", async (c) => {
 });
 
 accountingRoutes.put("/recurring-expenses/:id", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -968,7 +982,7 @@ accountingRoutes.put("/recurring-expenses/:id", async (c) => {
 });
 
 accountingRoutes.get("/recurring-expenses/preview", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio." }, 403);
   }
@@ -980,7 +994,7 @@ accountingRoutes.get("/recurring-expenses/preview", async (c) => {
 });
 
 accountingRoutes.post("/recurring-expenses/generate", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio." }, 403);
   }
@@ -997,7 +1011,7 @@ accountingRoutes.post("/recurring-expenses/generate", async (c) => {
 
 // R4.6 Gastos Devengados Gobernados
 accountingRoutes.get("/governed-expenses", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio válido." }, 403);
   }
@@ -1014,7 +1028,7 @@ accountingRoutes.get("/governed-expenses", async (c) => {
 });
 
 accountingRoutes.get("/governed-expense-categories", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio válido." }, 403);
   }
@@ -1022,7 +1036,7 @@ accountingRoutes.get("/governed-expense-categories", async (c) => {
 });
 
 accountingRoutes.post("/governed-expense-categories", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -1036,7 +1050,7 @@ accountingRoutes.post("/governed-expense-categories", async (c) => {
 });
 
 accountingRoutes.get("/governed-expense-suppliers", async (c) => {
-  const auth = accountingIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio válido." }, 403);
   }
@@ -1044,7 +1058,7 @@ accountingRoutes.get("/governed-expense-suppliers", async (c) => {
 });
 
 accountingRoutes.post("/governed-expense-suppliers", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -1058,7 +1072,7 @@ accountingRoutes.post("/governed-expense-suppliers", async (c) => {
 });
 
 accountingRoutes.post("/governed-expenses", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -1075,7 +1089,7 @@ accountingRoutes.post("/governed-expenses", async (c) => {
 });
 
 accountingRoutes.post("/governed-expenses/:id/payments", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }
@@ -1093,7 +1107,7 @@ accountingRoutes.post("/governed-expenses/:id/payments", async (c) => {
 });
 
 accountingRoutes.post("/governed-expense-payments/:id/reversals", async (c) => {
-  const auth = gymIdentity(c);
+  const auth = permissionIdentity(c, "gastos.gobernar");
   if (!auth?.gymId) {
     return c.json({ error: "El token no identifica un gimnasio administrador." }, 403);
   }

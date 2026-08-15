@@ -33,6 +33,7 @@ export const authRoutes = () => {
       gym_id: auth?.gymId ?? null,
       es_plataforma: auth?.esPlataforma === true,
       origen: "REMOTE_USER",
+      permissions: [...(c.get("permissions") ?? new Set<string>())].sort(),
     });
   });
 

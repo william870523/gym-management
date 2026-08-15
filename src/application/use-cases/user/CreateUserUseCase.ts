@@ -11,7 +11,7 @@ export interface CreateUserDTO {
     user_nombre: string;
     user_email: string;
     password: string;
-    role: "admin" | "user";
+    role: "admin" | "reception" | "accounting" | "trainer";
     active?: boolean;
 }
 

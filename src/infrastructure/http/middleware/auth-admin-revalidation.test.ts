@@ -73,13 +73,18 @@ describe("revalidación administrativa", () => {
         expect(calls).toBe(0);
     });
 
-    it("requirePermission falla cerrado mientras RBAC no tenga política real", async () => {
+    it("requirePermission falla cerrado sin un actor revalidado", async () => {
         const app = new Hono();
-        app.use("*", requirePermission("clients.read", noAudit));
+        app.use("*", requirePermission("clientes.leer", noAudit));
         app.get("/", (c) => c.json({ ok: true }));
 
         const response = await app.request("/");
         expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+            error: "Forbidden - Permission required",
+            error_code: "PERMISSION_DENIED",
+            required_permission: "clientes.leer",
+        });
     });
 });
 
@@ -110,5 +115,41 @@ describe("revalidación de operadores", () => {
         const response = await app.request("/", { headers: bearer(token) });
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ role: "user" });
+    });
+
+    it("autoriza por el permiso del rol persistido, no por el claim del JWT", async () => {
+        const app = new Hono();
+        app.use("*", authUser(async () => ({ role: "reception" }), noAudit));
+        app.use("*", requirePermission("cobros.registrar", noAudit));
+        app.get("/", (c) => c.json({ ok: true }));
+        const token = JwtService.signAdminToken({
+            userId: "recepcion-a",
+            role: "admin",
+            gymId: "gym-a",
+        });
+
+        const response = await app.request("/", { headers: bearer(token) });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ ok: true });
+    });
+
+    it("deniega de forma estable un permiso fuera de la matriz del rol", async () => {
+        const app = new Hono();
+        app.use("*", authUser(async () => ({ role: "reception" }), noAudit));
+        app.use("*", requirePermission("configuracion.escribir", noAudit));
+        app.get("/", (c) => c.json({ ok: true }));
+        const token = JwtService.signAdminToken({
+            userId: "recepcion-a",
+            role: "reception",
+            gymId: "gym-a",
+        });
+
+        const response = await app.request("/", { headers: bearer(token) });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+            error: "Forbidden - Permission required",
+            error_code: "PERMISSION_DENIED",
+            required_permission: "configuracion.escribir",
+        });
     });
 });

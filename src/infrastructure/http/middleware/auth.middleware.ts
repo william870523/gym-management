@@ -2,6 +2,10 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { JwtService } from "../../auth/jwt.service";
 import { auditSecurityEvent } from "../../logging/audit-logger";
+import {
+    permissionsForRole,
+    roleHasPermission,
+} from "../../auth/permissions";
 import { getClientIp } from "./rate-limit.middleware";
 import { prisma } from "../../db/prismaClient";
 import { normalizeStaffRole, type StaffRole } from "../../../application/auth/staff-role";
@@ -323,6 +327,7 @@ export const authUser = (
         role: session.role,
         esPlataforma: session.esPlataforma ?? false,
     });
+    c.set("permissions", new Set(permissionsForRole(session.role)));
     await next();
 });
 
@@ -409,6 +414,7 @@ export const authAdmin = (
         sub: userId,
         gymId: requestedGymId ?? gymId,
     });
+    c.set("permissions", new Set(permissionsForRole("admin")));
     await next();
 });
 
@@ -438,16 +444,94 @@ export const authDevice = () => createMiddleware(async (c, next) => {
 export const requirePermission = (
     action: string,
     audit: SecurityAuditor = auditSecurityEvent,
-) => createMiddleware(async (c) => {
+) => createMiddleware(async (c, next) => {
+    const auth = c.get("auth");
+    const permissions = c.get("permissions");
+    if (
+        auth?.sub &&
+        (auth.esPlataforma === true ||
+            (permissions?.has(action) && roleHasPermission(auth.role, action)))
+    ) {
+        await next();
+        return;
+    }
     audit({
         level: "WARN",
         category: "AUTH",
-        action: "PERMISSION_POLICY_UNAVAILABLE",
+        action: "PERMISSION_DENIED",
         ip: getClientIp(c),
         userId: c.get("auth")?.sub,
         gymId: c.get("auth")?.gymId,
         success: false,
         metadata: { requestedPermission: action },
     });
-    return c.json({ error: "Forbidden - Permission policy is not configured" }, 403);
+    return c.json({
+        error: "Forbidden - Permission required",
+        error_code: "PERMISSION_DENIED",
+        required_permission: action,
+    }, 403);
+});
+
+export const requirePermissionByMethod = (
+    readAction: string,
+    writeAction: string,
+    audit: SecurityAuditor = auditSecurityEvent,
+) => createMiddleware(async (c, next) => {
+    const action = READ_ONLY_METHODS.has(c.req.method) ? readAction : writeAction;
+    const auth = c.get("auth");
+    const permissions = c.get("permissions");
+    if (
+        auth?.sub &&
+        (auth.esPlataforma === true ||
+            (permissions?.has(action) && roleHasPermission(auth.role, action)))
+    ) {
+        await next();
+        return;
+    }
+    audit({
+        level: "WARN",
+        category: "AUTH",
+        action: "PERMISSION_DENIED",
+        ip: getClientIp(c),
+        userId: auth?.sub,
+        gymId: auth?.gymId,
+        success: false,
+        metadata: { requestedPermission: action },
+    });
+    return c.json({
+        error: "Forbidden - Permission required",
+        error_code: "PERMISSION_DENIED",
+        required_permission: action,
+    }, 403);
+});
+
+export const requireAnyPermission = (
+    ...actions: string[]
+) => createMiddleware(async (c, next) => {
+    const auth = c.get("auth");
+    if (
+        auth?.sub &&
+        (auth.esPlataforma === true ||
+            actions.some((action) =>
+                c.get("permissions")?.has(action) && roleHasPermission(auth.role, action)
+            ))
+    ) {
+        await next();
+        return;
+    }
+    auditSecurityEvent({
+        level: "WARN",
+        category: "AUTH",
+        action: "PERMISSION_DENIED",
+        ip: getClientIp(c),
+        userId: auth?.sub,
+        gymId: auth?.gymId,
+        success: false,
+        metadata: { requestedAnyPermission: actions },
+    });
+    return c.json({
+        error: "Forbidden - Permission required",
+        error_code: "PERMISSION_DENIED",
+        required_any_permission: actions,
+    }, 403);
 });

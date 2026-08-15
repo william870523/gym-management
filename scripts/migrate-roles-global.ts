@@ -54,10 +54,17 @@ async function migrar() {
   }
 
   const huella = await huellaDelCatalogo(prisma);
+  if (huella.asignaciones !== resultado.asignaciones) {
+    throw new Error(
+      `La matriz persistida tiene ${huella.asignaciones} enlaces; ` +
+        `el catálogo exige ${resultado.asignaciones}.`,
+    );
+  }
   console.log(
     `Migración remota de roles lista · roles ${resultado.roles} · permisos ` +
       `${resultado.permisos} · filas normalizadas ${resultado.normalizados} · ` +
-      `asignaciones intactas ${asignacionesDespues.n}`,
+      `usuarios↔roles intactos ${asignacionesDespues.n} · ` +
+      `roles↔permisos ${huella.asignaciones}`,
   );
   console.log(`Huella del catálogo: ${huella.huella}`);
   console.log(`Filas con gym_id no nulo: ${huella.conSede} (debe ser 0)`);

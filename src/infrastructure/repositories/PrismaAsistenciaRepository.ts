@@ -3,12 +3,14 @@ import type { AsistenciaRepository } from "../../domain/repositories/AsistenciaR
 import { prisma } from "../db/prismaClient";
 import { type SyncTransactionContext } from "../../application/use-cases/sync/sync-transaction";
 import { trustedClock } from "../../config/trusted-clock";
-import { calendarDayBoundsInZone, startOfDayInZone } from "../../config/tz";
+import { calendarDayBoundsInZone, datePartsInZone, startOfDayInZone } from "../../config/tz";
+import { env } from "../../config/env";
 import {
     softDeleteGymScopedSyncRecord,
     upsertGymScopedSyncRecord,
 } from "./gym-scoped-sync-write";
 import { assertGymScopedReference } from "./gym-scoped-reference";
+import { esVisitanteAutorizado } from "./visitante-referencia";
 
 const clienteSummary = {
     select: {
@@ -16,6 +18,10 @@ const clienteSummary = {
         nombres: true,
         apellidos: true,
         foto_cliente: true,
+        // M4a: visitante es quien pertenece a OTRA sede, no quien falta en la
+        // tabla. En el concentrador están TODAS las fichas, así que decidirlo
+        // por ausencia no marcaría a nadie nunca.
+        gym_id: true,
     },
 } as const;
 
@@ -37,17 +43,51 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
       : work(this.client);
   }
 
+  /**
+   * M4a — el socio de una asistencia es de esta sede… o un visitante
+   * autorizado. La excepción está acotada y se comprueba contra la base; ver
+   * `visitante-referencia.ts`.
+   *
+   * Vive aquí, y no repetida en cada camino, porque **los tres** —el alta por
+   * HTTP, la corrección por HTTP y la subida por sincronización— tienen que
+   * decir lo mismo. Cuando solo lo sabía la subida, el mostrador web daba
+   * «el cliente no pertenece al gimnasio autenticado» al visitante que el
+   * escritorio sí dejaba pasar: la misma puerta con dos respuestas.
+   */
+  private async esSocioAdmisible(tx: any, ci: string, gymId: string): Promise<boolean> {
+    const gym = await tx.gym.findUnique({
+      where: { gym_id: gymId },
+      select: { timezone: true },
+    });
+    const partes = datePartsInZone(
+      gym?.timezone?.trim() || env.defaultGymTimezone,
+      trustedClock.nowUtc(),
+    );
+    const fechaNegocio = new Date(Date.UTC(partes.year, partes.month - 1, partes.day));
+    if (await esVisitanteAutorizado({ tx, ci, gymId, fechaNegocio })) return true;
+    const propio = await tx.cliente.findFirst({
+      where: { ci, gym_id: gymId, is_deleted: false },
+      select: { ci: true },
+    });
+    return Boolean(propio);
+  }
+
     async upsertAsistencia(data: Asistencia): Promise<void> {
         const now = trustedClock.nowUtc();
         if (!data.gym_id) throw new Error("El evento de asistencia no tiene gimnasio autenticado.");
         await this.runInClient(async (tx) => {
-            await assertGymScopedReference({
-                delegate: tx.cliente,
-                entity: "cliente",
-                pk: "ci",
-                id: data.ci,
-                gymId: data.gym_id!,
-            });
+            // La subida comparte la regla con el alta por HTTP, pero conserva su
+            // redacción: el mensaje de `assertGymScopedReference` es el que la
+            // cuarentena guarda y por el que se auditan los rechazos de sync.
+            if (!(await this.esSocioAdmisible(tx, data.ci, data.gym_id!))) {
+                await assertGymScopedReference({
+                    delegate: tx.cliente,
+                    entity: "cliente",
+                    pk: "ci",
+                    id: data.ci,
+                    gymId: data.gym_id!,
+                });
+            }
             await upsertGymScopedSyncRecord({
             delegate: tx.asistencia,
             entity: "asistencia",
@@ -117,7 +157,7 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
             orderBy: { created_at: "desc" },
             include: { cliente: clienteSummary },
         });
-        return this.serializeClients(results);
+        return this.conVisitantes(this.serializeClients(results), gymId);
     }
 
     async findActive(gymId: string, skip: number = 0, take: number = 100): Promise<Asistencia[]> {
@@ -132,7 +172,7 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
             orderBy: { created_at: "desc" },
             include: { cliente: clienteSummary },
         });
-        return this.serializeClients(results);
+        return this.conVisitantes(this.serializeClients(results), gymId);
     }
 
     async findToday(gymId: string): Promise<Asistencia[]> {
@@ -158,7 +198,43 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
             orderBy: { created_at: "desc" },
             include: { cliente: clienteSummary },
         });
-        return this.serializeClients(results);
+        return this.conVisitantes(this.serializeClients(results), gymId);
+    }
+
+    /**
+     * M4a — rellena con la copia de visitante las filas cuyo socio no está en
+     * `cliente` de esta sede. Gemela de la del escritorio: sin esto, la
+     * entrada de un socio de otra sede sale sin nombre.
+     */
+    private async conVisitantes(results: any[], gymId: string): Promise<Asistencia[]> {
+        for (const fila of results) {
+            const sede = fila.cliente?.gym_id;
+            if (sede && sede !== gymId) {
+                fila.visitante = true;
+                fila.gym_id_origen = sede;
+            }
+        }
+        const sinFicha = results.filter((r) => !r.cliente).map((r) => r.ci);
+        if (sinFicha.length === 0) return results;
+        const copias = await this.client.clienteVisitante.findMany({
+            where: { ci: { in: sinFicha } },
+        });
+        const porCi = new Map(copias.map((c: any) => [c.ci, c]));
+        for (const fila of results) {
+            const copia: any = fila.cliente ? null : porCi.get(fila.ci);
+            if (!copia) continue;
+            fila.cliente = {
+                ci: copia.ci,
+                nombres: copia.nombres,
+                apellidos: copia.apellidos,
+                foto_cliente: Buffer.isBuffer(copia.foto_cliente)
+                    ? copia.foto_cliente.toString("base64")
+                    : null,
+            };
+            fila.visitante = true;
+            fila.gym_id_origen = copia.gym_id_origen;
+        }
+        return results;
     }
 
     private serializeClients(results: any[]): Asistencia[] {
@@ -183,11 +259,9 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
 
     async create(data: Asistencia): Promise<void> {
         if (!data.gym_id) throw new Error("El token debe identificar el gimnasio de la asistencia.");
-        const client = await this.client.cliente.findFirst({
-            where: { ci: data.ci, gym_id: data.gym_id, is_deleted: false },
-            select: { ci: true },
-        });
-        if (!client) throw new Error("El cliente no pertenece al gimnasio autenticado.");
+        if (!(await this.esSocioAdmisible(this.client, data.ci, data.gym_id))) {
+            throw new Error("El cliente no pertenece al gimnasio autenticado.");
+        }
         const now = trustedClock.nowUtc();
         await this.client.asistencia.create({
             data: {
@@ -207,12 +281,8 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
 
     async update(id: string, gymId: string, data: Partial<Asistencia>): Promise<void> {
         await this.runInClient(async (tx) => {
-            if (data.ci) {
-                const client = await tx.cliente.findFirst({
-                    where: { ci: data.ci, gym_id: gymId, is_deleted: false },
-                    select: { ci: true },
-                });
-                if (!client) throw new Error("El cliente no pertenece al gimnasio autenticado.");
+            if (data.ci && !(await this.esSocioAdmisible(tx, data.ci, gymId))) {
+                throw new Error("El cliente no pertenece al gimnasio autenticado.");
             }
             const result = await tx.asistencia.updateMany({
                 where: { asistencia_id: id, gym_id: gymId, is_deleted: false },

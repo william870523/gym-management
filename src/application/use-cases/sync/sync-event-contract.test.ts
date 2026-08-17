@@ -4,6 +4,8 @@ import {
   PARITY_SYNC_TARGET_DEFINITIONS,
   assertSyncPrimaryKeyOwnership,
   buildAuthenticatedSyncPayload,
+  GLOBAL_REACH_SYNC_ENTITIES,
+  GLOBAL_SYNC_ENTITIES,
   buildAuthoritativeGymRecord,
   normalizeSyncDates,
   optionalSyncVersion,
@@ -16,7 +18,7 @@ import {
 } from "./sync-event-contract";
 
 describe("contrato fail-closed de upload", () => {
-  it("declara las once entidades con pertenencia estricta", () => {
+  it("declara las trece entidades con pertenencia estricta", () => {
     expect([...PARITY_SYNC_ENTITIES]).toEqual([
       "usuario_sede",
       "gasto_categoria",
@@ -29,6 +31,8 @@ describe("contrato fail-closed de upload", () => {
       "tesoreria_cierre_periodo",
       "cliente_expediente_documento",
       "tipo_cambio_recargo",
+      "cliente_acceso_multisede",
+      "cliente_visitante",
     ]);
     expect(PARITY_SYNC_TARGET_DEFINITIONS.usuario_sede).toEqual({
       delegateKey: "usuarioSede",
@@ -145,6 +149,30 @@ describe("contrato fail-closed de upload", () => {
       gymId: "gym-auth",
       deviceId: "device-auth",
     })).toEqual({ moneda_id: "USD" });
+  });
+
+  it("el acceso multi-sede conserva su sede dueña: ni la pierde ni recibe la del emisor", () => {
+    // Las tres familias, una al lado de otra, porque la diferencia entre ellas
+    // es lo que M4a añadió y lo que se olvida al leer el código por encima:
+    // catálogo global pierde `gym_id`; entidad de sede recibe el del emisor;
+    // alcance global con dueño propio lo CONSERVA.
+    expect(buildAuthenticatedSyncPayload({
+      entity: "cliente_acceso_multisede",
+      payload: {
+        gym_id: "gym-oeste",
+        source_device: "device-atacante",
+        ci: "91021020015",
+      },
+      gymId: "gym-oeste",
+      deviceId: "device-auth",
+    })).toEqual({
+      gym_id: "gym-oeste",
+      source_device: "device-auth",
+      ci: "91021020015",
+    });
+    expect(GLOBAL_REACH_SYNC_ENTITIES.has("cliente_acceso_multisede")).toBe(true);
+    // El precio sí es catálogo de la cadena y no lleva sede ninguna.
+    expect(GLOBAL_SYNC_ENTITIES.has("acceso_multisede_precio")).toBe(true);
   });
 
   it("normaliza instantes sin convertir el mes contable en Date", () => {

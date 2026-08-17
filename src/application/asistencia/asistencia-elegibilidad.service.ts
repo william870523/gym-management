@@ -1,6 +1,9 @@
 import { prisma } from "../../infrastructure/db/prismaClient";
 import { PlanInstallmentService } from "../membership/plan-installment.service";
 import type { MembresiaParaEntrada } from "../../domain/asistencia-elegibilidad-policy";
+import { trustedClock } from "../../config/trusted-clock";
+import { datePartsInZone } from "../../config/tz";
+import { env } from "../../config/env";
 
 /**
  * Reúne los hechos que la política de entrada necesita, leyéndolos de MariaDB.
@@ -30,6 +33,44 @@ export class AsistenciaElegibilidadService {
     });
   }
 
+  /** Fecha de negocio de la sede, no la del servidor (docs/TIME_CONTRACT.md). */
+  async fechaDeNegocio(gymId: string): Promise<Date> {
+    const gym = await this.client.gym.findUnique({
+      where: { gym_id: gymId },
+      select: { timezone: true },
+    });
+    const partes = datePartsInZone(
+      gym?.timezone?.trim() || env.defaultGymTimezone,
+      trustedClock.nowUtc(),
+    );
+    return new Date(Date.UTC(partes.year, partes.month - 1, partes.day));
+  }
+
+  /** ¿Es socio de esta sede? Si no, se le atiende por el camino del visitante. */
+  async esSocioDeLaSede(ci: string, gymId: string): Promise<boolean> {
+    const propio = await this.client.cliente.findFirst({
+      where: { ci, gym_id: gymId, is_deleted: false },
+      select: { ci: true },
+    });
+    return Boolean(propio);
+  }
+
+  /**
+   * Copia de solo lectura y acceso multi-sede de un socio de otra sede (M4a).
+   * Son los únicos datos suyos que la sede visitada tiene.
+   */
+  async visitante(ci: string) {
+    const [copia, acceso] = await Promise.all([
+      this.client.clienteVisitante.findFirst({
+        where: { ci, is_deleted: false },
+      }),
+      this.client.clienteAccesoMultisede.findFirst({
+        where: { ci, is_deleted: false },
+      }),
+    ]);
+    return { copia, acceso };
+  }
+
   /**
    * Membresías vivas del socio con su bloqueo por cuota ya resuelto contra el
    * día de negocio de la sede y la gracia configurada.
@@ -45,14 +86,18 @@ export class AsistenciaElegibilidadService {
         is_deleted: false,
         estado: { in: ["ACTIVA", "PAUSADA", "PENDIENTE_PAGO"] },
       },
-      select: { estado: true, membresia_id: true },
+      select: { estado: true, membresia_id: true, fecha_fin: true },
     });
 
     const installmentService = new PlanInstallmentService();
     return Promise.all(
       membresias.map(async (membresia: any) => {
         if (membresia.estado !== "ACTIVA") {
-          return { estado: membresia.estado, bloqueoPorCuota: null };
+          return {
+            estado: membresia.estado,
+            fechaFin: membresia.fecha_fin,
+            bloqueoPorCuota: null,
+          };
         }
         const acceso = await installmentService.evaluateAccess(this.client, {
           gymId,
@@ -60,6 +105,7 @@ export class AsistenciaElegibilidadService {
         });
         return {
           estado: membresia.estado,
+          fechaFin: membresia.fecha_fin,
           bloqueoPorCuota: {
             bloqueada: acceso.hasQuotas && acceso.blocked,
             motivo: acceso.reason,

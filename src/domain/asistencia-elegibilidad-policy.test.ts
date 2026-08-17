@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   decidirEntrada,
+  decidirEntradaVisitante,
+  MOTIVO_COBERTURA_VENCIDA,
   MOTIVO_CUOTA_VENCIDA,
+  MOTIVO_VISITANTE_SIN_COPIA,
   MOTIVO_PAUSADA,
   MOTIVO_PENDIENTE_PAGO,
 } from "./asistencia-elegibilidad-policy";
@@ -160,5 +163,196 @@ describe("decidirEntrada · quién puede marcar entrada", () => {
         ],
       }),
     ).toEqual({ resultado: "PERMITIDA" });
+  });
+});
+
+/**
+ * M4a — la cobertura manda sobre el estado guardado.
+ *
+ * El defecto que cierran estas pruebas se comprobó por HTTP el 16-08-2026: el
+ * socio `79051931768`, cuya cobertura terminó el 2 de marzo, registró entrada
+ * con **201**. La regla miraba `estado` y nadie escribe nunca `VENCIDA`, así
+ * que una membresía muerta seguía diciendo `ACTIVA`. En aquella base eran 67
+ * socios en esa situación.
+ */
+describe("decidirEntrada · la cobertura vencida cierra el paso", () => {
+  const HOY = new Date("2026-08-16T00:00:00.000Z");
+
+  test("una ACTIVA cuya cobertura terminó ya no deja entrar", () => {
+    expect(
+      decidirEntrada({
+        tieneEntradaAbierta: false,
+        membresias: [{ estado: "ACTIVA", fechaFin: "2026-03-02T00:00:00.000Z" }],
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({
+      resultado: "BLOQUEADA",
+      status: 409,
+      motivo: MOTIVO_COBERTURA_VENCIDA,
+    });
+  });
+
+  test("`fecha_fin` es exclusiva: el día que figura ya no cubre", () => {
+    // El par distingue las dos ramas: el 17 cubre el día 16, el 16 no.
+    expect(
+      decidirEntrada({
+        tieneEntradaAbierta: false,
+        membresias: [{ estado: "ACTIVA", fechaFin: "2026-08-17T00:00:00.000Z" }],
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({ resultado: "PERMITIDA" });
+    expect(
+      decidirEntrada({
+        tieneEntradaAbierta: false,
+        membresias: [{ estado: "ACTIVA", fechaFin: "2026-08-16T00:00:00.000Z" }],
+        fechaNegocio: HOY,
+      }).resultado,
+    ).toBe("BLOQUEADA");
+  });
+
+  test("basta una que cubra: la vencida de al lado no estorba", () => {
+    expect(
+      decidirEntrada({
+        tieneEntradaAbierta: false,
+        membresias: [
+          { estado: "ACTIVA", fechaFin: "2026-03-02T00:00:00.000Z" },
+          { estado: "ACTIVA", fechaFin: "2026-09-30T00:00:00.000Z" },
+        ],
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({ resultado: "PERMITIDA" });
+  });
+
+  test("la mora solo la opinan las que cubren hoy", () => {
+    // La vencida está bloqueada por cuota, pero ya no cubre: dejarla hablar
+    // daría un motivo que no explica por qué no puede entrar.
+    expect(
+      decidirEntrada({
+        tieneEntradaAbierta: false,
+        membresias: [
+          {
+            estado: "ACTIVA",
+            fechaFin: "2026-03-02T00:00:00.000Z",
+            bloqueoPorCuota: { bloqueada: true, motivo: "Cuota 3 vencida." },
+          },
+          { estado: "ACTIVA", fechaFin: "2026-09-30T00:00:00.000Z" },
+        ],
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({ resultado: "PERMITIDA" });
+  });
+
+  test("sin fecha de negocio se comporta como antes: no puede hablar de fechas", () => {
+    expect(
+      decidirEntrada({
+        tieneEntradaAbierta: false,
+        membresias: [{ estado: "ACTIVA", fechaFin: "2026-03-02T00:00:00.000Z" }],
+      }),
+    ).toEqual({ resultado: "PERMITIDA" });
+  });
+});
+
+describe("decidirEntradaVisitante · el socio de otra sede", () => {
+  const HOY = new Date("2026-08-16T00:00:00.000Z");
+  const copiaVigente = {
+    membresia_estado: "ACTIVA",
+    membresia_fecha_fin: "2026-09-30T00:00:00.000Z",
+  };
+
+  test("con plus vigente y cobertura viva, entra", () => {
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: false,
+        visita: { resultado: "VISITANTE" },
+        copia: copiaVigente,
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({ resultado: "PERMITIDA" });
+  });
+
+  test("el plus bloqueado manda, y conserva su motivo", () => {
+    // Importa que el texto sobreviva: «no lo tiene» y «se le venció» se
+    // resuelven de maneras distintas en el mostrador.
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: false,
+        visita: {
+          resultado: "BLOQUEADA",
+          status: 409,
+          motivo: "El acceso multi-sede del socio venció.",
+        },
+        copia: copiaVigente,
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({
+      resultado: "BLOQUEADA",
+      status: 409,
+      motivo: "El acceso multi-sede del socio venció.",
+    });
+  });
+
+  test("sin copia no se entra: falla cerrado", () => {
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: false,
+        visita: { resultado: "VISITANTE" },
+        copia: null,
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({
+      resultado: "BLOQUEADA",
+      status: 409,
+      motivo: MOTIVO_VISITANTE_SIN_COPIA,
+    });
+    // Una copia sin membresía conocida es lo mismo que no tenerla: el caso
+    // «socio antiguo sin contrato» no aplica a quien no es de la casa.
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: false,
+        visita: { resultado: "VISITANTE" },
+        copia: { membresia_estado: null, membresia_fecha_fin: null },
+        fechaNegocio: HOY,
+      }).resultado,
+    ).toBe("BLOQUEADA");
+  });
+
+  test("el visitante con la cobertura vencida en su sede tampoco entra", () => {
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: false,
+        visita: { resultado: "VISITANTE" },
+        copia: {
+          membresia_estado: "ACTIVA",
+          membresia_fecha_fin: "2026-03-02T00:00:00.000Z",
+        },
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({
+      resultado: "BLOQUEADA",
+      status: 409,
+      motivo: MOTIVO_COBERTURA_VENCIDA,
+    });
+  });
+
+  test("una pausa en origen se lee igual que en casa", () => {
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: false,
+        visita: { resultado: "VISITANTE" },
+        copia: { membresia_estado: "PAUSADA", membresia_fecha_fin: null },
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({ resultado: "BLOQUEADA", status: 409, motivo: MOTIVO_PAUSADA });
+  });
+
+  test("quien ya está dentro no entra dos veces, venga de donde venga", () => {
+    expect(
+      decidirEntradaVisitante({
+        tieneEntradaAbierta: true,
+        visita: { resultado: "VISITANTE" },
+        copia: copiaVigente,
+        fechaNegocio: HOY,
+      }),
+    ).toEqual({ resultado: "YA_DENTRO" });
   });
 });

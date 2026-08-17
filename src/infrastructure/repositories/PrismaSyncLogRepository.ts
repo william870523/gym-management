@@ -83,6 +83,13 @@ export class PrismaSyncLogRepository implements SyncLogRepository {
                 "tipo_pago",
                 "tipo_cambio",
                 "referencia",
+                // M4a: el precio del plus es catálogo de la cadena, y la marca
+                // de un socio tiene que llegar a TODAS las sedes —no solo a la
+                // suya— o la sede visitada no sabría que puede dejarle entrar
+                // (docs/MULTI_SEDE.md §9-bis).
+                "acceso_multisede_precio",
+                "cliente_acceso_multisede",
+                "cliente_visitante",
               ],
             },
           },

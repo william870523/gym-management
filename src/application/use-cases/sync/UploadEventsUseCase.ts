@@ -27,6 +27,8 @@ import { reconcileFutureMembershipCoverage } from "../../../domain/membership-co
 import {
   PARITY_SYNC_ENTITIES,
   PARITY_SYNC_TARGET_DEFINITIONS,
+  ENTIDADES_SIN_COLUMNA_GYM_ID,
+  GLOBAL_REACH_SYNC_ENTITIES,
   GLOBAL_SYNC_ENTITIES,
   assertSyncPrimaryKeyOwnership,
   buildAuthenticatedSyncPayload,
@@ -48,6 +50,7 @@ import { delegateFor } from "./sync-transaction";
 import { usuarioSedeId } from "../../auth/usuario-sede";
 import { canonicalRole } from "../../../infrastructure/auth/permissions";
 import { surchargeScopeId } from "../../payment/rate-surcharge-scope.service";
+import { accesoMultisedeId } from "../../../domain/acceso-multisede-policy";
 
 /**
  * Resultado explícito del upload — Unidad 01, paso 4.
@@ -567,6 +570,12 @@ export class UploadEventsUseCase {
         "cliente_expediente_documento",
         "usuario_sede",
         "tipo_cambio_recargo",
+        // M4a. `acceso_multisede_precio` NO entra: el precio del plus es
+        // catálogo de la cadena y solo baja. Si una instalación lo subiera,
+        // cada sede podría fijar el suyo y el plus dejaría de ser un ingreso
+        // de la cadena.
+        "cliente_acceso_multisede",
+        "cliente_visitante",
       ].includes(ev.entidad)
     ) {
       await this.applyPrismaMappedEvent(
@@ -599,7 +608,13 @@ export class UploadEventsUseCase {
       });
     }
 
-    const effectiveGymId = GLOBAL_SYNC_ENTITIES.has(ev.entidad) ? null : gym_id;
+    // Un evento de alcance global se reemite con `gym_id: null` para que lo
+    // descargue cualquier instalación, aunque su fila tenga sede dueña.
+    const effectiveGymId =
+      GLOBAL_SYNC_ENTITIES.has(ev.entidad) ||
+      GLOBAL_REACH_SYNC_ENTITIES.has(ev.entidad)
+        ? null
+        : gym_id;
 
     // Registrar en sync_log, con el mismo tx que escribió la entidad.
     await this.syncLogRepository.register(
@@ -941,6 +956,16 @@ export class UploadEventsUseCase {
       deviceId,
     });
 
+    // `buildAuthoritativeGymRecord` estampa `gym_id` SIEMPRE, porque hasta M4a
+    // todo lo que pasaba por aquí era de sede. `cliente_visitante` no tiene esa
+    // columna —su sede vive en `gym_id_origen`— y Prisma rechaza el argumento
+    // desconocido, tumbando el lote entero por el orden estricto de la cola.
+    //
+    // Esto no lo veían las pruebas: la prueba del contrato ejercita
+    // `buildAuthenticatedSyncPayload`, que es el payload del `sync_log`, no el
+    // registro que se escribe. Dos funciones parecidas, dos caminos distintos.
+    if (ENTIDADES_SIN_COLUMNA_GYM_ID.has(ev.entidad)) delete record.gym_id;
+
     if (ev.entidad === "cliente_expediente_documento") {
       if (operation !== "INSERT") {
         throw new Error(
@@ -998,20 +1023,42 @@ export class UploadEventsUseCase {
       record.contenido = content;
     }
 
-    // Todas las entidades que llegan por el mapper son de gimnasio. La PK es
-    // global en Prisma, pero jamás puede usarse para reasignar una fila de
+    // Casi todas las entidades que llegan por el mapper son de gimnasio. La PK
+    // es global en Prisma, pero jamás puede usarse para reasignar una fila de
     // otro tenant mediante un upsert.
-    const existingOwnedRecord: { gym_id: string | null } | null =
-      await target.delegate.findUnique({
+    //
+    // `cliente_visitante` es la excepción declarada: **no tiene columna
+    // `gym_id`**, su sede vive en `gym_id_origen`. Preguntarle por `gym_id`
+    // haría fallar el `select` de Prisma y tumbaría la cola entera. Su
+    // pertenencia se comprueba unas líneas más abajo, contra `gym_id_origen` y
+    // la sede del dispositivo, que es la misma garantía por otro campo.
+    const sinColumnaGym = ENTIDADES_SIN_COLUMNA_GYM_ID.has(ev.entidad);
+    // Acotar por sede es lo que impide reasignar una fila ajena con un upsert.
+    // Donde no hay columna que acotar, el filtro se queda vacío y la garantía
+    // la da la validación por `gym_id_origen` de arriba.
+    const filtroDeSede = sinColumnaGym ? {} : { gym_id: gymId };
+    let existingOwnedRecord: { gym_id: string | null } | null = null;
+    let filaPrevia = false;
+    if (sinColumnaGym) {
+      filaPrevia = Boolean(
+        await target.delegate.findUnique({
+          where: { [target.pk]: primaryKey },
+          select: { [target.pk]: true },
+        }),
+      );
+    } else {
+      existingOwnedRecord = await target.delegate.findUnique({
         where: { [target.pk]: primaryKey },
         select: { gym_id: true },
       });
-    assertSyncPrimaryKeyOwnership({
-      entity: ev.entidad,
-      primaryKey,
-      gymId,
-      existingRecord: existingOwnedRecord,
-    });
+      assertSyncPrimaryKeyOwnership({
+        entity: ev.entidad,
+        primaryKey,
+        gymId,
+        existingRecord: existingOwnedRecord,
+      });
+      filaPrevia = Boolean(existingOwnedRecord);
+    }
 
     if (ev.entidad === "usuario_sede") {
       const userId = String(record.user_id ?? "").trim();
@@ -1032,6 +1079,64 @@ export class UploadEventsUseCase {
       record.rol = role;
       // `gym_id` y `source_device` ya fueron reemplazados por el mapper con
       // los valores del dispositivo autenticado; nunca manda el payload.
+    }
+
+    if (ev.entidad === "cliente_acceso_multisede") {
+      // Esta entidad conserva su `gym_id` en vez de recibir el del emisor
+      // (alcance global con dueño propio), así que la validación es lo único
+      // que impide a una instalación declararse dueña de un socio ajeno.
+      const ci = String(record.ci ?? "").trim();
+      const duena = String(record.gym_id ?? "").trim();
+      const vigenteHasta = record.vigente_hasta
+        ? new Date(record.vigente_hasta as any)
+        : null;
+      if (
+        !ci ||
+        String(primaryKey) !== accesoMultisedeId(ci) ||
+        // Mientras el cobro por cuenta ajena (M4b) no exista, una sede solo
+        // puede marcar a los suyos. Cuando exista, esta condición se relaja
+        // junto con el saldo entre sedes, no antes.
+        duena !== gymId ||
+        !vigenteHasta ||
+        Number.isNaN(vigenteHasta.getTime())
+      ) {
+        throw new Error(
+          "El acceso multi-sede no conserva identificación, identidad determinista, sede dueña o vigencia válidas.",
+        );
+      }
+      record.ci = ci;
+      record.gym_id = duena;
+    }
+
+    if (ev.entidad === "cliente_visitante") {
+      // Solo la sede de origen proyecta y retira a sus socios. Aceptar una copia
+      // que declare otra sede dejaría a cualquier instalación reescribir —o
+      // borrar— la ficha de un socio ajeno en todas las demás.
+      //
+      // **La baja se comprueba igual que el alta**, y esto costó encontrarlo:
+      // saltarse el DELETE dejó que una sede retirara la copia de una socia de
+      // otra, y la cola lo aplicó sin rechistar (16-08-2026). Es el mismo
+      // agujero que el borde HTTP tenía en `deleteAccesoMultisedeCliente`.
+      //
+      // Cuando el evento no declara origen —payload mínimo de una baja
+      // antigua— se lee el de la fila que ya existe. Sin ninguno de los dos, se
+      // rechaza: falla cerrado.
+      const ci = String(record.ci ?? "").trim() || String(primaryKey).trim();
+      let origen = String(record.gym_id_origen ?? "").trim();
+      if (!origen) {
+        const existente = await client.clienteVisitante.findUnique({
+          where: { ci },
+          select: { gym_id_origen: true },
+        });
+        origen = String(existente?.gym_id_origen ?? "").trim();
+      }
+      if (!ci || String(primaryKey) !== ci || origen !== gymId) {
+        throw new Error(
+          "La copia de visitante no identifica al socio o declara una sede de origen que no es la del emisor.",
+        );
+      }
+      record.ci = ci;
+      record.gym_id_origen = origen;
     }
 
     // R5.4 — convergencia del aviso de administración: **«leído» gana y nunca
@@ -1904,7 +2009,7 @@ export class UploadEventsUseCase {
       const now = trustedClock.nowUtc();
       const version = optionalSyncVersion(payload, ev.entidad);
       const deleted = await target.delegate.updateMany({
-        where: { [target.pk]: record[target.pk], gym_id: gymId },
+        where: { [target.pk]: record[target.pk], ...filtroDeSede },
         data: {
           is_deleted: true,
           deleted_at: now,
@@ -1912,7 +2017,7 @@ export class UploadEventsUseCase {
           ...(version === undefined ? {} : { version }),
         },
       });
-      if (existingOwnedRecord && deleted.count !== 1) {
+      if (filaPrevia && deleted.count !== 1) {
         throw new Error(
           `No se pudo eliminar ${ev.entidad} ${String(primaryKey)} ` +
             "dentro del gimnasio autenticado.",
@@ -1921,9 +2026,9 @@ export class UploadEventsUseCase {
       return;
     }
 
-    if (existingOwnedRecord) {
+    if (filaPrevia) {
       const updated = await target.delegate.updateMany({
-        where: { [target.pk]: primaryKey, gym_id: gymId },
+        where: { [target.pk]: primaryKey, ...filtroDeSede },
         data: record,
       });
       if (updated.count !== 1) {

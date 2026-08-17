@@ -38,6 +38,11 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
     delegateKey: "tipoCambioRecargo",
     pk: "tipo_cambio_recargo_id",
   },
+  cliente_acceso_multisede: {
+    delegateKey: "clienteAccesoMultisede",
+    pk: "cliente_acceso_multisede_id",
+  },
+  cliente_visitante: { delegateKey: "clienteVisitante", pk: "ci" },
 } as const;
 
 export const PARITY_SYNC_ENTITIES = new Set<string>(
@@ -52,6 +57,49 @@ export const GLOBAL_SYNC_ENTITIES = new Set<string>([
   "tipo_pago",
   "tipo_cambio",
   "referencia",
+  // M4a: el precio del plus multi-sede es catálogo de la cadena. Sin `gym_id`
+  // en el esquema, igual que sus vecinos de esta lista.
+  "acceso_multisede_precio",
+]);
+
+/**
+ * Alcance global **con dueño propio**: el evento llega a todas las sedes, pero
+ * el payload **conserva su `gym_id`** en vez de perderlo o de recibir el de
+ * quien lo aplica.
+ *
+ * Es un tercer caso, y hasta M4a no estaba declarado en ninguna parte: `user`
+ * ya se comportaba así —la cuenta del Dueño se emite con `gym_id: null` y
+ * conserva su sede principal— pero por un apaño en el receptor, no por una
+ * regla.
+ *
+ * `cliente_acceso_multisede` lo necesita de verdad: la marca tiene que llegar a
+ * **todas** las sedes para que la visitada sepa que puede dejar entrar
+ * (§9-bis), y a la vez el socio **sigue siendo de su sede**. Si el payload
+ * perdiera el `gym_id` nadie sabría de quién es el ingreso; si recibiera el de
+ * la sede que aplica el evento, cada instalación se apropiaría del socio al
+ * sincronizar —y el cobro cruzado de M4b acabaría atribuido a la sede
+ * equivocada, que es el riesgo más caro que nombra §7.10—.
+ */
+export const GLOBAL_REACH_SYNC_ENTITIES = new Set<string>([
+  "cliente_acceso_multisede",
+  // La copia de solo lectura del visitante lleva su sede en
+  // `gym_id_origen`, un nombre distinto a propósito para que ningún camino
+  // genérico la confunda con «la sede de esta fila» y se la reescriba.
+  "cliente_visitante",
+]);
+
+/**
+ * Entidades sincronizadas que **no tienen columna `gym_id`** y cuya pertenencia
+ * se comprueba por otro campo.
+ *
+ * Existe para que el aserto genérico de pertenencia no le pida `gym_id` a una
+ * tabla que no lo declara: Prisma rechazaría el `select` y, por el orden
+ * estricto de la cola, el fallo se llevaría por delante todos los eventos
+ * siguientes. Es el mismo tipo de avería que costó dos días de descargas
+ * paradas con `is_deleted` en `gym` y `device`.
+ */
+export const ENTIDADES_SIN_COLUMNA_GYM_ID = new Set<string>([
+  "cliente_visitante",
 ]);
 
 /**
@@ -234,6 +282,15 @@ export function buildAuthenticatedSyncPayload(input: {
   if (GLOBAL_SYNC_ENTITIES.has(input.entity) || input.entity === "gym") {
     delete record.gym_id;
     delete record.source_device;
+    return record;
+  }
+
+  if (GLOBAL_REACH_SYNC_ENTITIES.has(input.entity)) {
+    // El `gym_id` se conserva: es la sede DUEÑA del socio, no la del emisor.
+    // Que el emisor no pueda mentir lo garantiza la validación previa, que
+    // exige que coincida con la sede del dispositivo mientras el cobro por
+    // cuenta ajena (M4b) no exista.
+    record.source_device = input.deviceId;
     return record;
   }
 

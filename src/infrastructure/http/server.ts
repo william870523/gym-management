@@ -31,6 +31,7 @@ import { catalogsRoutes } from "./routes/catalogs.routes";
 import * as catalogs from "./controllers/catalogs.controller";
 import { gymsRoutes } from "./routes/gyms.routes";
 import { clientsRoutes } from "./routes/clients.routes";
+import { accesoMultisedeRoutes } from "./routes/acceso-multisede.routes";
 import { trainersRoutes } from "./routes/trainers.routes";
 import { paymentsRoutes } from "./routes/payments.routes";
 import { usersRoutes } from "./routes/users.routes";
@@ -163,6 +164,21 @@ clientsProtected.use("*", requirePermissionByMethod("clientes.leer", "clientes.e
 clientsProtected.use("*", adminLimiter);
 clientsProtected.route("/", clientsRoutes());
 app.route("/clients", clientsProtected);
+
+// M4a — acceso multi-sede. Se lee con `clientes.leer` y se marca con
+// `clientes.escribir`, porque marcar es un dato del socio y lo hace recepción
+// (docs/MULTI_SEDE.md §9, segunda ronda, respuesta 1). Cambiar el PRECIO no
+// entra por esta puerta: lo guarda `requirePlatformAuthority` en la propia ruta,
+// que es la autoridad de cadena y no un permiso de sede.
+const accesoMultisedeProtected = new Hono();
+accesoMultisedeProtected.use("*", authUser());
+accesoMultisedeProtected.use(
+  "*",
+  requirePermissionByMethod("clientes.leer", "clientes.escribir"),
+);
+accesoMultisedeProtected.use("*", adminLimiter);
+accesoMultisedeProtected.route("/", accesoMultisedeRoutes);
+app.route("/acceso-multisede", accesoMultisedeProtected);
 
 const trainersProtected = new Hono();
 trainersProtected.use("*", authUser());

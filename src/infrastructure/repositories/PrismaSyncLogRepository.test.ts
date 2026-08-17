@@ -15,6 +15,15 @@ import { PrismaSyncLogRepository } from "./PrismaSyncLogRepository";
  *   las dos bases; si no, el correo único hace chocar el evento y bloquea la
  *   cola (`repair:user-identity` alinea identidades).
  *
+ * Y creció otra vez con M4a (docs/MULTI_SEDE.md §9-bis):
+ *
+ * - `acceso_multisede_precio`: el precio del plus es catálogo de la cadena.
+ * - `cliente_acceso_multisede`: la marca de un socio tiene que llegar a TODAS
+ *   las sedes —no solo a la suya— o la sede visitada no sabría que puede
+ *   dejarle entrar. Es el marcador de acceso, **no la ficha del socio**: no
+ *   lleva datos personales ni financieros, solo a quién se le vendió el plus,
+ *   de qué sede es y hasta cuándo cubre.
+ *
  * Lo que no puede cambiar: nada de dinero, clientes o planes viaja por la vía
  * global.
  */
@@ -43,6 +52,9 @@ describe("aislamiento de descarga remota", () => {
             "tipo_pago",
             "tipo_cambio",
             "referencia",
+            "acceso_multisede_precio",
+            "cliente_acceso_multisede",
+            "cliente_visitante",
           ],
         },
       },
@@ -58,7 +70,13 @@ describe("aislamiento de descarga remota", () => {
       },
     });
     await repository.findChanges({ afterId: 10 }, 20, "gym-auth");
-    const global = JSON.stringify(query.where.OR);
+    // Comparación por nombre EXACTO, no por subcadena. La versión anterior
+    // buscaba «cliente» dentro del JSON y habría rechazado
+    // `cliente_acceso_multisede`, que es el marcador del plus y no la ficha del
+    // socio. Una prueba que confunde dos entidades por parecerse en el nombre
+    // acaba prohibiendo lo correcto o —peor— dejando pasar lo que sí importa
+    // el día que alguien la relaje para que compile.
+    const globales: string[] = query.where.OR[1].entidad.in;
     for (const entidad of [
       "planes_pago",
       "cliente",
@@ -69,7 +87,7 @@ describe("aislamiento de descarga remota", () => {
       "asistencia",
       "cuenta",
     ]) {
-      expect(global).not.toContain(entidad);
+      expect(globales).not.toContain(entidad);
     }
     // El ámbito por sede sigue siendo la primera condición de la consulta.
     expect(query.where.OR[0]).toEqual({ gym_id: "gym-auth" });

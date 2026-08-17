@@ -3,7 +3,14 @@ import type { CreateAsistenciaDTO } from "../../dtos/AsistenciaDTO";
 import type { Asistencia } from "../../../domain/entities/Asistencia";
 import type { AsistenciaRepository } from "../../../domain/repositories/AsistenciaRepository";
 import { trustedClock } from "../../../config/trusted-clock";
-import { decidirEntrada } from "../../../domain/asistencia-elegibilidad-policy";
+import {
+    decidirEntrada,
+    decidirEntradaVisitante,
+} from "../../../domain/asistencia-elegibilidad-policy";
+import {
+    decidirVisita,
+    esVisitanteDeOtraSede,
+} from "../../../domain/acceso-multisede-policy";
 import { AsistenciaElegibilidadService } from "../../asistencia/asistencia-elegibilidad.service";
 
 /** Rechazo de negocio, no fallo del sistema: se traduce a 409. */
@@ -34,15 +41,24 @@ export class CreateAsistenciaUseCase {
         // marcar la entrada de un socio pausado, pendiente de pago o con la
         // cuota vencida, y marcarla dos veces. El mostrador nunca lo permitió.
         // La regla es la misma para las dos superficies y vive en el dominio.
-        const [entradaAbierta, membresias] = await Promise.all([
+        const [entradaAbierta, fechaNegocio, esPropio] = await Promise.all([
             this.elegibilidad.entradaAbierta(dto.ci, gymId),
-            this.elegibilidad.membresiasParaEntrada(dto.ci, gymId),
+            this.elegibilidad.fechaDeNegocio(gymId),
+            this.elegibilidad.esSocioDeLaSede(dto.ci, gymId),
         ]);
 
-        const decision = decidirEntrada({
-            tieneEntradaAbierta: Boolean(entradaAbierta),
-            membresias,
-        });
+        // M4a — el socio de otra sede se decide con lo único que hay de él
+        // aquí: su copia de solo lectura y su acceso multi-sede.
+        const decision = esPropio
+            ? decidirEntrada({
+                tieneEntradaAbierta: Boolean(entradaAbierta),
+                membresias: await this.elegibilidad.membresiasParaEntrada(
+                    dto.ci,
+                    gymId,
+                ),
+                fechaNegocio,
+            })
+            : await this.decidirVisitante(dto.ci, gymId, Boolean(entradaAbierta), fechaNegocio);
 
         // La entrada es idempotente por socio: repetirla devuelve la misma fila
         // y no genera otro evento de sincronización, como en el escritorio.
@@ -69,5 +85,40 @@ export class CreateAsistenciaUseCase {
 
         await this.asistenciaRepository.create(newAsistencia);
         return { asistencia: newAsistencia, creada: true };
+    }
+
+    /**
+     * Entrada de un socio de otra sede (M4a, docs/MULTI_SEDE.md §5.2).
+     *
+     * Gemelo del camino del escritorio: la sede visitada no tiene sus
+     * membresías, así que decide con la copia replicada y el plus. Sin copia
+     * viva no es un visitante, es un desconocido, y se le trata como tal.
+     */
+    private async decidirVisitante(
+        ci: string,
+        gymId: string,
+        tieneEntradaAbierta: boolean,
+        fechaNegocio: Date,
+    ) {
+        const { copia, acceso } = await this.elegibilidad.visitante(ci);
+        if (!esVisitanteDeOtraSede(copia, gymId)) {
+            return {
+                resultado: "BLOQUEADA" as const,
+                status: 409 as const,
+                motivo:
+                    "El socio no pertenece a esta sede y no tiene acceso multi-sede vigente.",
+            };
+        }
+        return decidirEntradaVisitante({
+            tieneEntradaAbierta,
+            visita: decidirVisita({
+                gymIdDelSocio: copia.gym_id_origen,
+                gymIdDeLaSede: gymId,
+                acceso,
+                fechaNegocio,
+            }),
+            copia,
+            fechaNegocio,
+        });
     }
 }

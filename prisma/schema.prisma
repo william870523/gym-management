@@ -246,16 +246,16 @@ model TipoCambio {
 /// otro valor es una excepción de esa sede. No se declara FK a Gym porque el
 /// scope GLOBAL es deliberado y no representa una sede física.
 model TipoCambioRecargo {
-  tipo_cambio_recargo_id String   @id
+  tipo_cambio_recargo_id String    @id
   tipo_cambio_id         String
   tipo_pago_id           String
-  gym_id                 String   @default("GLOBAL")
-  porcentaje             Decimal  @db.Decimal(5, 2)
+  gym_id                 String    @default("GLOBAL")
+  porcentaje             Decimal   @db.Decimal(5, 2)
   source_device          String?
-  is_deleted             Boolean  @default(false)
-  created_at             DateTime @default(now())
-  version                Int      @default(1)
-  updated_at             DateTime @default(now())
+  is_deleted             Boolean   @default(false)
+  created_at             DateTime  @default(now())
+  version                Int       @default(1)
+  updated_at             DateTime  @default(now())
   deleted_at             DateTime?
 
   @@unique([tipo_cambio_id, tipo_pago_id, gym_id])
@@ -1533,6 +1533,105 @@ model Cliente {
   @@map("cliente")
 }
 
+/// M4a — precio del acceso multi-sede, el «plus» (docs/MULTI_SEDE.md §9-bis y
+/// §9 segunda ronda, respuesta 2). Catálogo global de la cadena: una sola fila
+/// `GLOBAL`, que fija el administrador y ninguna sede puede cambiar.
+///
+/// No lleva `gym_id`, como el resto de catálogos globales. Un precio por sede
+/// convertiría el plus en ingreso de la sede que cobra, que es exactamente lo
+/// que §5.1 prohíbe: inflaría su margen y el consolidado contaría dos veces el
+/// mismo dinero.
+model AccesoMultisedePrecio {
+  acceso_multisede_precio_id String    @id
+  precio                     Decimal
+  moneda_id                  String
+  source_device              String?
+  is_deleted                 Boolean   @default(false)
+  created_at                 DateTime  @default(now())
+  version                    Int       @default(1)
+  updated_at                 DateTime  @default(now())
+  deleted_at                 DateTime?
+
+  @@map("acceso_multisede_precio")
+}
+
+/// M4a — copia de **solo lectura** de un socio con acceso multi-sede, para que
+/// la sede que visita pueda encontrarlo y atenderlo (docs/MULTI_SEDE.md §5.2).
+///
+/// **Es una tabla aparte, y no una fila más en `cliente`, a propósito.** El
+/// padrón se consulta desde decenas de sitios y no todos filtran por `gym_id`:
+/// meter ahí al visitante haría que apareciera en el conteo de socios, en la
+/// estadística y en la facturación de una sede que no lo tiene contratado. El
+/// día que una sola consulta se olvidara del filtro, la avería sería contable.
+/// Con tabla propia, quien quiera visitantes tiene que pedirlos.
+///
+/// **Lleva a la persona, no su caja** (§9-bis): identidad, foto y el estado de
+/// su membresía en origen. Ni pagos, ni plan, ni entrenador, ni historial.
+///
+/// **`membresia_fecha_fin` se guarda; «si cubre hoy» NO.** Es la misma decisión
+/// que `membership-vigencia.ts`: la cobertura es una función de fechas y un
+/// booleano copiado envejece mal —diría «vigente» durante días después de
+/// dejar de serlo, en la sede que menos contexto tiene para dudarlo—.
+model ClienteVisitante {
+  ci                  String    @id
+  /// Sede DUEÑA del socio. Se llama así, y no `gym_id`, para que ningún camino
+  /// genérico de sincronización la confunda con «la sede de esta fila» y le
+  /// estampe la local.
+  gym_id_origen       String
+  nombres             String
+  apellidos           String
+  tipo_documento      String    @default("DESCONOCIDO")
+  foto_cliente        Bytes?    @db.LongBlob
+  /// Estado persistido de su membresía en origen: el acto, no la cobertura.
+  membresia_estado    String?
+  /// Fin de cobertura EXCLUSIVO, como `membresia_cliente.fecha_fin`.
+  membresia_fecha_fin DateTime?
+
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@index([gym_id_origen, is_deleted])
+  @@map("cliente_visitante")
+}
+
+/// M4a — acceso multi-sede de un socio: una **segunda suscripción** con su
+/// propio ciclo mensual, independiente del plan (docs/MULTI_SEDE.md §9-bis).
+///
+/// `gym_id` es la sede **dueña del socio**, no la que lo marcó. La fila viaja a
+/// todas las instalaciones y el receptor **no debe estamparle la suya**: si lo
+/// hiciera, el visitante se convertiría en socio de la sede que visita y su
+/// cobro dejaría de pertenecer a la sede de origen.
+///
+/// `precio_snapshot` se congela al marcar, como en el recargo por mora: un
+/// cambio del precio global no puede reescribir lo que alguien ya pagó.
+model ClienteAccesoMultisede {
+  cliente_acceso_multisede_id String   @id
+  ci                          String   @unique
+  gym_id                      String?
+  activo                      Boolean  @default(true)
+  /// Fin de vigencia EXCLUSIVO, igual que `membresia_cliente.fecha_fin`.
+  vigente_hasta               DateTime
+  precio_snapshot             Decimal
+  moneda_id                   String
+  marcado_por_user_id         String
+  marcado_en_gym_id           String
+
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@index([gym_id, activo, is_deleted])
+  @@index([vigente_hasta])
+  @@map("cliente_acceso_multisede")
+}
+
 model Asistencia {
   asistencia_id String    @id
   ci            String
@@ -1549,6 +1648,13 @@ model Asistencia {
   pausa_inicio  DateTime?
   pausa_ms      Int       @default(0)
 
+  /// M4a — la relación se conserva porque las lecturas de asistencia hacen
+  /// `include: { cliente }` para pintar nombre y foto, pero **la clave foránea
+  /// ya no existe en ninguna de las dos bases**: un socio con acceso multi-sede
+  /// entrena donde no está su ficha, y la restricción hacía imposible guardar su
+  /// entrada (docs/MULTI_SEDE.md §5.2). Quien vigila que cada `ci` cuelgue de
+  /// `cliente` o de `cliente_visitante` es `verificar-huerfanos-sync.ts`.
+  /// Migración: `migrate:asistencia-visitante`.
   cliente Cliente @relation(fields: [ci], references: [ci])
 
   @@map("asistencia")

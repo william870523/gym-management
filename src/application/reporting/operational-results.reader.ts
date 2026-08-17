@@ -8,6 +8,8 @@ export type OperationalMovementReadRow = {
   movementId: string;
   direction: "ENTRADA" | "SALIDA";
   concept: string;
+  /** `origen_tipo`. M4b lo necesita para reconocer el cobro por cuenta ajena. */
+  sourceType: string | null;
   accountId: string | null;
   currencyId: string;
   amount: string;

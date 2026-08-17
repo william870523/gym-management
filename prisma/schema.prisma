@@ -2001,3 +2001,100 @@ model AvisoAdministracion {
   @@index([gym_id, leido, created_at], map: "idx_aviso_admin_bandeja")
   @@map("aviso_administracion")
 }
+
+
+/// Libro del saldo entre partes: «efectivo aquí, ingreso allá» (M4b,
+/// docs/MULTI_SEDE.md §5.4).
+///
+/// Es un libro de ASIENTOS y no un saldo guardado, a propósito. El saldo se
+/// suma al leer. Un número guardado se descuadra en silencio el día que un
+/// reverso se aplique a medias, y nadie lo nota hasta que alguien reclama
+/// dinero; un libro no puede: o el contraasiento está o no está, y se ve.
+///
+/// La fila pertenece a la sede DEUDORA —aquella en cuya caja quedó el
+/// efectivo—, que es la misma que la emite. Por eso es una entidad de sede
+/// corriente y no necesita el alcance global de M4a.
+model SaldoEnlaceAsiento {
+  asiento_id      String   @id
+  /// Sede en cuya caja quedó el efectivo: la que debe.
+  gym_id          String
+  /// SEDE | CADENA. La cadena no tiene `gym_id`: no es una sede más.
+  acreedor_tipo   String
+  /// Nulo exactamente cuando el acreedor es la cadena.
+  acreedor_gym_id String?
+  moneda_id       String
+  /// Siempre positivo. El signo lo pone `sentido`, no el importe: un importe
+  /// negativo suelto se suma mal en cuanto alguien filtra sin mirar.
+  monto           Decimal
+  /// GENERA | DESHACE
+  sentido         String
+  /// PLAN | PLUS_MULTISEDE
+  clase_cobro     String
+  origen_tipo     String
+  origen_id       String
+  /// Idempotencia: reintentar la misma operación no duplica el asiento.
+  clave_origen    String
+  /// Socio del cobro, para poder auditar el saldo por persona.
+  ci              String?
+  ocurrido_at     DateTime
+  /// Fecha de negocio de la sede deudora, no la del servidor.
+  fecha_negocio   DateTime
+
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@unique([gym_id, clave_origen], map: "uq_saldo_enlace_gym_origen")
+  @@index([gym_id, acreedor_tipo, acreedor_gym_id, moneda_id], map: "idx_saldo_enlace_acreedor")
+  @@index([gym_id, fecha_negocio], map: "idx_saldo_enlace_gym_dia")
+  @@index([gym_id, origen_tipo, origen_id], map: "idx_saldo_enlace_origen")
+  @@map("saldo_enlace_asiento")
+}
+
+/// Cobro del plus multi-sede (M4b, docs/MULTI_SEDE.md §5.1 y §9-bis).
+///
+/// **No es un `PagoCliente`, y no por comodidad.** El plus «no es un atributo
+/// del plan, es una segunda suscripción» con su propio ciclo, y `pago_cliente`
+/// exige `id_planes_pago`: meterlo ahí obligaría a inventar un plan falso que
+/// después aparecería en los informes de planes como si alguien lo hubiera
+/// contratado.
+///
+/// `gym_id` es la sede que **cobró** —donde entró el efectivo—, que es la dueña
+/// de la fila y la que la emite. El ingreso, en cambio, es de la cadena
+/// siempre: eso no se guarda aquí, se deriva de la política y queda escrito en
+/// el asiento del saldo.
+model AccesoMultisedeCobro {
+  cobro_id                    String   @id
+  ci                          String
+  /// Sede en cuya caja entró el dinero.
+  gym_id                      String
+  cliente_acceso_multisede_id String
+  importe                     Decimal
+  moneda_id                   String
+  /// Periodo cubierto por este cobro. `cubre_hasta` es EXCLUSIVA, igual que
+  /// `vigente_hasta` del plus y que `fecha_fin` de una membresía.
+  cubre_desde                 DateTime
+  cubre_hasta                 DateTime
+  tipo_pago_id                String?
+  cuenta_id                   String?
+  /// R5.6: quién recibió el dinero, revalidado en servidor.
+  cobrado_por_user_id         String
+  cobrado_por_nombre_snapshot String
+  cobrado_por_rol_snapshot    String?
+  cobrado_por_origen          String?
+  fecha                       DateTime
+
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@index([gym_id, fecha], map: "idx_acc_multisede_cobro_gym_fecha")
+  @@index([ci, cubre_hasta], map: "idx_acc_multisede_cobro_ci")
+  @@map("acceso_multisede_cobro")
+}

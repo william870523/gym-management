@@ -18,7 +18,7 @@ import {
 } from "./sync-event-contract";
 
 describe("contrato fail-closed de upload", () => {
-  it("declara las trece entidades con pertenencia estricta", () => {
+  it("declara las quince entidades con pertenencia estricta", () => {
     expect([...PARITY_SYNC_ENTITIES]).toEqual([
       "usuario_sede",
       "gasto_categoria",
@@ -33,6 +33,8 @@ describe("contrato fail-closed de upload", () => {
       "tipo_cambio_recargo",
       "cliente_acceso_multisede",
       "cliente_visitante",
+      "saldo_enlace_asiento",
+      "acceso_multisede_cobro",
     ]);
     expect(PARITY_SYNC_TARGET_DEFINITIONS.usuario_sede).toEqual({
       delegateKey: "usuarioSede",

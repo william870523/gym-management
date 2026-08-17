@@ -74,6 +74,59 @@ describe("operational results policy", () => {
     expect(eur.ledgerNetMinor).toBe(1_200n);
   });
 
+  // M4b — «efectivo aquí, ingreso allá». El ámbito nuevo existe para que el
+  // dinero cobrado por cuenta de otro esté en el libro y fuera del resultado,
+  // y a la vez se vea en su propia línea: de ahí sale la deuda que alguien va
+  // a reclamar (docs/MULTI_SEDE.md §5.3 y §7.10).
+  test("el cobro por cuenta ajena queda fuera del flujo operativo y dentro del libro", () => {
+    const [cup] = summarizeOperationalMovements([
+      movement("cup", "PLAN_CLIENTE", "ENTRADA", 10_000n),
+      movement("cup", "COBRO_PLUS_MULTISEDE", "ENTRADA", 15_000n, "COBRO_CUENTA_AJENA"),
+    ]);
+    expect(cup.operationalNetMinor).toBe(10_000n);
+    expect(cup.scopeTotals.POR_CUENTA_AJENA).toBe(15_000n);
+    expect(cup.ledgerNetMinor).toBe(25_000n);
+    // No es algo «a revisar»: está perfectamente clasificado.
+    expect(cup.reviewCount).toBe(0);
+  });
+
+  test("el plus es de la cadena aunque el concepto llegue sin origen", () => {
+    // Los conceptos conocidos se mapean solos, para la historia ya emitida.
+    const clasificacion = classifyOperationalMovement({
+      concept: "COBRO_PLUS_MULTISEDE",
+      direction: "ENTRADA",
+      amountMinor: 15_000n,
+    });
+    expect(clasificacion.category).toBe("COBRADO_CUENTA_AJENA");
+    expect(clasificacion.scope).toBe("POR_CUENTA_AJENA");
+  });
+
+  test("el origen manda sobre el concepto", () => {
+    // Un concepto nuevo que nadie mapeó caería en «sin clasificar»: fuera del
+    // resultado —bien— pero también fuera del bloque de la deuda —mal—.
+    expect(classifyOperationalMovement({
+      concept: "CONCEPTO_FUTURO",
+      direction: "ENTRADA",
+      amountMinor: 4_000n,
+      sourceType: "COBRO_CUENTA_AJENA",
+    }).category).toBe("COBRADO_CUENTA_AJENA");
+    expect(classifyOperationalMovement({
+      concept: "CONCEPTO_FUTURO",
+      direction: "ENTRADA",
+      amountMinor: 4_000n,
+    }).category).toBe("SIN_CLASIFICAR");
+  });
+
+  test("devolver un cobro ajeno deshace la línea, no la mezcla con otra", () => {
+    const [cup] = summarizeOperationalMovements([
+      movement("cup", "COBRO_PLUS_MULTISEDE", "ENTRADA", 15_000n, "COBRO_CUENTA_AJENA"),
+      movement("cup", "REVERSO_COBRO_PLUS_MULTISEDE", "SALIDA", 15_000n, "COBRO_CUENTA_AJENA"),
+    ]);
+    expect(cup.scopeTotals.POR_CUENTA_AJENA).toBe(0n);
+    expect(cup.operationalNetMinor).toBe(0n);
+    expect(cup.ledgerNetMinor).toBe(0n);
+  });
+
   test("rechaza dirección, importe o moneda ambiguos", () => {
     expect(() => classifyOperationalMovement({
       concept: "PLAN_CLIENTE",
@@ -96,6 +149,7 @@ function movement(
   concept: string,
   direction: OperationalMovementDirection,
   amountMinor: bigint,
+  sourceType: string | null = null,
 ) {
-  return { currencyId, concept, direction, amountMinor };
+  return { currencyId, concept, direction, amountMinor, sourceType };
 }

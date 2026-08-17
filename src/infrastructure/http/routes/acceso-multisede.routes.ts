@@ -5,6 +5,7 @@ import {
   getPrecioAccesoMultisede,
   listarVisitantes,
   postAccesoMultisedeCliente,
+  postCobroAccesoMultisede,
   putPrecioAccesoMultisede,
 } from "../controllers/acceso-multisede.controller";
 import { requirePlatformAuthority } from "./global-catalog-authority";
@@ -21,4 +22,6 @@ accesoMultisedeRoutes.put("/precio", requirePlatformAuthority, putPrecioAccesoMu
 accesoMultisedeRoutes.get("/visitantes", listarVisitantes);
 accesoMultisedeRoutes.get("/clientes/:ci", getAccesoMultisedeCliente);
 accesoMultisedeRoutes.post("/clientes/:ci", postAccesoMultisedeCliente);
+// M4b: la venta del plus. Separada de la marca porque mueve dinero.
+accesoMultisedeRoutes.post("/clientes/:ci/cobro", postCobroAccesoMultisede);
 accesoMultisedeRoutes.delete("/clientes/:ci", deleteAccesoMultisedeCliente);

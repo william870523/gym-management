@@ -19,6 +19,8 @@ import {
   type AccesoMultisede,
 } from "../../domain/acceso-multisede-policy";
 import { normalizeMoney } from "../../domain/money";
+import { decidirCobro } from "../../domain/cobro-por-cuenta-ajena-policy";
+import { anotarAsiento } from "../saldo-enlace/saldo-enlace.service";
 
 /**
  * El precio del plus es uno solo para toda la cadena, así que su fila también.
@@ -453,4 +455,185 @@ export async function retirarAccesoMultisede(input: {
     },
   });
   return { operation: "UPDATE", row } as CambioAcceso<typeof row>;
+}
+
+/**
+ * Cobra el plus multi-sede (M4b, docs/MULTI_SEDE.md §5.1).
+ *
+ * Hace tres cosas que **tienen que pasar juntas o no pasar**: extiende la
+ * vigencia encadenando, registra el cobro con su periodo cubierto, y anota que
+ * esta sede se quedó un dinero que es de la cadena. Separarlas dejaría el caso
+ * que §7.10 llama el más caro: efectivo cobrado sin su deuda anotada, es decir,
+ * margen de sede inflado con dinero ajeno.
+ *
+ * El movimiento de tesorería se inyecta porque el libro de caja **no es
+ * gemelo** entre las dos APIs; el asiento del saldo sí lo es y por eso va
+ * dentro, donde no se puede olvidar.
+ *
+ * `emitirEvento` es obligatorio por el mismo motivo de siempre: un dato sin su
+ * rastro es una divergencia esperando turno.
+ */
+export async function cobrarAccesoMultisede(input: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any;
+  ci: string;
+  /** Sede que atiende el mostrador: en su caja entra el dinero. */
+  gymIdQueCobra: string;
+  cobradoPor: {
+    userId: string;
+    nombre: string;
+    rol?: string | null;
+    origen?: string | null;
+  };
+  tipoPagoId?: string | null;
+  cuentaId?: string | null;
+  fechaNegocio: Date;
+  sourceDevice: string;
+  nowUtc: Date;
+  meses?: number;
+  /** Identidad del cobro. La pone quien llama para poder ser determinista. */
+  cobroId: string;
+  /** Apunta el efectivo en el libro de caja de la sede que cobró. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registrarEnTesoreria: (cobro: any) => Promise<unknown>;
+  /**
+   * Encola el evento de una fila. Recibe la clave **explícita** y no la deduce
+   * del payload: `acceso_multisede_cobro` tiene una columna
+   * `cliente_acceso_multisede_id`, así que adivinarla con un `??` eligió la del
+   * acceso en vez de la del cobro y el concentrador rechazó el evento con «PK
+   * contradictoria», atascando la cola detrás. Lo destapó el cobro real del
+   * 17-08-2026, no ninguna prueba.
+   */
+  emitirEvento: (
+    entidad: string,
+    operacion: string,
+    entidadId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fila: any,
+  ) => Promise<unknown>;
+}) {
+  const { tx, gymIdQueCobra, nowUtc } = input;
+  const ci = String(input.ci ?? "").trim();
+
+  const socio = ci
+    ? await tx.cliente.findFirst({
+        where: { ci, is_deleted: false },
+        select: { ci: true, gym_id: true },
+      })
+    : null;
+  if (!socio) {
+    throw new AccesoMultisedeError(
+      404,
+      "CLIENTE_NO_ENCONTRADO",
+      "No existe un socio activo con esa identificación.",
+    );
+  }
+
+  // Sin plus vigente, un socio de otra sede no puede pagar aquí (§5.4-bis).
+  // Y cobrarle el plus a un socio ajeno es precisamente lo que no se puede
+  // hacer sin haberlo comprobado: el plus lo vende su sede.
+  const sedeDelSocio = String(socio.gym_id ?? "").trim();
+  if (sedeDelSocio && sedeDelSocio !== gymIdQueCobra) {
+    throw new AccesoMultisedeError(
+      403,
+      "PLUS_LO_VENDE_SU_SEDE",
+      "El plus multi-sede lo vende la sede del socio, no la que visita.",
+    );
+  }
+
+  const previo = await tx.clienteAccesoMultisede.findUnique({
+    where: { cliente_acceso_multisede_id: accesoMultisedeId(ci) },
+  });
+  // El periodo cobrado empieza donde termina el que ya cubría; si no cubría
+  // nada, empieza hoy. Es el mismo encadenado que aplica la vigencia, escrito
+  // aquí para que el comprobante diga exactamente qué se compró.
+  const cubriendo = previo && previo.activo && !previo.is_deleted
+    ? new Date(previo.vigente_hasta)
+    : null;
+  const cubreDesde =
+    cubriendo && cubriendo.getTime() > input.fechaNegocio.getTime()
+      ? cubriendo
+      : input.fechaNegocio;
+
+  const acceso = await marcarAccesoMultisede({
+    tx,
+    ci,
+    marcadoEnGymId: gymIdQueCobra,
+    marcadoPorUserId: input.cobradoPor.userId,
+    fechaNegocio: input.fechaNegocio,
+    sourceDevice: input.sourceDevice,
+    nowUtc,
+    meses: input.meses,
+  });
+  await input.emitirEvento(
+    "cliente_acceso_multisede",
+    acceso.operation,
+    acceso.row.cliente_acceso_multisede_id,
+    acceso.row,
+  );
+
+  const cobro = await tx.accesoMultisedeCobro.create({
+    data: {
+      cobro_id: input.cobroId,
+      ci,
+      gym_id: gymIdQueCobra,
+      cliente_acceso_multisede_id: acceso.row.cliente_acceso_multisede_id,
+      importe: acceso.row.precio_snapshot,
+      moneda_id: acceso.row.moneda_id,
+      cubre_desde: cubreDesde,
+      cubre_hasta: acceso.row.vigente_hasta,
+      tipo_pago_id: input.tipoPagoId ?? null,
+      cuenta_id: input.cuentaId ?? null,
+      cobrado_por_user_id: input.cobradoPor.userId,
+      cobrado_por_nombre_snapshot: input.cobradoPor.nombre,
+      cobrado_por_rol_snapshot: input.cobradoPor.rol ?? null,
+      cobrado_por_origen: input.cobradoPor.origen ?? null,
+      fecha: nowUtc,
+      source_device: input.sourceDevice,
+      version: 1,
+      is_deleted: false,
+      created_at: nowUtc,
+      updated_at: nowUtc,
+      deleted_at: null,
+    },
+  });
+  await input.emitirEvento(
+    "acceso_multisede_cobro",
+    "INSERT",
+    cobro.cobro_id,
+    cobro,
+  );
+
+  // El ingreso es de la cadena SIEMPRE, también cuando se cobra en la sede del
+  // propio socio: por eso `decidirCobro` recibe las dos sedes iguales y aun así
+  // devuelve saldo. Ver la prueba de paridad de la raíz.
+  const decision = decidirCobro({
+    clase: "PLUS_MULTISEDE",
+    gymIdQueCobra,
+    gymIdDelSocio: sedeDelSocio || gymIdQueCobra,
+  });
+  await anotarAsiento({
+    tx,
+    nowUtc,
+    asiento: {
+      asientoId: `sae-${input.cobroId}`,
+      decision,
+      monedaId: cobro.moneda_id,
+      monto: normalizeMoney(cobro.importe),
+      origenTipo: "COBRO_PLUS",
+      origenId: cobro.cobro_id,
+      claveOrigen: `COBRO_PLUS:${cobro.cobro_id}`,
+      claseCobro: "PLUS_MULTISEDE",
+      ci,
+      ocurridoAt: nowUtc,
+      fechaNegocio: input.fechaNegocio,
+      sourceDevice: input.sourceDevice,
+    },
+    emitirEvento: (fila) =>
+      input.emitirEvento("saldo_enlace_asiento", "INSERT", fila.asiento_id, fila),
+  });
+
+  await input.registrarEnTesoreria(cobro);
+
+  return { acceso, cobro, decision, cubreDesde };
 }

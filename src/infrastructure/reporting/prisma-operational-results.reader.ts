@@ -225,6 +225,7 @@ export class PrismaOperationalResultsReader implements OperationalResultsReader 
         movementId: row.movimiento_id,
         direction: this.direction(row.direccion),
         concept: row.concepto,
+        sourceType: row.origen_tipo,
         accountId: row.cuenta_id,
         currencyId: row.moneda_id,
         amount: row.monto.toString(),

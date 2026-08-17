@@ -6,6 +6,17 @@ export type OperationalResultScope =
   | "OPERATIVO"
   | "NO_OPERATIVO"
   | "NEUTRO"
+  /**
+   * M4b — efectivo que entró en esta caja pero cuyo ingreso es de otro: de otra
+   * sede o de la cadena (docs/MULTI_SEDE.md §5.3).
+   *
+   * Es un ámbito propio y no `NO_OPERATIVO`, aunque los dos queden fuera del
+   * resultado. Mezclarlos escondería la cifra justo donde hace falta verla: el
+   * cierre de la sede tiene que enseñar «lo mío» y «lo que cobré por cuenta
+   * ajena» en dos bloques, con su contraparte al lado, porque de ese segundo
+   * bloque sale la deuda que alguien va a reclamar.
+   */
+  | "POR_CUENTA_AJENA"
   | "REVISAR";
 
 export type OperationalResultCategory =
@@ -18,12 +29,22 @@ export type OperationalResultCategory =
   | "DEPOSITOS_MANUALES"
   | "RETIROS_MANUALES"
   | "TRANSFERENCIAS_INTERNAS"
+  | "COBRADO_CUENTA_AJENA"
   | "SIN_CLASIFICAR";
 
 export type OperationalMovementInput = {
   concept: string;
   direction: OperationalMovementDirection;
   amountMinor: bigint;
+  /**
+   * `origen_tipo` del movimiento. Opcional para no romper a quien clasificaba
+   * solo por concepto, pero cuando dice que el cobro es por cuenta ajena
+   * **manda sobre el concepto**: la familia la decidió la política del cobro
+   * contra la base, y un concepto nuevo que nadie recuerde mapear caería si no
+   * en «sin clasificar», es decir, fuera del resultado pero también fuera del
+   * bloque donde se ve la deuda.
+   */
+  sourceType?: string | null;
 };
 
 export type OperationalMovementClassification = {
@@ -112,6 +133,12 @@ const definitions: Record<OperationalResultCategory, CategoryDefinition> = {
     scope: "NEUTRO",
     requiresReview: false,
   },
+  COBRADO_CUENTA_AJENA: {
+    category: "COBRADO_CUENTA_AJENA",
+    label: "Cobrado por cuenta ajena",
+    scope: "POR_CUENTA_AJENA",
+    requiresReview: false,
+  },
   SIN_CLASIFICAR: {
     category: "SIN_CLASIFICAR",
     label: "Sin clasificar",
@@ -134,7 +161,17 @@ const categoryByConcept: Record<string, OperationalResultCategory> = {
   MANUAL_DEPOSITO: "DEPOSITOS_MANUALES",
   MANUAL_RETIRO: "RETIROS_MANUALES",
   MANUAL_TRANSFERENCIA: "TRANSFERENCIAS_INTERNAS",
+  // M4b: el plus multi-sede es ingreso de la cadena, aunque se cobre en la
+  // propia sede del socio (§5.1). El plan de un visitante es ingreso de su
+  // sede (M4c). Los dos dejan el efectivo aquí y el ingreso allá.
+  COBRO_PLUS_MULTISEDE: "COBRADO_CUENTA_AJENA",
+  REVERSO_COBRO_PLUS_MULTISEDE: "COBRADO_CUENTA_AJENA",
+  PLAN_CLIENTE_OTRA_SEDE: "COBRADO_CUENTA_AJENA",
+  REVERSO_PLAN_CLIENTE_OTRA_SEDE: "COBRADO_CUENTA_AJENA",
 };
+
+/** `origen_tipo` que marca la familia del cobro por cuenta ajena (M4b). */
+const ORIGEN_COBRO_AJENO = "COBRO_CUENTA_AJENA";
 
 const categoryOrder = Object.keys(definitions) as OperationalResultCategory[];
 
@@ -166,7 +203,10 @@ export function classifyOperationalMovement(
   assertDirection(input.direction);
   assertAmountMinor(input.amountMinor);
   const concept = normalizeConcept(input.concept);
-  const category = categoryByConcept[concept] ?? "SIN_CLASIFICAR";
+  const category =
+    normalizeConcept(input.sourceType) === ORIGEN_COBRO_AJENO
+      ? "COBRADO_CUENTA_AJENA"
+      : categoryByConcept[concept] ?? "SIN_CLASIFICAR";
   const definition = definitions[category];
   return {
     ...definition,
@@ -206,6 +246,7 @@ export function summarizeOperationalMovements(
           OPERATIVO: 0n,
           NO_OPERATIVO: 0n,
           NEUTRO: 0n,
+          POR_CUENTA_AJENA: 0n,
           REVISAR: 0n,
         },
         ledgerNetMinor: 0n,

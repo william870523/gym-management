@@ -45,6 +45,8 @@ type Totals = {
   bookNet: bigint;
   operational: bigint;
   nonOperational: bigint;
+  /** M4b: efectivo aquí, ingreso de otro. Fuera del resultado, a la vista. */
+  byOthers: bigint;
   pendingClassificationEffect: bigint;
   movements: number;
   withoutAccount: number;
@@ -303,6 +305,7 @@ export class OperationalResultsService {
       const amountMinor = this.policy(() => treasuryMoneyToMinor(movement.amount));
       const classification = this.policy(() => classifyOperationalMovement({
         concept: movement.concept,
+        sourceType: movement.sourceType,
         direction: movement.direction,
         amountMinor,
       }));
@@ -504,6 +507,10 @@ export class OperationalResultsService {
       totals.operational += classification.signedMinor;
     } else if (classification.scope === "NO_OPERATIVO") {
       totals.nonOperational += classification.signedMinor;
+    } else if (classification.scope === "POR_CUENTA_AJENA") {
+      // No entra en `operational`: es la línea que impide que el margen de esta
+      // sede se infle con dinero que no ganó (§7.10).
+      totals.byOthers += classification.signedMinor;
     } else if (classification.scope === "REVISAR") {
       totals.pendingClassificationEffect += classification.signedMinor;
     }
@@ -536,6 +543,7 @@ export class OperationalResultsService {
       otros_egresos_operativos: treasuryMinorToMoney(-effect("GASTOS_MANUALES")),
       flujo_operativo: treasuryMinorToMoney(totals.operational),
       flujo_no_operativo: treasuryMinorToMoney(totals.nonOperational),
+      cobrado_por_cuenta_ajena: treasuryMinorToMoney(totals.byOthers),
       flujo_pendiente_clasificacion: treasuryMinorToMoney(
         totals.pendingClassificationEffect,
       ),
@@ -549,8 +557,9 @@ export class OperationalResultsService {
     const scopeOrder: Record<string, number> = {
       OPERATIVO: 0,
       REVISAR: 1,
-      NO_OPERATIVO: 2,
-      NEUTRO: 3,
+      POR_CUENTA_AJENA: 2,
+      NO_OPERATIVO: 3,
+      NEUTRO: 4,
     };
     return [...totals.categories.values()]
       .map((row) => ({
@@ -722,6 +731,7 @@ export class OperationalResultsService {
       bookNet: 0n,
       operational: 0n,
       nonOperational: 0n,
+      byOthers: 0n,
       pendingClassificationEffect: 0n,
       movements: 0,
       withoutAccount: 0,

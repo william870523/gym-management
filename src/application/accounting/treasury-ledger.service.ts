@@ -1016,6 +1016,40 @@ export class TreasuryLedgerService {
     });
   }
 
+  /**
+   * M4b — el efectivo del plus multi-sede entra en la caja de la sede que lo
+   * cobró, pero con su propia familia de origen.
+   *
+   * `COBRO_CUENTA_AJENA` no es decorativo: los cierres y el margen agrupan por
+   * `origen_tipo`, así que meterlo en `PAGO_CLIENTE` haría que sumara como
+   * ingreso propio y el margen de esta sede se inflaría con dinero de la
+   * cadena (docs/MULTI_SEDE.md §7.10).
+   */
+  async recordPlusMultisedeInTx(tx: Tx, gymId: string, cobro: any) {
+    if (!cobro) return 0;
+    return this.createMovement(tx, gymId, {
+      key: `PLUS:${cobro.cobro_id}`,
+      sourceType: "COBRO_CUENTA_AJENA",
+      sourceId: cobro.cobro_id,
+      direction: "ENTRADA",
+      concept: "COBRO_PLUS_MULTISEDE",
+      accountId: cobro.cuenta_id,
+      currencyId: cobro.moneda_id,
+      paymentTypeId: cobro.tipo_pago_id,
+      amount: this.money(cobro.importe),
+      occurredAt: new Date(cobro.fecha),
+      description: `Plus multi-sede del socio ${cobro.ci}, ingreso de la cadena.`,
+      review: !cobro.cuenta_id,
+      reviewReason: !cobro.cuenta_id ? "COBRO_PLUS_SIN_CUENTA" : null,
+      collector: {
+        cobrado_por_user_id: cobro.cobrado_por_user_id ?? null,
+        cobrado_por_nombre_snapshot: cobro.cobrado_por_nombre_snapshot ?? null,
+        cobrado_por_rol_snapshot: cobro.cobrado_por_rol_snapshot ?? null,
+        cobrado_por_origen: cobro.cobrado_por_origen ?? null,
+      },
+    });
+  }
+
   async recordRefundInTx(tx: Tx, gymId: string, refund: any) {
     if (!refund || !["CONFIRMADO", "ANULADO"].includes(refund.estado)) return 0;
     return this.createMovement(tx, gymId, {

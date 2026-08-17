@@ -28,6 +28,9 @@ import {
   retirarAccesoMultisede,
   retirarVisitante,
 } from "../../../application/acceso-multisede/acceso-multisede.service";
+import { cobrarAccesoMultisede } from "../../../application/acceso-multisede/acceso-multisede.service";
+import { TreasuryLedgerService } from "../../../application/accounting/treasury-ledger.service";
+import { PrismaPaymentActorResolver } from "../../../application/payment/payment-actor";
 import { accesoCubre } from "../../../domain/acceso-multisede-policy";
 import { normalizeMoney } from "../../../domain/money";
 import type { AuthTokenPayload } from "../../../domain/interfaces/AuthTokenPayload";
@@ -72,6 +75,15 @@ const accesoPublico = (fila: any, hoy: Date) =>
         activo: fila.activo,
         vigente_hasta: fila.vigente_hasta,
         vigente: accesoCubre(fila, hoy),
+        // M4b — la fecha de negocio de la SEDE, publicada a propósito.
+        //
+        // La vista tiene que decir qué periodo va a comprar antes de cobrar, y
+        // cuando el plus está caducado ese periodo empieza «hoy». Calculando
+        // ese «hoy» en el navegador se equivocaba de día: el recorrido web del
+        // 17-08-2026 prometió 17/08 → 17/09 y el servidor cobró 16/08 → 16/09,
+        // porque el navegador miraba UTC y la sede vive en America/Los_Angeles.
+        // Un día de diferencia en un comprobante de dinero no es un detalle.
+        fecha_negocio: hoy,
         precio_snapshot: normalizeMoney(fila.precio_snapshot),
         moneda_id: fila.moneda_id,
         marcado_por_user_id: fila.marcado_por_user_id,
@@ -268,6 +280,109 @@ export async function postAccesoMultisedeCliente(c: Context) {
     });
     const hoy = await fechaNegocio(prisma, sesion.gymId);
     return c.json({ acceso: accesoPublico(cambio.row, hoy) }, cambio.operation === "INSERT" ? 201 : 200);
+  } catch (error) {
+    return responderError(c, error);
+  }
+}
+
+/**
+ * Cobra el plus multi-sede: extiende la vigencia y toma el dinero.
+ *
+ * Está separado de `POST /clientes/:ci` a propósito. Aquel marca sin cobrar
+ * —es lo que M4a entregó, y sigue sirviendo para una corrección o una
+ * cortesía—; este es la venta. Mezclarlos habría dejado un solo endpoint que a
+ * veces mueve dinero y a veces no, según lo que traiga el cuerpo.
+ */
+export async function postCobroAccesoMultisede(c: Context) {
+  const sesion = auth(c);
+  if (!sesion?.gymId || !sesion.sub) {
+    return c.json({ error: "La sesión no identifica gimnasio y operador." }, 403);
+  }
+  const ci = c.req.param("ci").trim();
+  const cuerpo = await c.req.json().catch(() => ({}) as any);
+  try {
+    // R5.6 — quién recibe el dinero se revalida contra la base antes de tocar
+    // nada, y falla cerrado: sin actor válido no hay cobro.
+    const actor = await new PrismaPaymentActorResolver(prisma).resolve({
+      userId: sesion.sub,
+      gymId: sesion.gymId,
+    });
+    const ledger = new TreasuryLedgerService();
+    const nowUtc = trustedClock.nowUtc();
+    const cobroId = randomUUID();
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      const salida = await cobrarAccesoMultisede({
+        tx,
+        ci,
+        gymIdQueCobra: sesion.gymId!,
+        cobradoPor: {
+          userId: actor.userId,
+          nombre: actor.nombre,
+          rol: actor.rol,
+          origen: actor.origen,
+        },
+        tipoPagoId: cuerpo?.tipo_pago_id ?? null,
+        cuentaId: cuerpo?.cuenta_id ?? null,
+        fechaNegocio: await fechaNegocio(tx, sesion.gymId!),
+        sourceDevice: DISPOSITIVO,
+        nowUtc,
+        cobroId,
+        registrarEnTesoreria: (cobro) =>
+          ledger.recordPlusMultisedeInTx(tx, sesion.gymId!, cobro),
+        emitirEvento: (entidad, operacion, entidadId, fila) =>
+          tx.syncLog.create({
+            data: {
+              event_id: randomUUID(),
+              entidad,
+              operacion,
+              entidad_id: entidadId,
+              // La marca tiene que llegar a TODAS las sedes; el cobro y su
+              // asiento son de la sede que cobró y viajan como suyos.
+              gym_id: entidad === "cliente_acceso_multisede" ? null : sesion.gymId!,
+              device_id: null,
+              payload_json: JSON.stringify(fila),
+            },
+          }),
+      });
+
+      // La persona antes que su permiso, igual que al marcar.
+      const visitante = await proyectarVisitante({
+        tx,
+        ci,
+        sourceDevice: DISPOSITIVO,
+        nowUtc,
+      });
+      await tx.syncLog.create({
+        data: {
+          event_id: randomUUID(),
+          entidad: "cliente_visitante",
+          operacion: visitante.operation,
+          entidad_id: visitante.row.ci,
+          gym_id: null,
+          payload_json: JSON.stringify(visitante.row),
+        },
+      });
+      return salida;
+    });
+
+    const hoy = await fechaNegocio(prisma, sesion.gymId);
+    return c.json(
+      {
+        acceso: accesoPublico(resultado.acceso.row, hoy),
+        cobro: {
+          cobro_id: resultado.cobro.cobro_id,
+          ci: resultado.cobro.ci,
+          importe: normalizeMoney(resultado.cobro.importe),
+          moneda_id: resultado.cobro.moneda_id,
+          cubre_desde: resultado.cobro.cubre_desde,
+          cubre_hasta: resultado.cobro.cubre_hasta,
+          cobrado_en_gym_id: resultado.cobro.gym_id,
+          ingreso_de: "CADENA",
+        },
+      },
+      201,
+    );
   } catch (error) {
     return responderError(c, error);
   }

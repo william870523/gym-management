@@ -576,6 +576,11 @@ export class UploadEventsUseCase {
         // de la cadena.
         "cliente_acceso_multisede",
         "cliente_visitante",
+        // M4b: el asiento del saldo. Sube como entidad de sede corriente; su
+        // `gym_id` es el de quien lo emite porque el deudor es siempre quien
+        // se quedó el efectivo.
+        "saldo_enlace_asiento",
+        "acceso_multisede_cobro",
       ].includes(ev.entidad)
     ) {
       await this.applyPrismaMappedEvent(
@@ -1137,6 +1142,43 @@ export class UploadEventsUseCase {
       }
       record.ci = ci;
       record.gym_id_origen = origen;
+    }
+
+    if (ev.entidad === "saldo_enlace_asiento") {
+      // Un asiento contable no se reescribe ni se borra: se contraasienta. Por
+      // eso solo se admite el alta, y la baja se rechaza igual que en el cierre
+      // mensual auditado. Si se admitiera el UPDATE, una instalación podría
+      // convertir una deuda de 300 en una de 30 sin dejar rastro, y el libro
+      // dejaría de ser un libro.
+      if (operation !== "INSERT") {
+        throw new Error(
+          "Un asiento del saldo entre partes no se modifica ni se elimina por sincronización: se contraasienta.",
+        );
+      }
+      const deudor = String(record.gym_id ?? "").trim();
+      const acreedorTipo = String(record.acreedor_tipo ?? "").trim();
+      const acreedorSede = String(record.acreedor_gym_id ?? "").trim();
+      const sentido = String(record.sentido ?? "").trim();
+      const monto = String(record.monto ?? "").trim();
+      if (
+        // El deudor es quien tiene el dinero, y solo él puede declarar su
+        // propia deuda. Sin esto, una sede podría anotarle deudas a otra.
+        deudor !== gymId ||
+        !["SEDE", "CADENA"].includes(acreedorTipo) ||
+        // La cadena no tiene `gym_id`; una sede acreedora sí, y nunca es el
+        // propio deudor: nadie se debe dinero a sí mismo.
+        (acreedorTipo === "CADENA" ? acreedorSede !== "" : !acreedorSede) ||
+        (acreedorTipo === "SEDE" && acreedorSede === deudor) ||
+        !["GENERA", "DESHACE"].includes(sentido) ||
+        !/^\d+(\.\d+)?$/.test(monto) ||
+        Number(monto) <= 0 ||
+        !String(record.clave_origen ?? "").trim()
+      ) {
+        throw new Error(
+          "El asiento del saldo no declara deudor, acreedor, sentido o importe válidos.",
+        );
+      }
+      record.acreedor_gym_id = acreedorTipo === "CADENA" ? null : acreedorSede;
     }
 
     // R5.4 — convergencia del aviso de administración: **«leído» gana y nunca

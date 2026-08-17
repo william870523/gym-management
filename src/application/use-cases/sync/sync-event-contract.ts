@@ -43,6 +43,20 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
     pk: "cliente_acceso_multisede_id",
   },
   cliente_visitante: { delegateKey: "clienteVisitante", pk: "ci" },
+  // M4b: el asiento del saldo entre partes es de la sede DEUDORA —la que se
+  // quedó el efectivo—, que es también la que lo emite. Entidad de sede
+  // corriente: no necesita el alcance global que sí necesitaba M4a.
+  saldo_enlace_asiento: {
+    delegateKey: "saldoEnlaceAsiento",
+    pk: "asiento_id",
+  },
+  // M4b: el cobro del plus es de la sede que se quedó el efectivo, que es la
+  // que lo emite. El ingreso es de la cadena, pero eso no vive aquí: vive en
+  // el asiento del saldo.
+  acceso_multisede_cobro: {
+    delegateKey: "accesoMultisedeCobro",
+    pk: "cobro_id",
+  },
 } as const;
 
 export const PARITY_SYNC_ENTITIES = new Set<string>(

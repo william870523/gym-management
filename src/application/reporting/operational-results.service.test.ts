@@ -38,10 +38,12 @@ const movement = (
   direction: "ENTRADA" | "SALIDA",
   amount: string,
   accountId: string | null = "cash",
+  sourceType: string | null = null,
 ) => ({
   movementId: id,
   currencyId,
   concept,
+  sourceType,
   direction,
   amount,
   accountId,
@@ -89,6 +91,59 @@ describe("remote OperationalResultsService parity", () => {
     expect(eur.caja.flujo_operativo).toBe("20.00");
     expect(cup.obligaciones.disponible).toBeFalse();
     expect(result.certificado).toBeFalse();
+  });
+
+  // M4b · docs/MULTI_SEDE.md §7.10 lo llama «el riesgo contable más caro»: si el
+  // cobro cruzado o el plus se registran como ingreso de la sede que cobró, su
+  // margen se infla y el consolidado duplica dinero. La prueba fija las dos
+  // mitades a la vez: el dinero SÍ está en la caja, y NO está en el resultado.
+  test("el cobro por cuenta ajena cuenta en la caja y no en el resultado", async () => {
+    const service = new OperationalResultsService(new FakeReader({
+      movements: [
+        movement("1", "cup", "PLAN_CLIENTE", "ENTRADA", "100.00"),
+        // El plus de un socio de la casa: sigue siendo ingreso de la cadena.
+        movement("2", "cup", "COBRO_PLUS_MULTISEDE", "ENTRADA", "150.00", "cash", "COBRO_CUENTA_AJENA"),
+        // El plan de un visitante: ingreso de su sede.
+        movement("3", "cup", "PLAN_CLIENTE_OTRA_SEDE", "ENTRADA", "300.00", "cash", "COBRO_CUENTA_AJENA"),
+      ],
+      accounts: [{ accountId: "cash", name: "Caja CUP", currencyId: "cup" }],
+      currencies: [{ currencyId: "cup", code: "CUP" }],
+      dailyCloses: [],
+      monthlyClose: null,
+    }));
+
+    const cup = (await service.get({ gymId: "gym", month: "2026-06" }))
+      .monedas.find((row: any) => row.moneda_codigo === "CUP")!;
+
+    // Lo suyo, y solo lo suyo.
+    expect(cup.caja.flujo_operativo).toBe("100.00");
+    expect(cup.caja.cobros_brutos).toBe("100.00");
+    // Lo ajeno, a la vista y en su propia línea.
+    expect(cup.caja.cobrado_por_cuenta_ajena).toBe("450.00");
+    // Y el libro cuadra con el arqueo: los 550 están en la caja.
+    expect(cup.caja.neto_libro).toBe("550.00");
+    expect(cup.caja.entradas_libro).toBe("550.00");
+  });
+
+  test("el origen manda sobre el concepto, para que un concepto nuevo no se escape", async () => {
+    // Si mañana alguien añade un concepto de cobro ajeno y olvida mapearlo,
+    // caería en «sin clasificar»: fuera del resultado —bien— pero también
+    // fuera del bloque donde se ve la deuda —mal, porque nadie la reclamaría—.
+    const service = new OperationalResultsService(new FakeReader({
+      movements: [
+        movement("1", "cup", "CONCEPTO_QUE_NADIE_MAPEO", "ENTRADA", "40.00", "cash", "COBRO_CUENTA_AJENA"),
+      ],
+      accounts: [{ accountId: "cash", name: "Caja CUP", currencyId: "cup" }],
+      currencies: [{ currencyId: "cup", code: "CUP" }],
+      dailyCloses: [],
+      monthlyClose: null,
+    }));
+
+    const cup = (await service.get({ gymId: "gym", month: "2026-06" }))
+      .monedas.find((row: any) => row.moneda_codigo === "CUP")!;
+    expect(cup.caja.cobrado_por_cuenta_ajena).toBe("40.00");
+    expect(cup.caja.flujo_operativo).toBe("0.00");
+    expect(cup.caja.flujo_pendiente_clasificacion).toBe("0.00");
   });
 
   test("expone movimientos pendientes de clasificación sin llamarlos ingreso", async () => {

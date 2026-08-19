@@ -236,7 +236,12 @@ export async function detallePorSede(input: {
 
   return {
     sede: { gym_id: sede.gym_id, nombre: sede.nombre, activa: sede.activo },
-    periodo: input.periodo,
+    // En `snake_case` como el resto de la API: el período es dato de borde, no
+    // el objeto de dominio que se le pasó a este servicio.
+    periodo: {
+      fecha_inicio: input.periodo.fechaInicio,
+      fecha_fin_exclusiva: input.periodo.fechaFinExclusiva,
+    },
     origen,
     nota: notaDelOrigen(origen),
     cierre: firmado

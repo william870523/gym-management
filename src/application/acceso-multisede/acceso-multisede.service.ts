@@ -20,6 +20,10 @@ import {
 } from "../../domain/acceso-multisede-policy";
 import { normalizeMoney } from "../../domain/money";
 import { decidirCobro } from "../../domain/cobro-por-cuenta-ajena-policy";
+import {
+  cotizarVisita,
+  type CotizacionDeVisita,
+} from "../../domain/cotizacion-visita-policy";
 import { anotarAsiento } from "../saldo-enlace/saldo-enlace.service";
 
 /**
@@ -309,6 +313,155 @@ export async function proyectarVisitante(input: {
     update: { ...comun, updated_at: nowUtc, version: { increment: 1 } },
   });
   return { operation: previo ? "UPDATE" : "INSERT", row } as CambioAcceso<typeof row>;
+}
+
+/**
+ * Proyecta la **cotización de visita**: lo que la sede visitada necesita para
+ * cobrarle sin conexión (M4c, docs/MULTI_SEDE.md §5.3).
+ *
+ * Va aparte de la copia de identidad y con su propio evento porque responde
+ * otra pregunta —«qué le cobro», no «quién es»— y cambia con otra frecuencia:
+ * cada pago, cada renovación y cada cambio de precio de su sede.
+ *
+ * **El descuento se resuelve aquí y viaja resuelto**: depende de la
+ * configuración de esta sede, que no se replica ni debe. **La mora viaja como
+ * regla**, no como importe, para que la cotización no caduque en veinticuatro
+ * horas: quien cobra recalcula el recargo contra los días de atraso del día en
+ * que cobra.
+ *
+ * Devuelve `null` cuando el socio no tiene plan vigente que cotizar. No es un
+ * error: es un socio al que, hoy, otra sede no puede cobrarle nada.
+ */
+export async function proyectarCotizacionDeVisita(input: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any;
+  ci: string;
+  /** Resuelve el descuento del socio contra la configuración de SU sede. */
+  resolverDescuento: (entrada: {
+    gymId: string;
+    ci: string;
+    planId: string;
+    numeroCuota?: number | null;
+  }) => Promise<{
+    precio_lista: string;
+    precio_final: string;
+    categoria_cliente: string;
+    plan_codigo: string;
+  }>;
+  sourceDevice: string;
+  nowUtc: Date;
+}) {
+  const { tx, sourceDevice, nowUtc } = input;
+  const ci = String(input.ci ?? "").trim();
+
+  const socio = await tx.cliente.findFirst({
+    where: { ci, is_deleted: false },
+    select: { ci: true, gym_id: true },
+  });
+  if (!socio?.gym_id) return null;
+
+  const membresia = await tx.membresiaCliente.findFirst({
+    where: { ci, gym_id: socio.gym_id, is_deleted: false, estado: { in: ["ACTIVA", "PENDIENTE_PAGO"] } },
+    orderBy: { fecha_fin: "desc" },
+    select: { membresia_id: true, id_planes_pago: true, fecha_fin: true },
+  });
+  if (!membresia?.id_planes_pago) return null;
+
+  const plan = await tx.planesPago.findFirst({
+    where: { id_planes_pago: membresia.id_planes_pago, is_deleted: false },
+    select: {
+      id_planes_pago: true,
+      nombre_plan_pago: true,
+      moneda_id: true,
+      recargo_mora_modo: true,
+      recargo_mora_valor: true,
+      recargo_mora_tope: true,
+      recargo_mora_activo: true,
+    },
+  });
+  if (!plan) return null;
+
+  // La cuota que toca: la primera pendiente. Si no va por cuotas no hay
+  // ninguna y manda el precio del plan.
+  const cuota = await tx.membresiaCuota.findFirst({
+    where: {
+      membresia_id: membresia.membresia_id,
+      gym_id: socio.gym_id,
+      is_deleted: false,
+      estado: "PENDIENTE",
+    },
+    orderBy: { numero_cuota: "asc" },
+    select: { numero_cuota: true, importe: true, fecha_exigible: true },
+  });
+
+  const descuento = await input.resolverDescuento({
+    gymId: socio.gym_id,
+    ci,
+    planId: plan.id_planes_pago,
+    numeroCuota: cuota?.numero_cuota ?? null,
+  });
+
+  const comun = {
+    gym_id_origen: socio.gym_id,
+    plan_id: plan.id_planes_pago,
+    plan_codigo: descuento.plan_codigo,
+    plan_nombre: plan.nombre_plan_pago,
+    moneda_id: plan.moneda_id,
+    precio_lista: normalizeMoney(descuento.precio_lista),
+    precio_final: normalizeMoney(descuento.precio_final),
+    categoria_cliente: descuento.categoria_cliente,
+    cubre_hasta: membresia.fecha_fin ?? null,
+    mora_activo: plan.recargo_mora_activo === true,
+    mora_modo: plan.recargo_mora_modo ?? null,
+    mora_valor: plan.recargo_mora_valor == null ? null : String(plan.recargo_mora_valor),
+    mora_tope: plan.recargo_mora_tope == null ? null : String(plan.recargo_mora_tope),
+    cuota_numero: cuota?.numero_cuota ?? null,
+    cuota_importe: cuota ? normalizeMoney(cuota.importe) : null,
+    cuota_fecha_exigible: cuota?.fecha_exigible ?? null,
+    calculada_al: nowUtc,
+    source_device: sourceDevice,
+    is_deleted: false,
+    deleted_at: null,
+  };
+
+  const previo = await tx.clienteVisitanteCotizacion.findUnique({ where: { ci } });
+  const row = await tx.clienteVisitanteCotizacion.upsert({
+    where: { ci },
+    create: { ci, ...comun, created_at: nowUtc, updated_at: nowUtc, version: 1 },
+    update: { ...comun, updated_at: nowUtc, version: { increment: 1 } },
+  });
+  return { operation: previo ? "UPDATE" : "INSERT", row } as CambioAcceso<typeof row>;
+}
+
+/**
+ * Retira la cotización. Va de la mano de la copia: un socio al que ya no se
+ * puede reconocer tampoco se le puede cobrar, y dejar el precio suelto sería
+ * dejar una oferta viva de alguien que ya no viene.
+ */
+export async function retirarCotizacionDeVisita(input: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any;
+  ci: string;
+  sourceDevice: string;
+  nowUtc: Date;
+}) {
+  const { tx, sourceDevice, nowUtc } = input;
+  const ci = String(input.ci ?? "").trim();
+  const previo = await tx.clienteVisitanteCotizacion.findUnique({ where: { ci } });
+  if (!previo || previo.is_deleted) return null;
+  const row = await tx.clienteVisitanteCotizacion.update({
+    where: { ci },
+    data: {
+      is_deleted: true,
+      deleted_at: nowUtc,
+      source_device: sourceDevice,
+      updated_at: nowUtc,
+      version: { increment: 1 },
+    },
+  });
+  // La baja no cabe en `CambioAcceso`, que solo contempla alta y edición: es
+  // una tercera cosa y se dice como tal en vez de forzarla dentro.
+  return { operation: "DELETE" as const, row };
 }
 
 /**
@@ -636,4 +789,228 @@ export async function cobrarAccesoMultisede(input: {
   await input.registrarEnTesoreria(cobro);
 
   return { acceso, cobro, decision, cubreDesde };
+}
+
+
+/**
+ * Cobra el PLAN de un socio de otra sede (M4c, docs/MULTI_SEDE.md §5.3).
+ *
+ * Es el cobro cruzado: el socio paga donde entrena, el efectivo se queda en esa
+ * caja y el ingreso es de su sede. Lo que aquí se decide con la cotización
+ * replicada; lo que se escribe, con la mecánica de saldo de M4b.
+ *
+ * ## Lo que esta sede NO hace, y es deliberado
+ *
+ * **No toca la membresía del socio.** No la tiene: vive en su sede, que puede
+ * estar sin conexión. §7.12 lo anticipa y resuelve el hueco por el lado del
+ * mostrador —el socio queda habilitado aquí con su comprobante— en vez de
+ * inventarse una membresía ajena que después habría que conciliar. Aplicar el
+ * cobro a la cobertura le toca a quien tiene las dos partes delante.
+ *
+ * **No pone cuenta en el detalle.** Sería una caja de otra sede, y esa
+ * referencia cruzada obligaría a abrir el aislamiento para las cuentas. Dónde
+ * entró el efectivo lo dice el movimiento de tesorería de esta sede, que es
+ * quien tiene que cuadrar su arqueo.
+ */
+export async function cobrarPlanDeVisitante(input: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any;
+  ci: string;
+  /** Sede que atiende: en su caja entra el dinero. */
+  gymIdQueCobra: string;
+  cobradoPor: {
+    userId: string;
+    nombre: string;
+    rol?: string | null;
+    origen?: string | null;
+  };
+  /** El plus del socio, activo y cubriendo la fecha de negocio de hoy. */
+  accesoMultisedeVigente: boolean;
+  tipoPagoId?: string | null;
+  /** Caja de ESTA sede donde entra el efectivo. */
+  cuentaId?: string | null;
+  fechaNegocio: Date;
+  sourceDevice: string;
+  nowUtc: Date;
+  pagoId: string;
+  detalleId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registrarEnTesoreria: (pago: any) => Promise<unknown>;
+  emitirEvento: (
+    entidad: string,
+    operacion: string,
+    entidadId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fila: any,
+  ) => Promise<unknown>;
+}) {
+  const { tx, gymIdQueCobra, nowUtc } = input;
+  const ci = String(input.ci ?? "").trim();
+
+  const fila = ci
+    ? await tx.clienteVisitanteCotizacion.findFirst({
+        where: { ci, is_deleted: false },
+      })
+    : null;
+
+  const cotizacion: CotizacionDeVisita | null = fila
+    ? {
+        ci: fila.ci,
+        gymIdOrigen: fila.gym_id_origen,
+        planId: fila.plan_id,
+        planCodigo: fila.plan_codigo,
+        planNombre: fila.plan_nombre,
+        monedaId: fila.moneda_id,
+        precioLista: normalizeMoney(fila.precio_lista),
+        precioFinal: normalizeMoney(fila.precio_final),
+        categoriaCliente: fila.categoria_cliente,
+        cubreHasta: fila.cubre_hasta ? new Date(fila.cubre_hasta) : null,
+        mora: {
+          activo: fila.mora_activo === true,
+          modo: fila.mora_modo ?? null,
+          valor: fila.mora_valor ?? null,
+          tope: fila.mora_tope ?? null,
+        },
+        cuota:
+          fila.cuota_numero == null
+            ? null
+            : {
+                numero: Number(fila.cuota_numero),
+                importe: normalizeMoney(fila.cuota_importe),
+                fechaExigible: new Date(fila.cuota_fecha_exigible),
+              },
+        calculadaAl: new Date(fila.calculada_al),
+      }
+    : null;
+
+  const decisionVisita = cotizarVisita({
+    cotizacion,
+    accesoMultisedeVigente: input.accesoMultisedeVigente,
+    fechaNegocio: input.fechaNegocio,
+  });
+  if (decisionVisita.resultado === "BLOQUEADO") {
+    throw new AccesoMultisedeError(
+      409,
+      "COBRO_CRUZADO_NO_DISPONIBLE",
+      decisionVisita.motivo,
+    );
+  }
+  const importe = decisionVisita.importe;
+  const gymIdDelIngreso = cotizacion!.gymIdOrigen;
+
+  // El detalle dice CÓMO se pagó, y eso no es opcional: `detalle_pago` lo
+  // exige. La cuenta sí puede faltar —es de otra sede y va aparte—, pero el
+  // método no; inventar uno metería en los informes de cobro un efectivo que
+  // quizá fue tarjeta. Se pide y se dice por qué.
+  if (!String(input.tipoPagoId ?? "").trim()) {
+    throw new AccesoMultisedeError(
+      400,
+      "COBRO_CRUZADO_SIN_METODO",
+      "Indique con qué método paga el visitante: el detalle del cobro no puede quedarse sin método.",
+    );
+  }
+
+  // Cobrarle aquí a un socio de esta misma sede no es cobro cruzado: es el
+  // cobro de siempre y tiene su propio camino, con sus reglas de membresía.
+  if (gymIdDelIngreso === gymIdQueCobra) {
+    throw new AccesoMultisedeError(
+      409,
+      "NO_ES_COBRO_CRUZADO",
+      "El socio es de esta sede: su plan se cobra por el camino corriente.",
+    );
+  }
+
+  // El ingreso es de SU sede; el efectivo, de esta. De ahí sale el saldo.
+  const decision = decidirCobro({
+    clase: "PLAN",
+    gymIdQueCobra,
+    gymIdDelSocio: gymIdDelIngreso,
+  });
+
+  const pago = await tx.pagoCliente.create({
+    data: {
+      pago_cliente_id: input.pagoId,
+      ci,
+      fecha: nowUtc,
+      monto_total: importe.total,
+      id_entrenador: null,
+      id_planes_pago: cotizacion!.planId,
+      moneda_id: importe.monedaId,
+      precio_lista_snapshot: importe.precioLista,
+      descuento_pct_snapshot: null,
+      descuento_monto_snapshot: null,
+      categoria_cliente_snapshot: importe.categoriaCliente,
+      plan_codigo_snapshot: importe.planCodigo,
+      cuota_sufijo_snapshot:
+        importe.cuotaNumero == null ? null : String(importe.cuotaNumero),
+      cobrado_por_user_id: input.cobradoPor.userId,
+      cobrado_por_nombre_snapshot: input.cobradoPor.nombre,
+      cobrado_por_rol_snapshot: input.cobradoPor.rol ?? null,
+      cobrado_por_origen: input.cobradoPor.origen ?? null,
+      // La sede DUEÑA del ingreso, y aparte dónde entró el efectivo.
+      gym_id: gymIdDelIngreso,
+      cobrado_en_gym_id: gymIdQueCobra,
+      source_device: input.sourceDevice,
+      version: 1,
+      is_deleted: false,
+      created_at: nowUtc,
+      updated_at: nowUtc,
+      deleted_at: null,
+    },
+  });
+  await input.emitirEvento("pago_cliente", "INSERT", pago.pago_cliente_id, pago);
+
+  const detalle = await tx.detallePago.create({
+    data: {
+      detalle_pago_id: input.detalleId,
+      pago_cliente_id: pago.pago_cliente_id,
+      tipo_pago_id: String(input.tipoPagoId).trim(),
+      moneda_id: importe.monedaId,
+      // Sin cuenta a propósito: la caja es de otra sede. Ver la política de
+      // atribución.
+      cuenta_id: null,
+      cantidad: importe.total,
+      tipo_cambio_id: null,
+      // El detalle sigue al INGRESO: los informes de la sede dueña cruzan
+      // pagos y detalles por el mismo `gym_id`.
+      gym_id: gymIdDelIngreso,
+      source_device: input.sourceDevice,
+      version: 1,
+      is_deleted: false,
+      created_at: nowUtc,
+      updated_at: nowUtc,
+      deleted_at: null,
+    },
+  });
+  await input.emitirEvento(
+    "detalle_pago",
+    "INSERT",
+    detalle.detalle_pago_id,
+    detalle,
+  );
+
+  await anotarAsiento({
+    tx,
+    nowUtc,
+    asiento: {
+      asientoId: `sae-${input.pagoId}`,
+      decision,
+      monedaId: importe.monedaId,
+      monto: importe.total,
+      origenTipo: "PAGO_CLIENTE",
+      origenId: pago.pago_cliente_id,
+      claveOrigen: `PAGO_CRUZADO:${pago.pago_cliente_id}`,
+      claseCobro: "PLAN",
+      ci,
+      ocurridoAt: nowUtc,
+      fechaNegocio: input.fechaNegocio,
+      sourceDevice: input.sourceDevice,
+    },
+    emitirEvento: (f) =>
+      input.emitirEvento("saldo_enlace_asiento", "INSERT", f.asiento_id, f),
+  });
+
+  await input.registrarEnTesoreria(pago);
+
+  return { pago, detalle, importe, decision, cotizacion: cotizacion! };
 }

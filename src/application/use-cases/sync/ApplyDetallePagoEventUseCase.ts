@@ -31,11 +31,46 @@ export class ApplyDetallePagoEventUseCase {
             return;
         }
 
-        const detallePago = this.mapPayloadToDetallePago(input);
+        const detallePago = this.mapPayloadToDetallePago(
+            input,
+            await this.sedeDelPago(input),
+        );
         await repo.upsertDetallePago(detallePago);
     }
 
-    private mapPayloadToDetallePago(input: ApplyDetallePagoEventInput): DetallePago {
+    /**
+     * La sede del detalle es la de **su pago**, no la del emisor (M4c).
+     *
+     * En un cobro corriente son la misma y esto no cambia nada. En un cobro por
+     * cuenta ajena no lo son: el ingreso es de la sede dueña y el detalle
+     * pertenece a ese ingreso —así lo guarda el cobro hecho directamente contra
+     * el remoto—. Sellarlo con la sede del emisor partía la operación en dos
+     * mitades de sedes distintas y el repositorio la rechazaba, con razón,
+     * porque el pago no pertenece a la sede que decía el detalle.
+     *
+     * Se **deriva del pago guardado**, no se le cree al payload. La diferencia
+     * la marcó una prueba que ya existía: llamado directamente, con un payload
+     * que declara una sede ajena, confiar en él dejaría colgar detalles del
+     * pago de otra sede. El borde de la subida hace la misma derivación sobre
+     * el payload que se reemite; esta es la que protege la fila.
+     */
+    private async sedeDelPago(input: ApplyDetallePagoEventInput): Promise<string> {
+        if (!input.tx) return input.gymId;
+        const payload = input.payload as Record<string, unknown>;
+        const pagoId = String(payload.pago_cliente_id ?? "").trim();
+        if (!pagoId) return input.gymId;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pago = await (input.tx as any).pagoCliente.findUnique({
+            where: { pago_cliente_id: pagoId },
+            select: { gym_id: true },
+        });
+        return String(pago?.gym_id ?? "").trim() || input.gymId;
+    }
+
+    private mapPayloadToDetallePago(
+        input: ApplyDetallePagoEventInput,
+        gymIdDelPago: string,
+    ): DetallePago {
         const payload = input.payload as Record<string, unknown>;
 
         return {
@@ -78,7 +113,7 @@ export class ApplyDetallePagoEventUseCase {
             recargo_mora_plan_tope: payload.recargo_mora_plan_tope == null
                 ? null
                 : String(payload.recargo_mora_plan_tope),
-            gym_id: input.gymId,
+            gym_id: gymIdDelPago,
             source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at ? new Date(String(payload.created_at)) : new Date(),

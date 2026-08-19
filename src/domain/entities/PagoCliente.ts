@@ -28,6 +28,12 @@ export interface PagoCliente {
     cobrado_por_rol_snapshot?: string | null;
     cobrado_por_origen?: string | null;
     gym_id: string | null;
+    /**
+     * M4c — sede en cuya CAJA entró el efectivo cuando no es la que ingresa.
+     * `gym_id` sigue siendo la sede dueña del ingreso: de ahí lo lee el margen.
+     * Nulo en el cobro corriente, donde las dos son la misma.
+     */
+    cobrado_en_gym_id?: string | null;
     source_device?: string | null;
     version: number;
     created_at?: Date | null;

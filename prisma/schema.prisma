@@ -1694,6 +1694,11 @@ model PagoCliente {
   cobrado_por_nombre_snapshot    String?
   cobrado_por_rol_snapshot       String?
   cobrado_por_origen             String?
+  /// M4c: sede en cuya CAJA entró el efectivo, cuando no es la misma que
+  /// ingresa. `gym_id` sigue siendo la sede DUEÑA del ingreso —de ahí lo lee
+  /// el margen— y este campo dice dónde está el dinero. Nulo en el cobro
+  /// corriente, donde las dos son la misma (docs/MULTI_SEDE.md §5.3).
+  cobrado_en_gym_id              String?
   is_deleted                     Boolean   @default(false)
   created_at                     DateTime? @default(now())
   gym_id                         String?

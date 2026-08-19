@@ -16,6 +16,7 @@ import type { Context } from "hono";
 import { randomUUID } from "crypto";
 
 import { prisma } from "../../db/prismaClient";
+import { audienciasDelCobroPorCuentaAjena } from "../../../application/use-cases/sync/sync-event-contract";
 import { trustedClock } from "../../../config/trusted-clock";
 import { datePartsInZone } from "../../../config/tz";
 import { env } from "../../../config/env";
@@ -28,7 +29,12 @@ import {
   retirarAccesoMultisede,
   retirarVisitante,
 } from "../../../application/acceso-multisede/acceso-multisede.service";
-import { cobrarAccesoMultisede } from "../../../application/acceso-multisede/acceso-multisede.service";
+import {
+  cobrarAccesoMultisede,
+  cobrarPlanDeVisitante,
+} from "../../../application/acceso-multisede/acceso-multisede.service";
+import { cotizarVisita } from "../../../domain/cotizacion-visita-policy";
+import { aplicarCobroCruzadoALaCobertura } from "../../../application/acceso-multisede/aplicar-cobro-cruzado";
 import { TreasuryLedgerService } from "../../../application/accounting/treasury-ledger.service";
 import { PrismaPaymentActorResolver } from "../../../application/payment/payment-actor";
 import { accesoCubre } from "../../../domain/acceso-multisede-policy";
@@ -379,6 +385,227 @@ export async function postCobroAccesoMultisede(c: Context) {
           cubre_hasta: resultado.cobro.cubre_hasta,
           cobrado_en_gym_id: resultado.cobro.gym_id,
           ingreso_de: "CADENA",
+        },
+      },
+      201,
+    );
+  } catch (error) {
+    return responderError(c, error);
+  }
+}
+
+/** Lee la cotización tal y como está replicada, sin decidir nada todavía. */
+async function cotizacionDeVisita(tx: any, ci: string) {
+  const fila = await tx.clienteVisitanteCotizacion.findFirst({
+    where: { ci, is_deleted: false },
+  });
+  if (!fila) return null;
+  return {
+    ci: fila.ci,
+    gymIdOrigen: fila.gym_id_origen,
+    planId: fila.plan_id,
+    planCodigo: fila.plan_codigo,
+    planNombre: fila.plan_nombre,
+    monedaId: fila.moneda_id,
+    precioLista: normalizeMoney(fila.precio_lista),
+    precioFinal: normalizeMoney(fila.precio_final),
+    categoriaCliente: fila.categoria_cliente,
+    cubreHasta: fila.cubre_hasta ? new Date(fila.cubre_hasta) : null,
+    mora: {
+      activo: fila.mora_activo === true,
+      modo: fila.mora_modo ?? null,
+      valor: fila.mora_valor ?? null,
+      tope: fila.mora_tope ?? null,
+    },
+    cuota:
+      fila.cuota_numero == null
+        ? null
+        : {
+            numero: Number(fila.cuota_numero),
+            importe: normalizeMoney(fila.cuota_importe),
+            fechaExigible: new Date(fila.cuota_fecha_exigible),
+          },
+    calculadaAl: new Date(fila.calculada_al),
+  };
+}
+
+/** ¿El plus de este socio cubre hoy en esta sede? */
+async function plusVigente(tx: any, ci: string, hoy: Date) {
+  const acceso = await tx.clienteAccesoMultisede.findFirst({
+    where: { ci, is_deleted: false },
+  });
+  return accesoCubre(acceso as any, hoy);
+}
+
+/**
+ * Qué se le cobraría hoy a un visitante, sin cobrar nada (M4c).
+ *
+ * El mostrador lo necesita **antes** de pulsar: enseñar un importe después de
+ * haberlo cobrado no sirve para decidir. Y como el recargo por mora se
+ * recalcula al leer, este endpoint devuelve el importe de hoy, no el de la foto.
+ */
+export async function getCotizacionDeVisitante(c: Context) {
+  const sesion = auth(c);
+  if (!sesion?.gymId) return c.json({ error: "La sesión no identifica gimnasio." }, 403);
+  const ci = c.req.param("ci").trim();
+  const hoy = await fechaNegocio(prisma, sesion.gymId);
+  const cotizacion = await cotizacionDeVisita(prisma, ci);
+  const decision = cotizarVisita({
+    cotizacion,
+    accesoMultisedeVigente: await plusVigente(prisma, ci, hoy),
+    fechaNegocio: hoy,
+  });
+
+  if (decision.resultado === "BLOQUEADO") {
+    // 200 y no 409: preguntar qué se le cobraría a alguien a quien no se le
+    // puede cobrar es una pregunta legítima, y el mostrador necesita el motivo
+    // para decirlo en pantalla en vez de enseñar un error.
+    return c.json({ cobrable: false, motivo: decision.motivo });
+  }
+  const i = decision.importe;
+  return c.json({
+    cobrable: true,
+    cotizacion: {
+      ci,
+      gym_id_origen: cotizacion!.gymIdOrigen,
+      plan_codigo: i.planCodigo,
+      plan_nombre: cotizacion!.planNombre,
+      moneda_id: i.monedaId,
+      precio_lista: i.precioLista,
+      base: i.base,
+      recargo_mora: i.recargoMora,
+      total: i.total,
+      dias_atraso: i.diasAtraso,
+      cuota_numero: i.cuotaNumero,
+      categoria_cliente: i.categoriaCliente,
+      // La antigüedad de la foto se publica: el operador tiene derecho a saber
+      // de cuándo es el precio que está a punto de cobrar.
+      antiguedad_dias: i.antiguedadDias,
+    },
+  });
+}
+
+/**
+ * Cobra el plan de un visitante (M4c): el efectivo se queda aquí y el ingreso
+ * es de su sede.
+ */
+export async function postCobroCruzado(c: Context) {
+  const sesion = auth(c);
+  if (!sesion?.gymId || !sesion.sub) {
+    return c.json({ error: "La sesión no identifica gimnasio y operador." }, 403);
+  }
+  const ci = c.req.param("ci").trim();
+  const cuerpo = await c.req.json().catch(() => ({}) as any);
+  try {
+    const actor = await new PrismaPaymentActorResolver(prisma).resolve({
+      userId: sesion.sub,
+      gymId: sesion.gymId,
+    });
+    const ledger = new TreasuryLedgerService();
+    const nowUtc = trustedClock.nowUtc();
+    const pagoId = randomUUID();
+    const cuentaId = cuerpo?.cuenta_id ?? null;
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      const hoy = await fechaNegocio(tx, sesion.gymId!);
+      const cobro = await cobrarPlanDeVisitante({
+        tx,
+        ci,
+        gymIdQueCobra: sesion.gymId!,
+        cobradoPor: {
+          userId: actor.userId,
+          nombre: actor.nombre,
+          rol: actor.rol,
+          origen: actor.origen,
+        },
+        accesoMultisedeVigente: await plusVigente(tx, ci, hoy),
+        tipoPagoId: cuerpo?.tipo_pago_id ?? null,
+        cuentaId,
+        fechaNegocio: hoy,
+        sourceDevice: DISPOSITIVO,
+        nowUtc,
+        pagoId,
+        detalleId: randomUUID(),
+        registrarEnTesoreria: (pago) =>
+          ledger.recordCobroCruzadoInTx(tx, sesion.gymId!, pago, cuentaId),
+        // M4c — el pago y su detalle interesan a DOS sedes: la dueña del
+        // ingreso y la que se quedó el efectivo. Se anuncian a las dos, con un
+        // evento por destinatario, porque cada instalación descarga por su
+        // `gym_id` y lleva su propio cursor. El asiento del saldo y el
+        // movimiento de caja son solo de quien cobró y viajan como suyos.
+        //
+        // Antes esto emitía un único evento hacia la sede dueña, así que la
+        // sede que tenía el dinero se quedaba con el asiento y el movimiento
+        // colgando de un pago que en su base no existía.
+        emitirEvento: async (entidad, operacion, entidadId, fila) => {
+          const destinatarios =
+            audienciasDelCobroPorCuentaAjena({
+              entity: entidad,
+              payload: fila as Record<string, unknown>,
+              gymIdEmisor: sesion.gymId!,
+            }) ??
+            (entidad === "saldo_enlace_asiento"
+              ? [sesion.gymId!]
+              : [String(fila.gym_id ?? sesion.gymId)]);
+          for (const destinatario of destinatarios) {
+            await tx.syncLog.create({
+              data: {
+                event_id: randomUUID(),
+                entidad,
+                operacion,
+                entidad_id: entidadId,
+                gym_id: destinatario,
+                device_id: null,
+                payload_json: JSON.stringify(fila),
+              },
+            });
+          }
+        },
+      });
+
+      // Un cobro hecho AQUÍ no sube: ya está en el concentrador. Si la
+      // cobertura solo se aplicara al subir, el visitante atendido desde la web
+      // pagaría y seguiría figurando vencido en su sede para siempre. Lo
+      // destapó la sonda del 17-08. Llamarlo en los dos sitios es seguro porque
+      // el aplicador es idempotente por `pago_membresia_aplicacion`: esa
+      // idempotencia deja de ser una precaución y pasa a ser lo que sostiene
+      // que haya dos caminos.
+      await aplicarCobroCruzadoALaCobertura({
+        tx,
+        pago: cobro.pago,
+        fechaNegocio: await fechaNegocio(tx, String(cobro.pago.gym_id)),
+        nowUtc,
+        sourceDevice: DISPOSITIVO,
+        emitirEvento: (entidad, operacion, entidadId, fila) =>
+          tx.syncLog.create({
+            data: {
+              event_id: randomUUID(),
+              entidad,
+              operacion,
+              entidad_id: entidadId,
+              gym_id: String(cobro.pago.gym_id),
+              device_id: null,
+              payload_json: JSON.stringify(fila),
+            },
+          }),
+      });
+      return cobro;
+    });
+
+    return c.json(
+      {
+        cobro: {
+          pago_cliente_id: resultado.pago.pago_cliente_id,
+          ci: resultado.pago.ci,
+          total: normalizeMoney(resultado.pago.monto_total),
+          base: resultado.importe.base,
+          recargo_mora: resultado.importe.recargoMora,
+          dias_atraso: resultado.importe.diasAtraso,
+          moneda_id: resultado.pago.moneda_id,
+          ingreso_de: resultado.pago.gym_id,
+          cobrado_en_gym_id: resultado.pago.cobrado_en_gym_id,
+          plan_codigo: resultado.importe.planCodigo,
+          cuota_numero: resultado.importe.cuotaNumero,
         },
       },
       201,

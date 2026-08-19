@@ -8,6 +8,10 @@ import {
     frozenActorFromSyncPayload,
 } from "../../payment/payment-actor";
 import { normalizeMoney } from "../../../domain/money";
+import {
+    atribuirCobro,
+    type AtribucionDeCobro,
+} from "../../../domain/atribucion-de-cobro-policy";
 
 /** Actor congelado del payload, o los cuatro nulos si el cobro es histórico. */
 function frozenCollectorColumns(payload: Record<string, unknown>) {
@@ -23,6 +27,26 @@ export interface ApplyPagoClienteEventInput {
     payload: SyncEventPayload;
     /** Contexto transaccional del upload (Unidad 01). */
     tx?: SyncTransactionContext;
+    /**
+     * M4c — resuelve si el socio está autorizado a que el ingreso se atribuya a
+     * la sede que el payload declara: pertenece a ella y tiene el plus vigente.
+     * Se comprueba contra la base, nunca contra el payload.
+     *
+     * Se inyecta en vez de consultarse aquí para que este caso de uso siga
+     * siendo el que aplica el evento y no el que decide quién es quién.
+     */
+    resolverSocioAutorizado?: (input: {
+        ci: string;
+        gymIdDeclarado: string;
+    }) => Promise<boolean>;
+}
+
+/** Rechazo de atribución: el evento va a cuarentena, no se «corrige». */
+export class AtribucionDeCobroError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "AtribucionDeCobroError";
+    }
 }
 
 export class ApplyPagoClienteEventUseCase {
@@ -41,11 +65,35 @@ export class ApplyPagoClienteEventUseCase {
             return;
         }
 
-        const pagoCliente = this.mapPayloadToPagoCliente(input);
+        // M4c — **el ingreso no se reescribe.** Antes se sellaba `gym_id` con la
+        // sede del dispositivo sin preguntar, así que un cobro hecho en otra
+        // sede llegaba convertido en ingreso de quien lo subía: sin error y sin
+        // rastro. Ahora se decide, y ante cualquier incoherencia se rechaza
+        // para que el evento se vea en la cuarentena (§7.10).
+        const payload = input.payload as Record<string, unknown>;
+        const decision = atribuirCobro({
+            gymIdDelDispositivo: input.gymId,
+            gymIdDeclaradoDelIngreso: payload.gym_id,
+            cobradoEnDeclarado: payload.cobrado_en_gym_id,
+            socioAutorizadoEnLaSedeDeclarada:
+                String(payload.gym_id ?? "").trim() &&
+                String(payload.gym_id).trim() !== input.gymId
+                    ? await (input.resolverSocioAutorizado?.({
+                          ci: String(payload.ci ?? "").trim(),
+                          gymIdDeclarado: String(payload.gym_id).trim(),
+                      }) ?? Promise.resolve(false))
+                    : true,
+        });
+        if (!decision.ok) throw new AtribucionDeCobroError(decision.motivo);
+
+        const pagoCliente = this.mapPayloadToPagoCliente(input, decision.atribucion);
         await repo.upsertPagoCliente(pagoCliente);
     }
 
-    private mapPayloadToPagoCliente(input: ApplyPagoClienteEventInput): PagoCliente {
+    private mapPayloadToPagoCliente(
+        input: ApplyPagoClienteEventInput,
+        atribucion: AtribucionDeCobro,
+    ): PagoCliente {
         const payload = input.payload as Record<string, unknown>;
 
         return {
@@ -83,7 +131,15 @@ export class ApplyPagoClienteEventUseCase {
             // aquí dejaría el cierre remoto sin poder decir quién recibió el
             // dinero, que es justo lo que este corte viene a arreglar.
             ...frozenCollectorColumns(payload),
-            gym_id: input.gymId,
+            // La sede DUEÑA del ingreso, que no siempre es la del dispositivo.
+            gym_id: atribucion.gymIdDelIngreso,
+            // Y dónde entró el efectivo. Nulo en el cobro corriente: ahí las
+            // dos son la misma y guardar el dato borraría la diferencia entre
+            // «no aplica» y «coincide».
+            cobrado_en_gym_id:
+                atribucion.clase === "POR_CUENTA_AJENA"
+                    ? atribucion.cobradoEnGymId
+                    : null,
             source_device: input.deviceId,
             version: (payload.version as number) ?? 1,
             created_at: payload.created_at

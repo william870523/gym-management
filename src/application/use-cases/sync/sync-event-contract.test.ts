@@ -3,6 +3,7 @@ import {
   PARITY_SYNC_ENTITIES,
   PARITY_SYNC_TARGET_DEFINITIONS,
   assertSyncPrimaryKeyOwnership,
+  audienciasDelCobroPorCuentaAjena,
   buildAuthenticatedSyncPayload,
   GLOBAL_REACH_SYNC_ENTITIES,
   GLOBAL_SYNC_ENTITIES,
@@ -18,7 +19,7 @@ import {
 } from "./sync-event-contract";
 
 describe("contrato fail-closed de upload", () => {
-  it("declara las quince entidades con pertenencia estricta", () => {
+  it("declara las dieciséis entidades con pertenencia estricta", () => {
     expect([...PARITY_SYNC_ENTITIES]).toEqual([
       "usuario_sede",
       "gasto_categoria",
@@ -33,6 +34,7 @@ describe("contrato fail-closed de upload", () => {
       "tipo_cambio_recargo",
       "cliente_acceso_multisede",
       "cliente_visitante",
+      "cliente_visitante_cotizacion",
       "saldo_enlace_asiento",
       "acceso_multisede_cobro",
     ]);
@@ -236,5 +238,157 @@ describe("contrato fail-closed de upload", () => {
     };
     expect(() => validateMembershipInstallmentSyncRecord(valid)).not.toThrow();
     expect(valid.estado).toBe("PAGADA");
+  });
+});
+
+describe("M4c · el cobro por cuenta ajena sube sin perder su dueño", () => {
+  const cruzado = {
+    gym_id: "dtc-gym-ajeno",
+    cobrado_en_gym_id: "local-gym-001",
+    source_device: "device-atacante",
+    ci: "99090100009",
+    monto_total: "275.00",
+  };
+
+  it("conserva la sede DUEÑA del ingreso y sella dónde entró el efectivo", () => {
+    // El defecto que encontró el recorrido del 17-08-2026: sellar `gym_id` con
+    // la sede del emisor convertía el cobro cruzado en ingreso de quien lo
+    // subía (§7.10) y, como el socio no es de esa sede, el evento se rechazaba
+    // y atascaba la cola con todo lo demás detrás.
+    expect(
+      buildAuthenticatedSyncPayload({
+        entity: "pago_cliente",
+        payload: { ...cruzado },
+        gymId: "local-gym-001",
+        deviceId: "device-auth",
+      }),
+    ).toEqual({
+      gym_id: "dtc-gym-ajeno",
+      cobrado_en_gym_id: "local-gym-001",
+      source_device: "device-auth",
+      ci: "99090100009",
+      monto_total: "275.00",
+    });
+  });
+
+  it("el cobro corriente sigue recibiendo la sede del emisor", () => {
+    // La excepción es de forma, no de entidad: un pago sin cobro cruzado
+    // declarado se sella como siempre, aunque venga con una sede mentida.
+    expect(
+      buildAuthenticatedSyncPayload({
+        entity: "pago_cliente",
+        payload: {
+          gym_id: "gym-atacante",
+          source_device: "device-atacante",
+          ci: "91021020015",
+        },
+        gymId: "local-gym-001",
+        deviceId: "device-auth",
+      }),
+    ).toEqual({
+      gym_id: "local-gym-001",
+      source_device: "device-auth",
+      ci: "91021020015",
+    });
+  });
+
+  it("no deja escribir en la sede de otro disfrazándolo de cobro cruzado", () => {
+    // Declarar una sede dueña ajena y decir que el efectivo entró en una
+    // TERCERA no es un cobro cruzado: es escribir en casa ajena. Se sella.
+    expect(
+      buildAuthenticatedSyncPayload({
+        entity: "pago_cliente",
+        payload: { ...cruzado, cobrado_en_gym_id: "m2-gym-oeste" },
+        gymId: "local-gym-001",
+        deviceId: "device-auth",
+      }),
+    ).toMatchObject({ gym_id: "local-gym-001" });
+
+    // Y declararla sin decir dónde entró el dinero, tampoco.
+    expect(
+      buildAuthenticatedSyncPayload({
+        entity: "pago_cliente",
+        payload: { ...cruzado, cobrado_en_gym_id: null },
+        gymId: "local-gym-001",
+        deviceId: "device-auth",
+      }),
+    ).toMatchObject({ gym_id: "local-gym-001" });
+  });
+
+  it("el efectivo se sella con el token: no se acepta el que declare el payload", () => {
+    // `cobrado_en_gym_id` es lo único que el emisor no puede elegir: el dinero
+    // entró en SU caja. Si se aceptara declarado, una sede podría atribuirle el
+    // efectivo —y el saldo— a otra.
+    expect(
+      buildAuthenticatedSyncPayload({
+        entity: "pago_cliente",
+        payload: { ...cruzado, cobrado_en_gym_id: "local-gym-001" },
+        gymId: "local-gym-001",
+        deviceId: "device-auth",
+      }),
+    ).toMatchObject({
+      gym_id: "dtc-gym-ajeno",
+      cobrado_en_gym_id: "local-gym-001",
+    });
+  });
+});
+
+describe("M4c · el cobro cruzado se anuncia a las dos sedes que lo viven", () => {
+  it("el pago llega a la dueña del ingreso y a la que se quedó el efectivo", () => {
+    expect(
+      audienciasDelCobroPorCuentaAjena({
+        entity: "pago_cliente",
+        payload: { gym_id: "dtc-gym-ajeno", cobrado_en_gym_id: "local-gym-001" },
+        gymIdEmisor: "local-gym-001",
+      }),
+    ).toEqual(["dtc-gym-ajeno", "local-gym-001"]);
+  });
+
+  it("el detalle sigue a su pago sin tener que copiarse el dato", () => {
+    // `detalle_pago` no tiene `cobrado_en_gym_id` y no debe tenerlo: basta con
+    // que declare una sede distinta a la del emisor, porque su `gym_id` ya lo
+    // hereda del pago.
+    expect(
+      audienciasDelCobroPorCuentaAjena({
+        entity: "detalle_pago",
+        payload: { gym_id: "dtc-gym-ajeno" },
+        gymIdEmisor: "local-gym-001",
+      }),
+    ).toEqual(["dtc-gym-ajeno", "local-gym-001"]);
+  });
+
+  it("un cobro corriente no tiene dos audiencias", () => {
+    expect(
+      audienciasDelCobroPorCuentaAjena({
+        entity: "pago_cliente",
+        payload: { gym_id: "local-gym-001", cobrado_en_gym_id: null },
+        gymIdEmisor: "local-gym-001",
+      }),
+    ).toBeNull();
+  });
+
+  it("declarar una sede ajena sin haber cobrado aquí no abre la segunda audiencia", () => {
+    // Si el efectivo dice haber entrado en una tercera sede, esto no es un
+    // cobro cruzado de quien lo emite: no se le regala audiencia a nadie.
+    expect(
+      audienciasDelCobroPorCuentaAjena({
+        entity: "pago_cliente",
+        payload: { gym_id: "dtc-gym-ajeno", cobrado_en_gym_id: "m2-gym-oeste" },
+        gymIdEmisor: "local-gym-001",
+      }),
+    ).toBeNull();
+  });
+
+  it("las otras entidades del cobro no se reparten: el saldo y la caja son de quien cobró", () => {
+    for (const entidad of ["saldo_enlace_asiento", "tesoreria_movimiento", "membresia_cliente"]) {
+      expect(
+        audienciasDelCobroPorCuentaAjena({
+          entity: entidad,
+          payload: { gym_id: "dtc-gym-ajeno", cobrado_en_gym_id: "local-gym-001" },
+          gymIdEmisor: "local-gym-001",
+        }),
+        entidad,
+      ).toBeNull();
+    }
   });
 });

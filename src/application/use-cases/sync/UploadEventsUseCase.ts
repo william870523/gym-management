@@ -31,6 +31,7 @@ import {
   GLOBAL_REACH_SYNC_ENTITIES,
   GLOBAL_SYNC_ENTITIES,
   assertSyncPrimaryKeyOwnership,
+  audienciasDelCobroPorCuentaAjena,
   buildAuthenticatedSyncPayload,
   buildAuthoritativeGymRecord,
   normalizeSyncDates,
@@ -51,6 +52,24 @@ import { usuarioSedeId } from "../../auth/usuario-sede";
 import { canonicalRole } from "../../../infrastructure/auth/permissions";
 import { surchargeScopeId } from "../../payment/rate-surcharge-scope.service";
 import { accesoMultisedeId } from "../../../domain/acceso-multisede-policy";
+import { esVisitanteAutorizado } from "../../../infrastructure/repositories/visitante-referencia";
+import { aplicarCobroCruzadoALaCobertura } from "../../acceso-multisede/aplicar-cobro-cruzado";
+
+/**
+ * Fecha de negocio de la sede que sube, no la del servidor
+ * (docs/TIME_CONTRACT.md). El plus vence a medianoche del gimnasio.
+ */
+async function fechaDeNegocioDeLaSede(tx: any, gymId: string): Promise<Date> {
+  const gym = await tx.gym.findUnique({
+    where: { gym_id: gymId },
+    select: { timezone: true },
+  });
+  const partes = datePartsInZone(
+    String(gym?.timezone ?? "Etc/UTC"),
+    trustedClock.nowUtc(),
+  );
+  return new Date(Date.UTC(partes.year, partes.month - 1, partes.day));
+}
 
 /**
  * Resultado explícito del upload — Unidad 01, paso 4.
@@ -361,6 +380,27 @@ export class UploadEventsUseCase {
       deviceId: device_id,
     });
 
+    // M4c — el detalle es de la sede de SU PAGO, no de la de quien lo sube.
+    //
+    // Se resuelve aquí, antes de repartir, y no dentro del caso de uso, porque
+    // este payload es también **el que se reemite**: si se corrigiera solo al
+    // escribir la fila, el concentrador guardaría el detalle en la sede dueña y
+    // se lo anunciaría a las demás con la sede del emisor. La instalación que
+    // bajara ese eco escribiría una tercera versión, y las dos bases dirían
+    // cosas distintas de la misma fila sin que nadie hubiera hecho nada mal a la
+    // vista. Medido en el recorrido del 17-08-2026.
+    if (ev.entidad === "detalle_pago" && ev.operacion !== "DELETE") {
+      const pagoId = String(effectivePayload.pago_cliente_id ?? "").trim();
+      if (pagoId) {
+        const pago = await (tx as any).pagoCliente.findUnique({
+          where: { pago_cliente_id: pagoId },
+          select: { gym_id: true },
+        });
+        const dueña = String(pago?.gym_id ?? "").trim();
+        if (dueña) effectivePayload.gym_id = dueña;
+      }
+    }
+
     // Enrutamiento por entidad
     if (ev.entidad === "cliente") {
       await this.applyClienteEventUseCase.execute({
@@ -421,7 +461,62 @@ export class UploadEventsUseCase {
         deviceId: device_id,
         payload: effectivePayload,
         tx,
+        // M4c — la misma excepción auditada que M4a abrió para la asistencia,
+        // y por el mismo motivo: es lo único que permite que el ingreso se
+        // atribuya a otra sede, y se comprueba contra la base. Sin ella el
+        // cobro cruzado se rechaza (falla cerrado).
+        resolverSocioAutorizado: async ({ ci, gymIdDeclarado }) => {
+          const socio = await (tx as any).cliente.findFirst({
+            where: { ci, gym_id: gymIdDeclarado, is_deleted: false },
+            select: { ci: true },
+          });
+          if (!socio) return false;
+          return esVisitanteAutorizado({
+            tx,
+            ci,
+            gymId: gym_id,
+            fechaNegocio: await fechaDeNegocioDeLaSede(tx, gym_id),
+          });
+        },
       });
+
+      // M4c — y aquí se cierra el hueco de §7.12. El cobro cruzado ya está
+      // guardado con el ingreso en la sede dueña; falta que su cobertura
+      // avance. La sede que cobró no pudo hacerlo —no tiene esa membresía— y
+      // la dueña tardaría en hacerlo lo que tarde en encenderse. El
+      // concentrador es el único que tiene las dos partes delante siempre.
+      const cruzado = String((effectivePayload as any)?.cobrado_en_gym_id ?? "").trim();
+      if (
+        ev.operacion !== "DELETE" &&
+        cruzado &&
+        cruzado !== String((effectivePayload as any)?.gym_id ?? "").trim()
+      ) {
+        const guardado = await (tx as any).pagoCliente.findUnique({
+          where: { pago_cliente_id: ev.entidad_id },
+        });
+        if (guardado) {
+          await aplicarCobroCruzadoALaCobertura({
+            tx,
+            pago: guardado,
+            // La fecha de negocio de la SEDE DUEÑA: es su cobertura.
+            fechaNegocio: await fechaDeNegocioDeLaSede(tx, String(guardado.gym_id)),
+            nowUtc: trustedClock.nowUtc(),
+            sourceDevice: device_id,
+            emitirEvento: (entidad, operacion, entidadId, fila) =>
+              (tx as any).syncLog.create({
+                data: {
+                  event_id: randomUUID(),
+                  entidad,
+                  operacion,
+                  entidad_id: entidadId,
+                  gym_id: String(guardado.gym_id),
+                  device_id: null,
+                  payload_json: JSON.stringify(fila),
+                },
+              }),
+          });
+        }
+      }
     } else if (ev.entidad === "detalle_pago") {
       await this.applyDetallePagoEventUseCase.execute({
         eventId: ev.event_id,
@@ -576,6 +671,7 @@ export class UploadEventsUseCase {
         // de la cadena.
         "cliente_acceso_multisede",
         "cliente_visitante",
+        "cliente_visitante_cotizacion",
         // M4b: el asiento del saldo. Sube como entidad de sede corriente; su
         // `gym_id` es el de quien lo emite porque el deudor es siempre quien
         // se quedó el efectivo.
@@ -621,19 +717,40 @@ export class UploadEventsUseCase {
         ? null
         : gym_id;
 
+    // M4c — el cobro por cuenta ajena interesa a DOS sedes y se anuncia a las
+    // dos: la dueña del ingreso y la que se quedó el efectivo. Se registra un
+    // evento por destinatario, con su propio `event_id`, porque cada
+    // instalación lleva su cursor y descarga lo suyo.
+    //
+    // El que sube ya tiene la fila —nació en su base—, pero el evento se emite
+    // igual: es lo que hace que las dos rutas, subir y cobrar en la web, dejen
+    // el mismo estado. Aplicarlo dos veces es un upsert sobre la misma clave.
+    const audiencias =
+      ev.operacion === "DELETE"
+        ? null
+        : audienciasDelCobroPorCuentaAjena({
+            entity: ev.entidad,
+            payload: effectivePayload,
+            gymIdEmisor: gym_id,
+          });
+
     // Registrar en sync_log, con el mismo tx que escribió la entidad.
-    await this.syncLogRepository.register(
-      {
-        eventId: ev.event_id,
-        entidad: ev.entidad,
-        operacion: ev.operacion,
-        entidadId: ev.entidad_id,
-        gymId: effectiveGymId,
-        deviceId: device_id,
-        payload: effectivePayload,
-      },
-      tx,
-    );
+    for (const [indice, destinatario] of (audiencias ?? [effectiveGymId]).entries()) {
+      await this.syncLogRepository.register(
+        {
+          // El primero conserva el `event_id` del emisor: es el que su cola
+          // espera confirmado. El segundo es un anuncio nuevo y lleva el suyo.
+          eventId: indice === 0 ? ev.event_id : randomUUID(),
+          entidad: ev.entidad,
+          operacion: ev.operacion,
+          entidadId: ev.entidad_id,
+          gymId: destinatario,
+          deviceId: device_id,
+          payload: effectivePayload,
+        },
+        tx,
+      );
+    }
 
     // El evento original se registra primero. Si la unión local/remota
     // descubre dos compras futuras solapadas, las correcciones quedan después
@@ -1138,6 +1255,31 @@ export class UploadEventsUseCase {
       if (!ci || String(primaryKey) !== ci || origen !== gymId) {
         throw new Error(
           "La copia de visitante no identifica al socio o declara una sede de origen que no es la del emisor.",
+        );
+      }
+      record.ci = ci;
+      record.gym_id_origen = origen;
+    }
+
+    if (ev.entidad === "cliente_visitante_cotizacion") {
+      // Gemela de la validación de la copia, y por el mismo motivo: solo la
+      // sede de origen cotiza a sus socios. Aceptar una cotización que declare
+      // otra sede dejaría a cualquier instalación fijarle el precio a un socio
+      // ajeno en todas las demás. La baja se comprueba igual que el alta —el
+      // agujero que costó encontrar el 16-08 con `cliente_visitante`—, leyendo
+      // el origen de la fila existente cuando el payload no lo trae.
+      const ci = String(record.ci ?? "").trim() || String(primaryKey).trim();
+      let origen = String(record.gym_id_origen ?? "").trim();
+      if (!origen) {
+        const existente = await client.clienteVisitanteCotizacion.findUnique({
+          where: { ci },
+          select: { gym_id_origen: true },
+        });
+        origen = String(existente?.gym_id_origen ?? "").trim();
+      }
+      if (!ci || String(primaryKey) !== ci || origen !== gymId) {
+        throw new Error(
+          "La cotización de visita no identifica al socio o declara una sede de origen que no es la del emisor.",
         );
       }
       record.ci = ci;

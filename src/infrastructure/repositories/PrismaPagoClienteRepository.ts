@@ -121,6 +121,15 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     id_planes_pago: data.id_planes_pago,
                     moneda_id: data.moneda_id,
                     gym_id: data.gym_id,
+                    // M4c. La entidad lo declaraba y el caso de uso lo
+                    // calculaba, pero el upsert no lo escribía: el cobro
+                    // cruzado que subía por la cola llegaba con el ingreso bien
+                    // atribuido y **sin decir dónde está el dinero**, así que el
+                    // aviso al dueño hablaba de «la sede otra». Es el tercer
+                    // caso del mismo patrón, después de los descuentos de R5.3 y
+                    // la fecha de nacimiento del 31-07-2026: un campo que se
+                    // mapea y no se persiste no da error, da silencio.
+                    cobrado_en_gym_id: data.cobrado_en_gym_id ?? null,
                     source_device: data.source_device ?? null,
                     version: data.version,
                     created_at: data.created_at ?? now,
@@ -155,6 +164,7 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
                     id_planes_pago: data.id_planes_pago,
                     moneda_id: data.moneda_id,
                     gym_id: data.gym_id,
+                    cobrado_en_gym_id: data.cobrado_en_gym_id ?? null,
                     source_device: data.source_device ?? null,
                     version: data.version,
                     updated_at: now,

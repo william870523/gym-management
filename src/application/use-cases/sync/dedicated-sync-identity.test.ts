@@ -121,7 +121,15 @@ describe("identidad autoritativa en handlers dedicados", () => {
   });
 
   it("sobrescribe gym_id y source_device del payload en todas las filas scoped", async () => {
-    for (const testCase of scopedCases) {
+    // M4c — `pago_cliente` queda fuera de esta regla, y es un endurecimiento,
+    // no una excepción. Sobrescribir en silencio el `gym_id` declarado era
+    // seguro mientras NADIE podía declarar legítimamente otra sede: la
+    // normalización y el ataque se trataban igual porque el ataque era el único
+    // caso. Con el cobro cruzado deja de serlo, y entonces normalizar en
+    // silencio significa convertir el ingreso de otra sede en propio sin que
+    // nada lo delate (§7.10). El cobro se comprueba y se RECHAZA; su regla está
+    // en `atribucion-de-cobro.test.ts`.
+    for (const testCase of scopedCases.filter((c) => c.entity !== "pago_cliente")) {
       let written: Record<string, unknown> | null = null;
       const repository: Record<string, unknown> = {
         softDelete: async () => undefined,
@@ -137,6 +145,26 @@ describe("identidad autoritativa en handlers dedicados", () => {
       expect(written!.gym_id, testCase.entity).toBe("gym-auth");
       expect(written!.source_device, testCase.entity).toBe("device-auth");
     }
+  });
+
+  it("el cobro con sede ajena se rechaza en vez de normalizarse (M4c)", async () => {
+    // La otra mitad de la prueba anterior: aquí se comprueba que el ataque
+    // sigue sin pasar, pero por la puerta correcta. Antes el atacante lograba
+    // escribir una fila —la suya, renombrada—; ahora no escribe nada.
+    let written: Record<string, unknown> | null = null;
+    const repository: any = {
+      softDelete: async () => undefined,
+      upsertPagoCliente: async (record: Record<string, unknown>) => {
+        written = record;
+      },
+    };
+    await expect(
+      new ApplyPagoClienteEventUseCase(repository).execute({
+        ...authenticatedInput,
+        operacion: "INSERT",
+      } as any),
+    ).rejects.toThrow();
+    expect(written).toBeNull();
   });
 
   it("propaga gym_id al DELETE de todas las filas scoped", async () => {

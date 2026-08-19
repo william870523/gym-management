@@ -43,6 +43,13 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
     pk: "cliente_acceso_multisede_id",
   },
   cliente_visitante: { delegateKey: "clienteVisitante", pk: "ci" },
+  // M4c: la cotización de visita. Misma clase que la copia —alcance global con
+  // dueño propio en `gym_id_origen`— y tabla aparte porque responde otra
+  // pregunta y cambia con otra frecuencia.
+  cliente_visitante_cotizacion: {
+    delegateKey: "clienteVisitanteCotizacion",
+    pk: "ci",
+  },
   // M4b: el asiento del saldo entre partes es de la sede DEUDORA —la que se
   // quedó el efectivo—, que es también la que lo emite. Entidad de sede
   // corriente: no necesita el alcance global que sí necesitaba M4a.
@@ -100,6 +107,9 @@ export const GLOBAL_REACH_SYNC_ENTITIES = new Set<string>([
   // `gym_id_origen`, un nombre distinto a propósito para que ningún camino
   // genérico la confunda con «la sede de esta fila» y se la reescriba.
   "cliente_visitante",
+  // M4c: su cotización viaja igual. Que llegue a todas las sedes es lo que
+  // permite cobrarle sin conexión en cualquiera de ellas.
+  "cliente_visitante_cotizacion",
 ]);
 
 /**
@@ -114,6 +124,7 @@ export const GLOBAL_REACH_SYNC_ENTITIES = new Set<string>([
  */
 export const ENTIDADES_SIN_COLUMNA_GYM_ID = new Set<string>([
   "cliente_visitante",
+  "cliente_visitante_cotizacion",
 ]);
 
 /**
@@ -286,6 +297,67 @@ export function buildAuthoritativeGymRecord(input: {
   };
 }
 
+/**
+ * Un cobro **por cuenta ajena** que sube desde la sede que se quedó el efectivo
+ * (M4c, docs/MULTI_SEDE.md §5.3).
+ *
+ * Se reconoce por su forma y no por un permiso: la fila declara una sede dueña
+ * distinta de la del emisor **y** declara que el efectivo entró justo en la del
+ * emisor. Cualquier otra combinación —una sede dueña ajena sin decir dónde entró
+ * el dinero, o diciendo que entró en una tercera— no es un cobro cruzado sino un
+ * intento de escribir en la sede de otro, y sigue el camino de siempre.
+ */
+function declaraCobroPorCuentaAjena(
+  record: Record<string, unknown>,
+  gymIdDelDispositivo: string,
+) {
+  const dueña = String(record.gym_id ?? "").trim();
+  const cobradoEn = String(record.cobrado_en_gym_id ?? "").trim();
+  const emisor = String(gymIdDelDispositivo ?? "").trim();
+  return dueña !== "" && dueña !== emisor && cobradoEn === emisor;
+}
+
+/**
+ * A qué sedes tiene que llegar un evento de **cobro por cuenta ajena** (M4c).
+ *
+ * Es un cuarto caso de alcance, junto a «de sede», «global» y «global con dueño
+ * propio»: el cobro cruzado interesa a **dos** instalaciones y a ninguna más.
+ *
+ * - la **dueña del ingreso**, porque es su dinero y su contabilidad;
+ * - la que se quedó el **efectivo**, porque es su caja, su arqueo y el
+ *   comprobante que le enseña al socio (§5.3, §7.11).
+ *
+ * Hasta ahora el evento se anunciaba a una sola, y **cuál dependía de dónde se
+ * hubiera cobrado**: el cobro subido desde el escritorio llegaba solo a quien lo
+ * cobró y el hecho en la web solo a la sede dueña. La misma operación dejaba dos
+ * estados distintos, y en el segundo caso la sede que tiene el dinero se
+ * quedaba con un asiento de saldo y un movimiento de caja colgando de un pago
+ * que no existía en su base —hijos sin padre por construcción—.
+ *
+ * `null` cuando la fila no es un cobro cruzado: entonces manda la regla normal.
+ */
+export function audienciasDelCobroPorCuentaAjena(input: {
+  entity: string;
+  payload: Record<string, unknown>;
+  /** Sede del emisor, que en un cobro cruzado es la que se quedó el efectivo. */
+  gymIdEmisor: string;
+}): string[] | null {
+  if (input.entity !== "pago_cliente" && input.entity !== "detalle_pago") return null;
+  const dueña = String(input.payload.gym_id ?? "").trim();
+  const emisor = String(input.gymIdEmisor ?? "").trim();
+  if (!dueña || !emisor || dueña === emisor) return null;
+  // El pago lo dice de su puño y letra; el detalle lo hereda de él, que es
+  // quien lo sabe. Exigírselo al detalle obligaría a copiar el dato en una
+  // tabla que no lo tiene, y un dato copiado es un dato que se desincroniza.
+  if (
+    input.entity === "pago_cliente" &&
+    String(input.payload.cobrado_en_gym_id ?? "").trim() !== emisor
+  ) {
+    return null;
+  }
+  return [dueña, emisor];
+}
+
 export function buildAuthenticatedSyncPayload(input: {
   entity: string;
   payload: Record<string, unknown>;
@@ -304,6 +376,29 @@ export function buildAuthenticatedSyncPayload(input: {
     // Que el emisor no pueda mentir lo garantiza la validación previa, que
     // exige que coincida con la sede del dispositivo mientras el cobro por
     // cuenta ajena (M4b) no exista.
+    record.source_device = input.deviceId;
+    return record;
+  }
+
+  // M4c — la única fila de sede cuyo `gym_id` NO es el del emisor.
+  //
+  // Sellarlo aquí, que es lo que se hacía, tenía dos caras y las dos malas: el
+  // cobro cruzado llegaba **convertido en ingreso de quien lo subía** —el
+  // «ingreso mal atribuido» que §7.10 llama el riesgo más caro— y, como el socio
+  // no pertenece a esa sede, la escritura se rechazaba y **el evento atascaba la
+  // cola**. Medido en el recorrido del 17-08-2026: el cobro sin conexión no
+  // llegaba nunca al concentrador, con tres eventos retenidos detrás.
+  //
+  // Se conserva la sede dueña **declarada** y se sella la que no puede
+  // declararse: el efectivo entró en la caja de quien sube, y eso lo sabe el
+  // token, no el payload. Que la sede dueña sea legítima no se cree, se
+  // comprueba contra la base en `ApplyPagoClienteEventUseCase`, que exige que el
+  // socio pertenezca allí y tenga el plus vigente aquí.
+  if (
+    input.entity === "pago_cliente" &&
+    declaraCobroPorCuentaAjena(record, input.gymId)
+  ) {
+    record.cobrado_en_gym_id = input.gymId;
     record.source_device = input.deviceId;
     return record;
   }

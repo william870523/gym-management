@@ -1025,6 +1025,36 @@ export class TreasuryLedgerService {
    * ingreso propio y el margen de esta sede se inflaría con dinero de la
    * cadena (docs/MULTI_SEDE.md §7.10).
    */
+  /**
+   * M4c — el efectivo del plan de un visitante entra en la caja de la sede que
+   * lo cobró, con la misma familia de origen que el plus: el ingreso es de otro.
+   */
+  async recordCobroCruzadoInTx(tx: Tx, gymId: string, pago: any, cuentaId: string | null) {
+    if (!pago) return 0;
+    return this.createMovement(tx, gymId, {
+      key: `CRUZ:${pago.pago_cliente_id}`,
+      sourceType: "COBRO_CUENTA_AJENA",
+      sourceId: pago.pago_cliente_id,
+      direction: "ENTRADA",
+      concept: "PLAN_CLIENTE_OTRA_SEDE",
+      accountId: cuentaId,
+      currencyId: pago.moneda_id,
+      paymentTypeId: null,
+      amount: this.money(pago.monto_total),
+      occurredAt: new Date(pago.fecha),
+      description:
+        `Plan del socio ${pago.ci}, cobrado aquí; el ingreso es de ${pago.gym_id}.`,
+      review: !cuentaId,
+      reviewReason: !cuentaId ? "COBRO_CRUZADO_SIN_CUENTA" : null,
+      collector: {
+        cobrado_por_user_id: pago.cobrado_por_user_id ?? null,
+        cobrado_por_nombre_snapshot: pago.cobrado_por_nombre_snapshot ?? null,
+        cobrado_por_rol_snapshot: pago.cobrado_por_rol_snapshot ?? null,
+        cobrado_por_origen: pago.cobrado_por_origen ?? null,
+      },
+    });
+  }
+
   async recordPlusMultisedeInTx(tx: Tx, gymId: string, cobro: any) {
     if (!cobro) return 0;
     return this.createMovement(tx, gymId, {

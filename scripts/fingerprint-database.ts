@@ -42,6 +42,18 @@ interface TablaHuella {
   excluidas: string[];
   /** clave primaria → resumen de la fila. Vacío si la tabla no tiene PK. */
   contenido: Record<string, string>;
+  /**
+   * M4c — de qué sede es cada fila, cuando la tabla lo declara.
+   *
+   * Se guarda comprimido: la sede con más filas va en `mayoritaria` y solo se
+   * enumeran las claves de las demás. Sin esto, el comparador no puede
+   * distinguir una fila **perdida** de una fila **de otra sede**, y desde el
+   * cobro cruzado esa diferencia es la mitad de los casos.
+   */
+  porSede: {
+    mayoritaria: string | null;
+    excepciones: Record<string, string[]>;
+  } | null;
   /** columna → resumen de todos sus valores, en orden de clave. */
   huellaColumnas: Record<string, string>;
 }
@@ -94,6 +106,7 @@ async function huella() {
     );
 
     let claves: string[] = [];
+    let porSede: TablaHuella["porSede"] = null;
     const contenido: Record<string, string> = {};
     const huellaColumnas: Record<string, string> = {};
 
@@ -115,6 +128,37 @@ async function huella() {
       for (const entrada of conClave) {
         contenido[entrada.clave] = huellaFila(entrada.fila, comparables);
       }
+      // Sede de cada fila, comprimida: la mayoritaria implícita y el resto
+      // enumeradas. Comprimir no es un ahorro cosmético —la huella ya pesa un
+      // megabyte y medio— y además hace legible el fichero: se ve de un vistazo
+      // qué tabla tiene filas de fuera.
+      if (cols.some((col) => col.COLUMN_NAME === "gym_id")) {
+        const conteo = new Map<string, number>();
+        for (const entrada of conClave) {
+          const sede = entrada.fila.gym_id === null || entrada.fila.gym_id === undefined
+            ? ""
+            : String(entrada.fila.gym_id);
+          conteo.set(sede, (conteo.get(sede) ?? 0) + 1);
+        }
+        let mayoritaria: string | null = null;
+        let maximo = -1;
+        for (const [sede, veces] of conteo) {
+          if (veces > maximo) {
+            maximo = veces;
+            mayoritaria = sede;
+          }
+        }
+        const excepciones: Record<string, string[]> = {};
+        for (const entrada of conClave) {
+          const sede = entrada.fila.gym_id === null || entrada.fila.gym_id === undefined
+            ? ""
+            : String(entrada.fila.gym_id);
+          if (sede === mayoritaria) continue;
+          (excepciones[sede] ??= []).push(entrada.clave);
+        }
+        porSede = { mayoritaria, excepciones };
+      }
+
       for (const columna of comparables) {
         huellaColumnas[columna.nombre] = huellaColumna(
           conClave.map((entrada) =>
@@ -129,6 +173,7 @@ async function huella() {
       vivas,
       pk,
       claves,
+      porSede,
       columnas: comparables,
       excluidas: [...COLUMNAS_EXCLUIDAS],
       contenido,

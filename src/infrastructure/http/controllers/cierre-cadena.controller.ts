@@ -19,6 +19,7 @@ import {
 } from "../../../application/accounting/cierre-cadena-solicitud.service";
 import { semaforoDeLaCadena } from "../../../application/accounting/semaforo-cierre.service";
 import { consolidadoDeLaCadena } from "../../../application/accounting/consolidado-cadena.service";
+import { detallePorSede } from "../../../application/accounting/detalle-por-sede.service";
 import {
   CertificadoCadenaError,
   firmarCertificadoDeCadena,
@@ -248,4 +249,32 @@ export async function getCertificadosDeCierre(c: Context) {
     soloVigentes: c.req.query("historico") !== "todos",
   });
   return c.json({ certificados });
+}
+
+/**
+ * El detalle de cobros de una sede (§6.4).
+ *
+ * La sede llega por parámetro y no por el token: es la excepción declarada al
+ * §3.3, y por eso la ruta exige autoridad de cadena. Sin ese guardia esto sería
+ * un agujero de aislamiento con forma de informe.
+ *
+ * Solo lectura: el central mira, no cobra ni anula ni firma el cierre de una
+ * sede.
+ */
+export async function getDetallePorSede(c: Context) {
+  try {
+    const gymId = String(c.req.query("gym_id") ?? "").trim();
+    if (!gymId) {
+      return c.json({ error: "Indique la sede que quiere auditar." }, 400);
+    }
+    const periodo = await periodoPedido(c);
+    const detalle = await detallePorSede({ gymId, periodo });
+    if (!detalle) return c.json({ error: "Esa sede no existe." }, 404);
+    return c.json(detalle);
+  } catch (error) {
+    if (error instanceof CierreCadenaError) {
+      return c.json({ error: error.message }, error.status as 400);
+    }
+    throw error;
+  }
 }

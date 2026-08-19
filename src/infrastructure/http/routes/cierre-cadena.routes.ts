@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   getCertificadosDeCierre,
+  getDetallePorSede,
   getConsolidadoDeCierre,
   getSemaforoDeCierre,
   listarSolicitudesDeCierre,
@@ -25,6 +26,10 @@ cierreCadenaRoutes.get(
   requirePlatformAuthority,
   getConsolidadoDeCierre,
 );
+// El detalle de una sede llega con la sede por parámetro —la excepción al §3.3—,
+// así que este guardia es lo único que separa un informe de un agujero de
+// aislamiento.
+cierreCadenaRoutes.get("/detalle", requirePlatformAuthority, getDetallePorSede);
 // Firmar el certificado es el acto de cadena por excelencia: congela el dinero
 // de todas las sedes en una foto que ya no cambia.
 cierreCadenaRoutes.get("/certificados", requirePlatformAuthority, getCertificadosDeCierre);

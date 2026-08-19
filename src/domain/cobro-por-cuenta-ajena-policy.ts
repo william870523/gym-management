@@ -204,3 +204,67 @@ export function reversoDe(decision: DecisionDeCobro): DecisionDeCobro {
     saldo: decision.saldo ? { ...decision.saldo, sentido: "DESHACE" } : null,
   };
 }
+
+/** Un cobro guardado, con lo justo para decidir quién puede anularlo. */
+export interface CobroParaAnular {
+  /** Sede DUEÑA del ingreso. */
+  readonly gymId: string;
+  /** Sede en cuya caja entró el efectivo. Nula en el cobro corriente. */
+  readonly cobradoEnGymId?: string | null;
+}
+
+/**
+ * Qué sede puede anular un cobro (§7.8).
+ *
+ * **La que tiene el dinero**, que en un cobro cruzado no es la dueña del
+ * ingreso. Anular devuelve billetes, y los billetes están en una caja concreta:
+ * si pudiera anularlo la sede del socio, estaría ordenando que otra caja pague
+ * una devolución que ella no puede contar ni cuadrar. Etapa 1 de §7.8 lo dice
+ * así, y esta función es el único sitio donde se decide.
+ *
+ * En el cobro corriente las dos sedes son la misma y la regla no se nota.
+ */
+export function sedeQuePuedeAnular(cobro: CobroParaAnular): string {
+  const efectivo = limpio(cobro.cobradoEnGymId ?? "");
+  return efectivo || limpio(cobro.gymId);
+}
+
+/** Motivo cuando lo intenta anular la sede que no tiene el dinero. */
+export const MOTIVO_ANULA_QUIEN_TIENE_EL_EFECTIVO =
+  "Este cobro se anula desde la sede en cuya caja entró el efectivo: es la que devuelve el dinero.";
+
+/**
+ * ¿Puede esta sede anular este cobro?
+ *
+ * Falla cerrado: sin sede no se anula nada.
+ */
+export function puedeAnularElCobro(input: {
+  readonly cobro: CobroParaAnular;
+  readonly gymIdQueAnula: string;
+}): { permitido: boolean; motivo?: string; sedeQueDebeAnular: string } {
+  const debe = sedeQuePuedeAnular(input.cobro);
+  const quien = limpio(input.gymIdQueAnula);
+  if (!quien || !debe) {
+    return {
+      permitido: false,
+      motivo: MOTIVO_ANULA_QUIEN_TIENE_EL_EFECTIVO,
+      sedeQueDebeAnular: debe,
+    };
+  }
+  return quien === debe
+    ? { permitido: true, sedeQueDebeAnular: debe }
+    : {
+        permitido: false,
+        motivo: MOTIVO_ANULA_QUIEN_TIENE_EL_EFECTIVO,
+        sedeQueDebeAnular: debe,
+      };
+}
+
+/**
+ * La clave del contraasiento que deshace el saldo de un cobro anulado.
+ *
+ * Derivada del cobro para que reintentar la anulación no meta dos
+ * contraasientos: el saldo volvería a subir por un dinero que solo se devolvió
+ * una vez.
+ */
+export const claveDeReversoDeCobro = (pagoId: string) => `REVERSO_PAGO:${limpio(pagoId)}`;

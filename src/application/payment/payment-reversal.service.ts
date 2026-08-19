@@ -6,6 +6,13 @@ import {
   normalizeReversalReason,
   resolveMembershipAfterReversal,
 } from "../../domain/payment-reversal-policy";
+import {
+  claveDeReversoDeCobro,
+  puedeAnularElCobro,
+  reversoDe,
+  decidirCobro,
+} from "../../domain/cobro-por-cuenta-ajena-policy";
+import { anotarAsiento } from "../saldo-enlace/saldo-enlace.service";
 import { prisma } from "../../infrastructure/db/prismaClient";
 import { serialize } from "../../shared/utils/serialize";
 import { TreasuryLedgerService } from "../accounting/treasury-ledger.service";
@@ -58,8 +65,11 @@ export class PaymentReversalService {
     })();
 
     return prisma.$transaction(async (tx) => {
+      // Sin filtrar por sede: o el cobro está anulado o no lo está, y eso no
+      // depende de quién pregunte. Con el filtro, la sede dueña del ingreso
+      // podía volver a anular un cobro cruzado que la otra ya había anulado.
       const repeated = await tx.pagoReversion.findFirst({
-        where: { pago_cliente_id: paymentId, gym_id: input.gymId },
+        where: { pago_cliente_id: paymentId },
       });
       if (repeated) return this.present(repeated, true);
       const sameOperation = await tx.pagoReversion.findUnique({
@@ -70,9 +80,27 @@ export class PaymentReversalService {
       }
 
       const payment = await tx.pagoCliente.findFirst({
-        where: { pago_cliente_id: paymentId, gym_id: input.gymId },
+        where: { pago_cliente_id: paymentId },
       });
       if (!payment) throw new PaymentReversalError("Cobro no encontrado.", 404);
+
+      // §7.8: anula la sede que tiene el dinero, que en un cobro cruzado NO es
+      // la dueña del ingreso. Antes se filtraba por `gym_id` —la dueña—, así
+      // que la sede que iba a sacar los billetes de su caja era justamente la
+      // única que no podía anularlo.
+      const autoridad = puedeAnularElCobro({
+        cobro: {
+          gymId: String(payment.gym_id ?? ""),
+          cobradoEnGymId: payment.cobrado_en_gym_id,
+        },
+        gymIdQueAnula: input.gymId,
+      });
+      if (!autoridad.permitido) {
+        throw new PaymentReversalError(autoridad.motivo!, 403);
+      }
+      // Membresías, cuotas y comisiones cuelgan del cobro, y el cobro es de la
+      // sede dueña del ingreso: se buscan por ella, no por quien anula.
+      const gymDelCobro = String(payment.gym_id ?? "");
       if (payment.is_deleted) {
         throw new PaymentReversalError(
           "El cobro fue anulado por el flujo anterior y requiere conciliación manual.",
@@ -82,24 +110,24 @@ export class PaymentReversalService {
 
       const [applications, accruals, operator, paymentDetails] = await Promise.all([
         tx.pagoMembresiaAplicacion.findMany({
-          where: { pago_cliente_id: paymentId, gym_id: input.gymId, is_deleted: false },
+          where: { pago_cliente_id: paymentId, gym_id: gymDelCobro, is_deleted: false },
         }),
         tx.entrenadorComisionDevengo.findMany({
-          where: { pago_cliente_id: paymentId, gym_id: input.gymId, is_deleted: false },
+          where: { pago_cliente_id: paymentId, gym_id: gymDelCobro, is_deleted: false },
         }),
         tx.user.findFirst({
           where: { user_id: input.userId, gym_id: input.gymId, active: true, is_deleted: false },
           select: { user_nombre: true },
         }),
         tx.detallePago.findMany({
-          where: { pago_cliente_id: paymentId, gym_id: input.gymId, is_deleted: false },
+          where: { pago_cliente_id: paymentId, gym_id: gymDelCobro, is_deleted: false },
           select: { detalle_pago_id: true },
         }),
       ]);
       if (!operator) throw new PaymentReversalError("La cuenta operadora no está disponible.", 403);
       const accrualIds = accruals.map((item) => item.devengo_id);
       const installments = accrualIds.length === 0 ? [] : await tx.entrenadorComisionCuota.findMany({
-        where: { devengo_id: { in: accrualIds }, gym_id: input.gymId, is_deleted: false },
+        where: { devengo_id: { in: accrualIds }, gym_id: gymDelCobro, is_deleted: false },
       });
       if (hasPaidCommission({
         accrualStates: accruals.map((item) => item.estado),
@@ -115,7 +143,7 @@ export class PaymentReversalService {
       const now = trustedClock.nowUtc();
       const detailIds = paymentDetails.map((item) => item.detalle_pago_id);
       const membershipInstallments = detailIds.length === 0 ? [] : await tx.membresiaCuota.findMany({
-        where: { pago_detalle_id: { in: detailIds }, gym_id: input.gymId, is_deleted: false },
+        where: { pago_detalle_id: { in: detailIds }, gym_id: gymDelCobro, is_deleted: false },
       });
       for (const installment of membershipInstallments) {
         const reopened = await tx.membresiaCuota.update({
@@ -128,7 +156,7 @@ export class PaymentReversalService {
             updated_at: now,
           },
         });
-        await this.recordSync(tx, "membresia_cuota", "UPDATE", reopened.cuota_instancia_id, input.gymId, reopened);
+        await this.recordSync(tx, "membresia_cuota", "UPDATE", reopened.cuota_instancia_id, gymDelCobro, reopened);
       }
       for (const installment of installments) {
         if (installment.estado === "ANULADO") continue;
@@ -141,7 +169,7 @@ export class PaymentReversalService {
             updated_at: now,
           },
         });
-        await this.recordSync(tx, "entrenador_comision_cuota", "UPDATE", updated.cuota_id, input.gymId, updated);
+        await this.recordSync(tx, "entrenador_comision_cuota", "UPDATE", updated.cuota_id, gymDelCobro, updated);
       }
       for (const accrual of accruals) {
         if (accrual.estado === "ANULADO") continue;
@@ -149,7 +177,7 @@ export class PaymentReversalService {
           where: { devengo_id: accrual.devengo_id },
           data: { estado: "ANULADO", cuotas_pagadas: 0, version: { increment: 1 }, updated_at: now },
         });
-        await this.recordSync(tx, "entrenador_comision_devengo", "UPDATE", updated.devengo_id, input.gymId, updated);
+        await this.recordSync(tx, "entrenador_comision_devengo", "UPDATE", updated.devengo_id, gymDelCobro, updated);
       }
 
       for (const application of applications) {
@@ -157,7 +185,7 @@ export class PaymentReversalService {
           where: { aplicacion_id: application.aplicacion_id },
           data: { is_deleted: true, deleted_at: now, version: { increment: 1 }, updated_at: now },
         });
-        await this.recordSync(tx, "pago_membresia_aplicacion", "DELETE", updated.aplicacion_id, input.gymId, updated);
+        await this.recordSync(tx, "pago_membresia_aplicacion", "DELETE", updated.aplicacion_id, gymDelCobro, updated);
       }
 
       const membershipIds = [...new Set(applications.map((item) => item.membresia_id))];
@@ -167,17 +195,17 @@ export class PaymentReversalService {
       let assignmentsPending = 0;
       for (const membershipId of membershipIds) {
         const membership = await tx.membresiaCliente.findFirst({
-          where: { membresia_id: membershipId, gym_id: input.gymId, is_deleted: false },
+          where: { membresia_id: membershipId, gym_id: gymDelCobro, is_deleted: false },
         });
         if (!membership) continue;
         const remainingApplications = await tx.pagoMembresiaAplicacion.findMany({
-          where: { membresia_id: membershipId, gym_id: input.gymId, is_deleted: false },
+          where: { membresia_id: membershipId, gym_id: gymDelCobro, is_deleted: false },
         });
         const remainingPaymentIds = [...new Set(remainingApplications.map((item) => item.pago_cliente_id))];
         const validPayments = remainingPaymentIds.length === 0 ? [] : await tx.pagoCliente.findMany({
           where: {
             pago_cliente_id: { in: remainingPaymentIds },
-            gym_id: input.gymId,
+            gym_id: gymDelCobro,
             is_deleted: false,
           },
           select: { pago_cliente_id: true },
@@ -187,7 +215,7 @@ export class PaymentReversalService {
           .filter((item) => validIds.has(item.pago_cliente_id))
           .reduce((sum, item) => sum + Number(item.monto_aplicado), 0);
         const quotaSchedule = await tx.membresiaCuota.findMany({
-          where: { membresia_id: membershipId, gym_id: input.gymId, is_deleted: false },
+          where: { membresia_id: membershipId, gym_id: gymDelCobro, is_deleted: false },
         });
         const installmentResolution = resolveInstallmentReversalProjection({
           remainingPaid,
@@ -213,12 +241,12 @@ export class PaymentReversalService {
             updated_at: now,
           },
         });
-        await this.recordSync(tx, "membresia_cliente", "UPDATE", membershipId, input.gymId, updated);
+        await this.recordSync(tx, "membresia_cliente", "UPDATE", membershipId, gymDelCobro, updated);
         if (resolution.state !== "PENDIENTE_PAGO") continue;
         membershipsPending.push(membershipId);
 
         const pauses = await tx.membresiaPausa.findMany({
-          where: { membresia_id: membershipId, gym_id: input.gymId, estado: "ACTIVA", is_deleted: false },
+          where: { membresia_id: membershipId, gym_id: gymDelCobro, estado: "ACTIVA", is_deleted: false },
         });
         for (const pause of pauses) {
           const cancelled = await tx.membresiaPausa.update({
@@ -226,13 +254,13 @@ export class PaymentReversalService {
             data: { estado: "CANCELADA", activa_clave: null, version: { increment: 1 }, updated_at: now },
           });
           pausesCancelled++;
-          await this.recordSync(tx, "membresia_pausa", "UPDATE", cancelled.pausa_id, input.gymId, cancelled);
+          await this.recordSync(tx, "membresia_pausa", "UPDATE", cancelled.pausa_id, gymDelCobro, cancelled);
         }
 
         const requests = await tx.membresiaSolicitud.findMany({
           where: {
             membresia_id: membershipId,
-            gym_id: input.gymId,
+            gym_id: gymDelCobro,
             estado: { in: ["PENDIENTE", "EN_DECISION"] },
             is_deleted: false,
           },
@@ -252,11 +280,11 @@ export class PaymentReversalService {
             },
           });
           requestsCancelled++;
-          await this.recordSync(tx, "membresia_solicitud", "UPDATE", cancelled.solicitud_id, input.gymId, cancelled);
+          await this.recordSync(tx, "membresia_solicitud", "UPDATE", cancelled.solicitud_id, gymDelCobro, cancelled);
         }
 
         const assignments = await tx.membresiaEntrenadorAsignacion.findMany({
-          where: { membresia_id: membershipId, gym_id: input.gymId, estado: "ACTIVA", is_deleted: false },
+          where: { membresia_id: membershipId, gym_id: gymDelCobro, estado: "ACTIVA", is_deleted: false },
         });
         for (const assignment of assignments) {
           const pending = await tx.membresiaEntrenadorAsignacion.update({
@@ -269,16 +297,44 @@ export class PaymentReversalService {
             },
           });
           assignmentsPending++;
-          await this.recordSync(tx, "membresia_entrenador_asignacion", "UPDATE", pending.asignacion_id, input.gymId, pending);
+          await this.recordSync(tx, "membresia_entrenador_asignacion", "UPDATE", pending.asignacion_id, gymDelCobro, pending);
         }
       }
 
-      const updatedClient = await this.rebuildClientProjection(tx, payment.ci, input.gymId, now);
+      // La proyección del socio va **solo a su sede**, no a las dos. Mandarla
+      // también a la que tiene el efectivo parecía simetría con el cobro y no
+      // lo es: al aplicarla, esa instalación reescribe `gym_id` con la suya y
+      // se apropia del socio. Lo que la sede del efectivo necesita es el cobro,
+      // no la titularidad del miembro; para verlo está `cliente_visitante`.
+      const updatedClient = await this.rebuildClientProjection(
+        tx,
+        payment.ci,
+        gymDelCobro,
+        now,
+      );
       const deletedPayment = await tx.pagoCliente.update({
         where: { pago_cliente_id: paymentId },
         data: { is_deleted: true, deleted_at: now, version: { increment: 1 }, updated_at: now },
       });
-      await this.recordSync(tx, "pago_cliente", "DELETE", paymentId, input.gymId, deletedPayment);
+      await this.recordSyncEnCadaSede(
+        tx,
+        "pago_cliente",
+        "DELETE",
+        paymentId,
+        this.alcanceDelCobro(payment),
+        deletedPayment,
+      );
+
+      // §7.8: «el contraasiento debe deshacer también el saldo entre sedes.
+      // Nunca dejar el reverso a medias en una de las dos». Sin esto se
+      // devolvía el dinero y la deuda seguía viva para siempre: la sede que
+      // cobró aparecía debiendo un efectivo que ya había sacado de su caja.
+      const asientoDeshecho = await this.deshacerSaldoDelCobro(
+        tx,
+        payment,
+        paymentId,
+        now,
+      );
 
       const summary = {
         aplicaciones_anuladas: applications.length,
@@ -290,6 +346,9 @@ export class PaymentReversalService {
         solicitudes_canceladas: requestsCancelled,
         asignaciones_pendientes: assignmentsPending,
         cliente_activo: updatedClient.activo,
+        // Se declara aunque sea nulo: «no había saldo que deshacer» y «se me
+        // olvidó deshacerlo» se leen igual en un resumen que lo omite.
+        saldo_entre_sedes_deshecho: asientoDeshecho,
       };
       const reversal = await tx.pagoReversion.create({
         data: {
@@ -308,24 +367,93 @@ export class PaymentReversalService {
           resumen_json: JSON.stringify(summary),
           is_deleted: false,
           created_at: now,
-          gym_id: input.gymId,
+          gym_id: gymDelCobro,
           source_device: "WEB_ADMIN",
           version: 1,
           updated_at: now,
           deleted_at: null,
         },
       });
-      await this.recordSync(tx, "pago_reversion", "INSERT", reversal.reversion_id, input.gymId, reversal);
+      await this.recordSync(tx, "pago_reversion", "INSERT", reversal.reversion_id, gymDelCobro, reversal);
       await this.treasuryLedger.recordPaymentReversalInTx(
         tx,
-        input.gymId,
+        gymDelCobro,
         reversal,
       );
       return this.present(reversal, false);
     }, { timeout: 30_000 });
   }
 
-  private async rebuildClientProjection(tx: Tx, ci: string, gymId: string, now: Date) {
+  /**
+   * Deshace el saldo entre sedes que dejó un cobro cruzado (§7.8).
+   *
+   * Devuelve el identificador del contraasiento, o `null` si el cobro no era
+   * cruzado y no había saldo que deshacer.
+   *
+   * La decisión se **deriva del cobro**, no se vuelve a calcular: recalcularla
+   * desde los datos de hoy daría otra respuesta el día que el socio haya
+   * cambiado de sede o su plus haya caducado entre el cobro y la anulación, y
+   * el contraasiento iría a parar a otra parte que el asiento original.
+   */
+  private async deshacerSaldoDelCobro(
+    tx: Tx,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    payment: any,
+    paymentId: string,
+    now: Date,
+  ): Promise<string | null> {
+    const cobradoEn = String(payment.cobrado_en_gym_id ?? "").trim();
+    if (!cobradoEn) return null;
+
+    // El asiento original dice cuánto y en qué moneda: el cobro pudo pagarse en
+    // varios métodos y el saldo se anotó una vez, con su total.
+    const original = await tx.saldoEnlaceAsiento.findFirst({
+      where: {
+        gym_id: cobradoEn,
+        origen_tipo: "PAGO_CLIENTE",
+        origen_id: paymentId,
+        sentido: "GENERA",
+        is_deleted: false,
+      },
+    });
+    if (!original) return null;
+
+    const decision = decidirCobro({
+      clase: "PLAN",
+      gymIdQueCobra: cobradoEn,
+      gymIdDelSocio: String(payment.gym_id ?? ""),
+    });
+    const reverso = reversoDe(decision);
+    const asiento = await anotarAsiento({
+      tx,
+      nowUtc: now,
+      asiento: {
+        asientoId: `sae-rev-${paymentId}`,
+        saldo: reverso.saldo,
+        monedaId: String(original.moneda_id),
+        monto: String(original.monto),
+        origenTipo: "REVERSO_PAGO_CLIENTE",
+        origenId: paymentId,
+        claveOrigen: claveDeReversoDeCobro(paymentId),
+        claseCobro: String(original.clase_cobro),
+        ci: original.ci ?? null,
+        ocurridoAt: now,
+        fechaNegocio: original.fecha_negocio ?? now,
+        sourceDevice: null,
+      },
+      emitirEvento: (fila) =>
+        this.recordSync(tx, "saldo_enlace_asiento", "INSERT", fila.asiento_id, cobradoEn, fila),
+    });
+    return String(asiento.asiento_id);
+  }
+
+  private async rebuildClientProjection(
+    tx: Tx,
+    ci: string,
+    gymId: string,
+    now: Date,
+    alcance: string[] = [gymId],
+  ) {
     const active = await tx.membresiaCliente.findFirst({
       where: { ci, gym_id: gymId, estado: { in: ["ACTIVA", "PAUSADA"] }, is_deleted: false },
       orderBy: [{ fecha_fin: "desc" }, { updated_at: "desc" }],
@@ -349,12 +477,42 @@ export class PaymentReversalService {
         updated_at: now,
       },
     });
-    await this.recordSync(tx, "cliente", "UPDATE", client.ci, gymId, client);
+    await this.recordSyncEnCadaSede(tx, "cliente", "UPDATE", client.ci, alcance, client);
     return client;
   }
 
   private appendNote(current: string | null, note: string) {
     return current?.trim() ? `${current.trim()}\n${note}` : note;
+  }
+
+  /**
+   * A qué sedes tiene que llegar la consecuencia de anular este cobro.
+   *
+   * Un cobro cruzado alcanza a **dos** instalaciones —la dueña del ingreso y la
+   * que se quedó el efectivo—, y su anulación tiene que alcanzar a las mismas.
+   * Emitirla solo para la dueña deja a la otra con el cobro vivo en su base: la
+   * huella lo cazó a los diez minutos de escribirlo, con el `is_deleted` en 1 de
+   * un lado y en 0 del otro.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private alcanceDelCobro(payment: any): string[] {
+    const dueña = String(payment.gym_id ?? "").trim();
+    const cobradoEn = String(payment.cobrado_en_gym_id ?? "").trim();
+    return cobradoEn && cobradoEn !== dueña ? [dueña, cobradoEn] : [dueña];
+  }
+
+  /** Emite el mismo evento para cada sede a la que alcanza. */
+  private async recordSyncEnCadaSede(
+    tx: Tx,
+    entity: string,
+    operation: string,
+    entityId: string,
+    gymIds: string[],
+    payload: unknown,
+  ) {
+    for (const gymId of gymIds) {
+      await this.recordSync(tx, entity, operation, entityId, gymId, payload);
+    }
   }
 
   private async recordSync(

@@ -1,5 +1,6 @@
 import { prisma } from "../../../infrastructure/db/prismaClient";
 import { logger } from "../../../config/logger";
+import { registrarNoticiaDeLaSede } from "../../../infrastructure/sync/noticia-de-la-sede";
 import type { UploadEventsDTO } from "../../validation/sync.schemas";
 import type { SyncLogRepository } from "../../../domain/repositories/SyncLogRepository";
 import type { ApplyClienteEventUseCase } from "./ApplyClienteEventUseCase";
@@ -829,24 +830,21 @@ export class UploadEventsUseCase {
     await target.delegate.updateMany({ where, data: { version } });
   }
 
-  /** Telemetría del dispositivo. Fuera de la transacción por evento. */
+  /**
+   * Telemetría del dispositivo. Fuera de la transacción por evento.
+   *
+   * Comparte función con la bajada (M5) para que las dos marcas signifiquen lo
+   * mismo: de esta marca cuelga el `SIN_NOTICIAS` del semáforo de cierre, y dos
+   * escrituras parecidas pero distintas es como se acaba teniendo dos ideas de
+   * cuándo se supo de una sede.
+   */
   private async touchSyncClientState(device_id: string) {
-    try {
-      await prisma.syncClientState.upsert({
-        where: { device_id },
-        create: {
-          device_id,
-          last_upload_at: trustedClock.nowUtc(),
-          last_seen_at: trustedClock.nowUtc(),
-        },
-        update: {
-          last_upload_at: trustedClock.nowUtc(),
-          last_seen_at: trustedClock.nowUtc(),
-        },
-      });
-    } catch (err) {
-      logger.error("Error actualizando SyncClientState", { err });
-    }
+    await registrarNoticiaDeLaSede(prisma, {
+      deviceId: device_id,
+      cuando: trustedClock.nowUtc(),
+      motivo: "SUBIDA",
+      alFallar: (err) => logger.error("Error actualizando SyncClientState", { err }),
+    });
   }
 
   private async canonicalizeClientReferences(

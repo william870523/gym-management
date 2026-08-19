@@ -3,6 +3,9 @@ import type { Context } from "hono";
 import { Prisma } from "@prisma/client";
 import { UploadEventsSchema, ChangesQuerySchema } from "../../../application/validation/sync.schemas";
 import { SyncService } from "../../sync/SyncService";
+import { registrarNoticiaDeLaSede } from "../../sync/noticia-de-la-sede";
+import { prisma } from "../../db/prismaClient";
+import { trustedClock } from "../../../config/trusted-clock";
 import { logger } from "../../../config/logger";
 
 const syncService = new SyncService();
@@ -121,6 +124,17 @@ export async function getChangesController(c: Context) {
 
   try {
     const result = await syncService.getChanges(parsed.data);
+    // La bajada es la única señal que deja **siempre** una sede viva: la subida
+    // ni sale a la red cuando el outbox está vacío. Sin anotarla aquí, una sede
+    // tranquila pero conectada aparecería `SIN_NOTICIAS` en el semáforo de
+    // cierre (M5, docs/MULTI_SEDE.md §6.2) y se le buscaría una avería de red
+    // que no tiene.
+    await registrarNoticiaDeLaSede(prisma, {
+      deviceId: scope.deviceId,
+      cuando: trustedClock.nowUtc(),
+      motivo: "BAJADA",
+      alFallar: (err) => logger.error("No se pudo anotar la noticia de la sede", { err }),
+    });
     return c.json({ ok: true, ...result });
   } catch (err) {
     logger.error("Error in getChangesController", err);

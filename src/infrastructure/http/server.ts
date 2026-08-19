@@ -32,6 +32,7 @@ import * as catalogs from "./controllers/catalogs.controller";
 import { gymsRoutes } from "./routes/gyms.routes";
 import { clientsRoutes } from "./routes/clients.routes";
 import { accesoMultisedeRoutes } from "./routes/acceso-multisede.routes";
+import { cierreCadenaRoutes } from "./routes/cierre-cadena.routes";
 import { trainersRoutes } from "./routes/trainers.routes";
 import { paymentsRoutes } from "./routes/payments.routes";
 import { usersRoutes } from "./routes/users.routes";
@@ -179,6 +180,16 @@ accesoMultisedeProtected.use(
 accesoMultisedeProtected.use("*", adminLimiter);
 accesoMultisedeProtected.route("/", accesoMultisedeRoutes);
 app.route("/acceso-multisede", accesoMultisedeProtected);
+
+// M5 — la solicitud de cierre de la cadena (docs/MULTI_SEDE.md §6.2). Se lee
+// con `tesoreria.cerrar` porque quien va a cerrar es quien necesita verla; la
+// autoridad de cadena para pedirla y retirarla la pone cada ruta.
+const cierreCadenaProtected = new Hono();
+cierreCadenaProtected.use("*", authUser());
+cierreCadenaProtected.use("*", requirePermissionByMethod("tesoreria.cerrar", "tesoreria.cerrar"));
+cierreCadenaProtected.use("*", adminLimiter);
+cierreCadenaProtected.route("/", cierreCadenaRoutes);
+app.route("/cierre-cadena", cierreCadenaProtected);
 
 const trainersProtected = new Hono();
 trainersProtected.use("*", authUser());

@@ -88,6 +88,8 @@ export class PrismaSyncLogRepository implements SyncLogRepository {
                 // suya— o la sede visitada no sabría que puede dejarle entrar
                 // (docs/MULTI_SEDE.md §9-bis).
                 "acceso_multisede_precio",
+                // M5: la solicitud de cierre de la cadena (§6.2).
+                "cierre_cadena_solicitud",
                 "cliente_acceso_multisede",
                 "cliente_visitante",
               ],

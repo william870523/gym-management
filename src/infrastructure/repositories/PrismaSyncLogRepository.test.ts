@@ -24,6 +24,11 @@ import { PrismaSyncLogRepository } from "./PrismaSyncLogRepository";
  *   lleva datos personales ni financieros, solo a quién se le vendió el plus,
  *   de qué sede es y hasta cuándo cubre.
  *
+ * - `cierre_cadena_solicitud` (M5): la petición de cierre que emite
+ *   contabilidad central. Una para toda la cadena, y **no lleva dinero**: dice
+ *   qué período hay que cerrar y quién lo pidió, nada más. Si a una sede no le
+ *   llegara, el semáforo la reclamaría por no cerrar algo que nunca se le pidió.
+ *
  * Lo que no puede cambiar: nada de dinero, clientes o planes viaja por la vía
  * global.
  */
@@ -53,6 +58,7 @@ describe("aislamiento de descarga remota", () => {
             "tipo_cambio",
             "referencia",
             "acceso_multisede_precio",
+            "cierre_cadena_solicitud",
             "cliente_acceso_multisede",
             "cliente_visitante",
           ],

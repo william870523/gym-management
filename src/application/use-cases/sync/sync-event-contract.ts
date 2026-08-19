@@ -81,6 +81,11 @@ export const GLOBAL_SYNC_ENTITIES = new Set<string>([
   // M4a: el precio del plus multi-sede es catálogo de la cadena. Sin `gym_id`
   // en el esquema, igual que sus vecinos de esta lista.
   "acceso_multisede_precio",
+  // M5: la solicitud de cierre que emite contabilidad central. Una para toda la
+  // cadena, sin `gym_id`, y tiene que llegar a TODAS las instalaciones: si a
+  // alguna no le llega, el semáforo la mediría contra una petición que esa sede
+  // nunca vio y la reclamaría por no cerrar algo que nadie le pidió.
+  "cierre_cadena_solicitud",
 ]);
 
 /**

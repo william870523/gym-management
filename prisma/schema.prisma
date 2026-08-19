@@ -2103,3 +2103,96 @@ model AccesoMultisedeCobro {
   @@index([ci, cubre_hasta], map: "idx_acc_multisede_cobro_ci")
   @@map("acceso_multisede_cobro")
 }
+
+/// Cotización de visita: lo que la sede visitada necesita para cobrarle a un
+/// socio ajeno **sin conexión** (M4c, docs/MULTI_SEDE.md §5.3).
+///
+/// Va en tabla aparte de `cliente_visitante` a propósito. La copia responde
+/// «quién es y si puede entrar»; esto responde «qué le cobro». Son preguntas
+/// distintas y con vidas distintas: la identidad casi no cambia, la cotización
+/// cambia con cada pago, cada renovación y cada cambio de precio de su sede.
+/// Fundirlas haría que el mostrador arrastrara una docena de columnas
+/// financieras cada vez que busca a alguien por su nombre.
+///
+/// Sin `gym_id`, como su hermana: alcance global con dueño propio en
+/// `gym_id_origen`.
+model ClienteVisitanteCotizacion {
+  ci             String @id
+  /// Sede dueña del socio: a ella pertenece el ingreso.
+  gym_id_origen  String
+  plan_id        String
+  plan_codigo    String
+  plan_nombre    String
+  moneda_id      String
+  /// Antes del descuento del socio.
+  precio_lista   Decimal
+  /// Ya con su descuento aplicado por la sede dueña, que es quien conoce su
+  /// configuración de descuentos y no la replica.
+  precio_final   Decimal
+  categoria_cliente String
+  /// Fin de cobertura EXCLUSIVO. Mide el atraso cuando no hay cuotas.
+  cubre_hasta    DateTime?
+
+  /// La mora viaja como REGLA, no como importe: así la cotización no caduca.
+  mora_activo    Boolean  @default(false)
+  mora_modo      String?
+  mora_valor     String?
+  mora_tope      String?
+
+  /// La cuota que toca, cuando la membresía va por cuotas.
+  cuota_numero          Int?
+  cuota_importe         Decimal?
+  cuota_fecha_exigible  DateTime?
+
+  /// Cuándo la calculó la sede dueña. Se publica; no se disimula.
+  calculada_al   DateTime
+
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@index([gym_id_origen, is_deleted], map: "idx_visitante_cotizacion_origen")
+  @@map("cliente_visitante_cotizacion")
+}
+
+/// M5 — la solicitud de cierre que emite contabilidad central
+/// (docs/MULTI_SEDE.md §6.2).
+///
+/// El central **pide**; cada sede **cierra y firma** con su arqueo, porque el
+/// dinero está allí. Esta tabla guarda la petición, no el cierre.
+///
+/// **No es `TesoreriaCierreSolicitud`**, que ya existe y es otra cosa: la
+/// aprobación interna de un arqueo descuadrado dentro de una sede.
+///
+/// **Sin `gym_id` a propósito.** Es una solicitud para toda la cadena y llega a
+/// todas las instalaciones, como el precio del plus multi-sede. Emitir una por
+/// sede obligaría a mantenerlas coherentes entre ellas; con una sola, el
+/// semáforo compara todas las sedes contra la misma petición, que es lo que
+/// hace comparable el consolidado.
+model CierreCadenaSolicitud {
+  solicitud_id                   String    @id
+  tipo_periodo                   String
+  fecha_inicio                   DateTime
+  fecha_fin_exclusiva            DateTime
+  estado                         String
+  nota                           String?
+  fecha_limite                   DateTime?
+  solicitada_por_user_id         String
+  solicitada_por_nombre_snapshot String
+  solicitada_por_rol_snapshot    String
+  solicitada_at                  DateTime
+  retirada_motivo                String?
+  retirada_at                    DateTime?
+  source_device                  String?
+  version                        Int       @default(1)
+  is_deleted                     Boolean   @default(false)
+  created_at                     DateTime  @default(now())
+  updated_at                     DateTime  @default(now())
+  deleted_at                     DateTime?
+
+  @@unique([tipo_periodo, fecha_inicio, fecha_fin_exclusiva], map: "uq_cierre_cadena_periodo")
+  @@map("cierre_cadena_solicitud")
+}

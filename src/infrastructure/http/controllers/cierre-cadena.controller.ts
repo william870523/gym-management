@@ -19,6 +19,11 @@ import {
 } from "../../../application/accounting/cierre-cadena-solicitud.service";
 import { semaforoDeLaCadena } from "../../../application/accounting/semaforo-cierre.service";
 import { consolidadoDeLaCadena } from "../../../application/accounting/consolidado-cadena.service";
+import {
+  CertificadoCadenaError,
+  firmarCertificadoDeCadena,
+  listarCertificados,
+} from "../../../application/accounting/certificado-cadena.service";
 
 const DISPOSITIVO = "WEB_ADMIN";
 
@@ -134,9 +139,15 @@ export async function getSemaforoDeCierre(c: Context) {
   }
 }
 
-/** De la solicitud si se nombra; si no, de las fechas que lleguen. */
-async function periodoPedido(c: Context) {
-  const solicitudId = c.req.query("solicitud_id");
+/**
+ * De la solicitud si se nombra; si no, de las fechas que lleguen.
+ *
+ * Las lee de la consulta y, cuando la petición trae cuerpo —firmar es un POST—,
+ * también de ahí. Obligar a repetirlas en la URL de un POST es la clase de
+ * detalle que acaba firmando el período equivocado.
+ */
+async function periodoPedido(c: Context, cuerpo?: any) {
+  const solicitudId = c.req.query("solicitud_id") ?? cuerpo?.solicitud_id;
   if (solicitudId) {
     const solicitud = await prisma.cierreCadenaSolicitud.findUnique({
       where: { solicitud_id: solicitudId },
@@ -149,8 +160,10 @@ async function periodoPedido(c: Context) {
       fechaFinExclusiva: solicitud.fecha_fin_exclusiva,
     };
   }
-  const inicio = new Date(String(c.req.query("fecha_inicio") ?? ""));
-  const fin = new Date(String(c.req.query("fecha_fin_exclusiva") ?? ""));
+  const inicio = new Date(String(c.req.query("fecha_inicio") ?? cuerpo?.fecha_inicio ?? ""));
+  const fin = new Date(
+    String(c.req.query("fecha_fin_exclusiva") ?? cuerpo?.fecha_fin_exclusiva ?? ""),
+  );
   if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
     throw new CierreCadenaError("Indique una solicitud o un período con fechas válidas.");
   }
@@ -198,4 +211,41 @@ export async function getConsolidadoDeCierre(c: Context) {
     }
     throw error;
   }
+}
+
+/**
+ * Firma el certificado del período (§6.4).
+ *
+ * A diferencia del informe, esto **congela**: guarda la foto exacta y su sello, y
+ * a partir de ahí no cambia aunque después entren correcciones. Rehacerlo emite
+ * un ciclo nuevo y anula el anterior con su motivo, sin borrarlo: el histórico es
+ * la razón de ser del certificado.
+ */
+export async function postCertificadoDeCierre(c: Context) {
+  const sesion = auth(c);
+  try {
+    const cuerpo = (await c.req.json().catch(() => null)) as any;
+    const periodo = await periodoPedido(c, cuerpo);
+    const r = await firmarCertificadoDeCadena({
+      periodo,
+      tipoPeriodo: String(cuerpo?.tipo_periodo ?? "RANGO"),
+      actor: await actorDe(sesion),
+      motivo: cuerpo?.motivo,
+      sourceDevice: DISPOSITIVO,
+    });
+    return c.json({ certificado: r.certificado, rehecho: r.rehecho }, 201);
+  } catch (error) {
+    if (error instanceof CertificadoCadenaError || error instanceof CierreCadenaError) {
+      return c.json({ error: error.message }, (error as any).status as 400);
+    }
+    throw error;
+  }
+}
+
+/** Los certificados de la cadena, con su integridad comprobada al leer. */
+export async function getCertificadosDeCierre(c: Context) {
+  const certificados = await listarCertificados({
+    soloVigentes: c.req.query("historico") !== "todos",
+  });
+  return c.json({ certificados });
 }

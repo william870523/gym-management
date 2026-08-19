@@ -86,6 +86,9 @@ export const GLOBAL_SYNC_ENTITIES = new Set<string>([
   // alguna no le llega, el semáforo la mediría contra una petición que esa sede
   // nunca vio y la reclamaría por no cerrar algo que nadie le pidió.
   "cierre_cadena_solicitud",
+  // M6: el certificado del consolidado. Misma razón que la solicitud: es de la
+  // cadena, no lleva `gym_id`, y tiene que llegar a todas las instalaciones.
+  "cierre_cadena_certificado",
 ]);
 
 /**

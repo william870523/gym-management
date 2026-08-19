@@ -2196,3 +2196,46 @@ model CierreCadenaSolicitud {
   @@unique([tipo_periodo, fecha_inicio, fecha_fin_exclusiva], map: "uq_cierre_cadena_periodo")
   @@map("cierre_cadena_solicitud")
 }
+
+/// M6 — la foto congelada del consolidado de la cadena (docs/MULTI_SEDE.md §6.4).
+///
+/// El informe agregado cambia si llegan datos nuevos; esto no. Guarda una copia
+/// exacta de lo que había al firmar, con su sello, para poder decir «esto es lo
+/// que se cerró en julio» y que nadie pueda reescribirlo.
+///
+/// `foto_json` es el **texto que se selló**, no una reconstrucción: verificarlo
+/// desde columnas mediría la serialización de hoy y no la firma de entonces.
+///
+/// Sin `gym_id`: es de la cadena y llega a todas las instalaciones, como la
+/// solicitud de cierre.
+model CierreCadenaCertificado {
+  certificado_id              String    @id
+  /// Deja un solo certificado vigente por período. Los anulados la sueltan y
+  /// se conservan: el histórico es la razón de ser de esta tabla.
+  clave_activa                String?   @unique(map: "uq_cierre_cadena_cert_activa")
+  tipo_periodo                String
+  fecha_inicio                DateTime
+  fecha_fin_exclusiva         DateTime
+  ciclo_numero                Int       @default(1)
+  clase                       String
+  estado                      String
+  sedes_incluidas             Int       @default(0)
+  foto_json                   String    @db.LongText
+  foto_sha256                 String
+  foto_version                Int       @default(1)
+  firmado_por_user_id         String
+  firmado_por_nombre_snapshot String
+  firmado_por_rol_snapshot    String
+  firmado_at                  DateTime
+  anulado_motivo              String?   @db.Text
+  anulado_at                  DateTime?
+  source_device               String?
+  version                     Int       @default(1)
+  is_deleted                  Boolean   @default(false)
+  created_at                  DateTime  @default(now())
+  updated_at                  DateTime  @default(now())
+  deleted_at                  DateTime?
+
+  @@index([tipo_periodo, fecha_inicio, fecha_fin_exclusiva], map: "idx_cierre_cadena_cert_periodo")
+  @@map("cierre_cadena_certificado")
+}

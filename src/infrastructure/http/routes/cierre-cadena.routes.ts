@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import {
+  getCertificadosDeCierre,
   getConsolidadoDeCierre,
   getSemaforoDeCierre,
   listarSolicitudesDeCierre,
+  postCertificadoDeCierre,
   postRetiroDeSolicitud,
   postSolicitudDeCierre,
 } from "../controllers/cierre-cadena.controller";
@@ -23,6 +25,10 @@ cierreCadenaRoutes.get(
   requirePlatformAuthority,
   getConsolidadoDeCierre,
 );
+// Firmar el certificado es el acto de cadena por excelencia: congela el dinero
+// de todas las sedes en una foto que ya no cambia.
+cierreCadenaRoutes.get("/certificados", requirePlatformAuthority, getCertificadosDeCierre);
+cierreCadenaRoutes.post("/certificados", requirePlatformAuthority, postCertificadoDeCierre);
 cierreCadenaRoutes.post("/solicitudes", requirePlatformAuthority, postSolicitudDeCierre);
 cierreCadenaRoutes.post(
   "/solicitudes/:solicitudId/retiro",

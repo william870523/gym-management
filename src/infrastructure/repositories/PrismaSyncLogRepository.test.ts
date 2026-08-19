@@ -29,8 +29,18 @@ import { PrismaSyncLogRepository } from "./PrismaSyncLogRepository";
  *   qué período hay que cerrar y quién lo pidió, nada más. Si a una sede no le
  *   llegara, el semáforo la reclamaría por no cerrar algo que nunca se le pidió.
  *
- * Lo que no puede cambiar: nada de dinero, clientes o planes viaja por la vía
- * global.
+ * - `cierre_cadena_certificado` (M6): la foto firmada del consolidado. Esta **sí
+ *   lleva dinero**, y entra igual por una razón concreta: es el dinero **ya
+ *   agregado y firmado de la cadena entera**, que es precisamente lo que la sede
+ *   necesita para saber en qué cierre entró y con qué cifras. No son movimientos
+ *   ni fichas de nadie: son totales por moneda y por sede, los mismos que cada
+ *   sede firmó en su propio cierre. Ocultárselo dejaría a la instalación sin
+ *   poder demostrar su parte del cierre contable de la cadena.
+ *
+ * Lo que no puede cambiar: ningún **movimiento** de dinero, ninguna ficha de
+ * cliente y ningún plan viajan por la vía global. El certificado es la
+ * excepción razonada de arriba —totales firmados de la cadena—, y sigue siendo
+ * cierto que por aquí no pasa un cobro, un pago ni un socio.
  */
 describe("aislamiento de descarga remota", () => {
   it("comparte solo la lista explícita de eventos globales", async () => {
@@ -59,6 +69,7 @@ describe("aislamiento de descarga remota", () => {
             "referencia",
             "acceso_multisede_precio",
             "cierre_cadena_solicitud",
+            "cierre_cadena_certificado",
             "cliente_acceso_multisede",
             "cliente_visitante",
           ],

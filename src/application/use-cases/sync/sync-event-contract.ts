@@ -57,6 +57,10 @@ export const PARITY_SYNC_TARGET_DEFINITIONS = {
     delegateKey: "saldoEnlaceAsiento",
     pk: "asiento_id",
   },
+  // M8: `saldo_liquidacion` NO figura aquí, y no es un olvido. Este contrato es
+  // el de la SUBIDA, y la liquidación no sube: registrar que el dinero se movió
+  // entre dos negocios es autoridad de cadena y se hace en el concentrador. La
+  // fila solo baja, y del otro lado sí está declarada como destino de descarga.
   // M4b: el cobro del plus es de la sede que se quedó el efectivo, que es la
   // que lo emite. El ingreso es de la cadena, pero eso no vive aquí: vive en
   // el asiento del saldo.

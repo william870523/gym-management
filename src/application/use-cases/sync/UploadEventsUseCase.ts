@@ -677,6 +677,10 @@ export class UploadEventsUseCase {
         // `gym_id` es el de quien lo emite porque el deudor es siempre quien
         // se quedó el efectivo.
         "saldo_enlace_asiento",
+        // M8. `saldo_liquidacion` NO entra: registrar que el dinero se movió
+        // entre dos negocios es autoridad de cadena y se hace en el
+        // concentrador, así que la fila solo baja. Si una instalación pudiera
+        // subirla, una sede podría declararse pagada sola.
         "acceso_multisede_cobro",
       ].includes(ev.entidad)
     ) {

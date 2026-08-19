@@ -118,7 +118,8 @@
     "demo:usuario-sede-m2": "bun --preload ./src/config/tz-preload.ts scripts/demo-usuario-sede-m2.ts",
     "demo:catalog-scope-m3": "bun --preload ./src/config/tz-preload.ts scripts/demo-catalog-scope-m3.ts",
     "migrate:cierre-cadena": "bun --preload ./src/config/tz-preload.ts scripts/migrate-cierre-cadena-solicitud.ts",
-    "migrate:cierre-cadena-certificado": "bun --preload ./src/config/tz-preload.ts scripts/migrate-cierre-cadena-certificado.ts"
+    "migrate:cierre-cadena-certificado": "bun --preload ./src/config/tz-preload.ts scripts/migrate-cierre-cadena-certificado.ts",
+    "migrate:saldo-liquidacion": "bun --preload ./src/config/tz-preload.ts scripts/migrate-saldo-liquidacion.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

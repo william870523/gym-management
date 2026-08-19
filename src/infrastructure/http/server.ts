@@ -33,6 +33,7 @@ import { gymsRoutes } from "./routes/gyms.routes";
 import { clientsRoutes } from "./routes/clients.routes";
 import { accesoMultisedeRoutes } from "./routes/acceso-multisede.routes";
 import { cierreCadenaRoutes } from "./routes/cierre-cadena.routes";
+import { saldoEnlaceRoutes } from "./routes/saldo-enlace.routes";
 import { trainersRoutes } from "./routes/trainers.routes";
 import { paymentsRoutes } from "./routes/payments.routes";
 import { usersRoutes } from "./routes/users.routes";
@@ -190,6 +191,16 @@ cierreCadenaProtected.use("*", requirePermissionByMethod("tesoreria.cerrar", "te
 cierreCadenaProtected.use("*", adminLimiter);
 cierreCadenaProtected.route("/", cierreCadenaRoutes);
 app.route("/cierre-cadena", cierreCadenaProtected);
+
+// M8 — el saldo entre sedes y su liquidación (docs/MULTI_SEDE.md §5.4). Mismo
+// permiso que el cierre: quien cuadra el dinero de la cadena es quien mira lo
+// que una sede le debe a otra. La autoridad de cadena la pone cada ruta.
+const saldoEnlaceProtected = new Hono();
+saldoEnlaceProtected.use("*", authUser());
+saldoEnlaceProtected.use("*", requirePermissionByMethod("tesoreria.cerrar", "tesoreria.cerrar"));
+saldoEnlaceProtected.use("*", adminLimiter);
+saldoEnlaceProtected.route("/", saldoEnlaceRoutes);
+app.route("/saldo-enlace", saldoEnlaceProtected);
 
 const trainersProtected = new Hono();
 trainersProtected.use("*", authUser());

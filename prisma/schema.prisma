@@ -2059,6 +2059,60 @@ model SaldoEnlaceAsiento {
   @@map("saldo_enlace_asiento")
 }
 
+/// M8 — una sede pagó lo que debía (docs/MULTI_SEDE.md §5.4).
+///
+/// El asiento `DESHACE` del libro es lo que baja el saldo; esta fila guarda lo
+/// que el asiento no sabe decir: quién la registró, con qué referencia de
+/// transferencia, y cuánto se debía antes y después. El libro no lleva autor
+/// —nació de cobros, donde el autor ya estaba en el cobro—, y una transferencia
+/// entre dos negocios sin nadie que responda por ella es la clase de apunte que
+/// nadie puede aclarar seis meses después.
+model SaldoLiquidacion {
+  liquidacion_id  String @id
+  /// Sede que paga: la deudora, la misma del asiento. La acreedora no la
+  /// descarga —su ingreso ya lo tenía contado— y la ve desde el concentrador.
+  gym_id          String
+  /// SEDE | CADENA, igual que en el libro.
+  acreedor_tipo   String
+  /// Nulo exactamente cuando el acreedor es la cadena.
+  acreedor_gym_id String?
+  moneda_id       String
+  /// Siempre positivo: lo que se transfirió.
+  monto           Decimal
+  /// Lo que se debía cuando se registró. Si mañana aparece un cobro atrasado el
+  /// saldo recalculado cambia, y esta foto es lo único que explica por qué se
+  /// transfirió esa cifra y no otra.
+  saldo_antes     Decimal
+  saldo_despues   Decimal
+  /// Pagó más de lo que debía, y lo declaró. Sin declararlo se rechaza.
+  dejo_saldo_a_favor Boolean @default(false)
+  /// El asiento DESHACE que produjo. Uno por liquidación.
+  asiento_id      String
+  /// Número de operación, comprobante, lo que haya.
+  referencia      String?
+  nota            String?
+
+  registrado_por_user_id         String
+  registrado_por_nombre_snapshot String
+  registrado_por_rol_snapshot    String
+
+  ocurrido_at   DateTime
+  /// Fecha de negocio de la sede que paga, no la del servidor.
+  fecha_negocio DateTime
+
+  source_device String?
+  version       Int       @default(1)
+  is_deleted    Boolean   @default(false)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now())
+  deleted_at    DateTime?
+
+  @@unique([asiento_id], map: "uq_saldo_liquidacion_asiento")
+  @@index([gym_id, acreedor_tipo, acreedor_gym_id, moneda_id], map: "idx_saldo_liquidacion_acreedor")
+  @@index([gym_id, fecha_negocio], map: "idx_saldo_liquidacion_gym_dia")
+  @@map("saldo_liquidacion")
+}
+
 /// Cobro del plus multi-sede (M4b, docs/MULTI_SEDE.md §5.1 y §9-bis).
 ///
 /// **No es un `PagoCliente`, y no por comodidad.** El plus «no es un atributo

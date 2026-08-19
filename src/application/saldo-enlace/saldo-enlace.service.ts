@@ -19,7 +19,7 @@
  */
 import {
   claveDeTitular,
-  type DecisionDeCobro,
+  type SaldoDeEnlace,
   type TitularDeIngreso,
 } from "../../domain/cobro-por-cuenta-ajena-policy";
 
@@ -47,7 +47,16 @@ function aTexto(minimas: bigint): string {
 export type AsientoNuevo = {
   /** Identidad del asiento. Determinista, la pone quien lo emite. */
   asientoId: string;
-  decision: DecisionDeCobro;
+  /**
+   * Quién debe, a quién y en qué sentido.
+   *
+   * Antes esto era la `DecisionDeCobro` entera, y el libro solo sabía anotar lo
+   * que salía de un cobro. Liquidar una deuda (M8) también escribe aquí y no es
+   * un cobro: no tiene ingreso que atribuir ni caja donde entre efectivo.
+   * Pedirle esos campos habría obligado a inventarlos, y un asiento que miente
+   * sobre su origen es peor que uno que no existe.
+   */
+  saldo: SaldoDeEnlace | null;
   monedaId: string;
   /** Importe positivo, como texto decimal. */
   monto: string;
@@ -87,10 +96,10 @@ export async function anotarAsiento(input: {
   emitirEvento: (fila: any) => Promise<unknown>;
 }) {
   const { tx, asiento, nowUtc } = input;
-  const saldo = asiento.decision.saldo;
+  const saldo = asiento.saldo;
   if (!saldo) {
     throw new Error(
-      "Un cobro propio no genera saldo entre partes; no debe anotarse asiento.",
+      "Sin saldo no hay asiento: un cobro propio no genera deuda entre partes.",
     );
   }
   const minimas = aMinimas(asiento.monto);

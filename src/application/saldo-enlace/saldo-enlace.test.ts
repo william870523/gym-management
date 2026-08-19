@@ -65,7 +65,7 @@ const cobroDelPlus = decidirCobro({
 
 const asiento = (extra: Partial<Parameters<typeof anotarAsiento>[0]["asiento"]> = {}) => ({
   asientoId: "asi-1",
-  decision: cobroDelPlan,
+  saldo: cobroDelPlan.saldo,
   monedaId: CUP,
   monto: "300.00",
   origenTipo: "PAGO_CLIENTE",
@@ -99,7 +99,7 @@ describe("M4b · libro del saldo entre partes", () => {
       tx: base.tx,
       asiento: asiento({
         asientoId: "asi-2",
-        decision: reversoDe(cobroDelPlan),
+        saldo: reversoDe(cobroDelPlan).saldo,
         origenTipo: "PAGO_REVERSION",
         origenId: "rev-1",
         claveOrigen: "PAGO_REVERSION:rev-1",
@@ -140,7 +140,7 @@ describe("M4b · libro del saldo entre partes", () => {
       tx: base.tx,
       asiento: asiento({
         asientoId: "asi-plus",
-        decision: cobroDelPlus,
+        saldo: cobroDelPlus.saldo,
         claseCobro: "PLUS_MULTISEDE",
         monto: "150.00",
         origenTipo: "COBRO_PLUS",
@@ -240,11 +240,11 @@ describe("M4b · libro del saldo entre partes", () => {
     await expect(
       anotarAsiento({
         tx: base.tx,
-        asiento: asiento({ decision: propio }),
+        asiento: asiento({ saldo: propio.saldo }),
         nowUtc: AHORA,
         emitirEvento: base.emitirEvento,
       }),
-    ).rejects.toThrow("no genera saldo");
+    ).rejects.toThrow("no genera deuda entre partes");
   });
 
   it("rechaza importes no positivos o con formato inválido", async () => {

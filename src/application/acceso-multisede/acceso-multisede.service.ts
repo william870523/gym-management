@@ -770,7 +770,7 @@ export async function cobrarAccesoMultisede(input: {
     nowUtc,
     asiento: {
       asientoId: `sae-${input.cobroId}`,
-      decision,
+      saldo: decision.saldo,
       monedaId: cobro.moneda_id,
       monto: normalizeMoney(cobro.importe),
       origenTipo: "COBRO_PLUS",
@@ -994,7 +994,7 @@ export async function cobrarPlanDeVisitante(input: {
     nowUtc,
     asiento: {
       asientoId: `sae-${input.pagoId}`,
-      decision,
+      saldo: decision.saldo,
       monedaId: importe.monedaId,
       monto: importe.total,
       origenTipo: "PAGO_CLIENTE",

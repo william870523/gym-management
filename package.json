@@ -72,6 +72,7 @@
     "migrate:asistencia-visitante": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-visitante.ts",
     "demo:cobro-cruzado": "bun --preload ./src/config/tz-preload.ts scripts/demo-cobro-cruzado-m4c.ts",
     "demo:acceso-multisede-m4b": "bun --preload ./src/config/tz-preload.ts scripts/demo-acceso-multisede-m4b.ts",
+    "demo:liquidacion-saldo-m8": "bun --preload ./src/config/tz-preload.ts scripts/demo-liquidacion-saldo-m8.ts",
     "demo:acceso-multisede": "bun --preload ./src/config/tz-preload.ts scripts/demo-acceso-multisede-m4a.ts",
     "barrer:visitantes": "bun --preload ./src/config/tz-preload.ts scripts/barrer-visitantes-caducados.ts",
     "migrate:recargo-mora": "bun --preload ./src/config/tz-preload.ts scripts/migrate-recargo-mora.ts",

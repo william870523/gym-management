@@ -25,6 +25,7 @@ import {
 } from "../../../domain/liquidacion-saldo-policy";
 import { saldoDeLaSede } from "../../../application/saldo-enlace/saldo-enlace.service";
 import {
+  anularLiquidacion,
   liquidacionesDeLaSede,
   registrarLiquidacion,
 } from "../../../application/saldo-enlace/liquidacion-saldo.service";
@@ -226,12 +227,20 @@ function fechaDeNegocio(cuerpo: Record<string, unknown>, nowUtc: Date): Date {
  * asiento al que acompaña, porque es la que sacó el dinero de su caja.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function registrarEvento(tx: any, entidad: string, entidadId: string, fila: any, gymId: string) {
+async function registrarEvento(
+  tx: any,
+  entidad: string,
+  entidadId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fila: any,
+  gymId: string,
+  operacion: string = "INSERT",
+) {
   await tx.syncLog.create({
     data: {
       event_id: randomUUID(),
       entidad,
-      operacion: "INSERT",
+      operacion,
       entidad_id: entidadId,
       gym_id: gymId,
       device_id: null,
@@ -245,4 +254,54 @@ function respuestaDeError(c: Context, error: unknown) {
     return c.json({ error: error.message }, error.status as 400);
   }
   throw error;
+}
+
+/**
+ * Anula una liquidación: la marca y la **contraasienta**.
+ *
+ * No la borra. La transferencia ocurrió de verdad, y hacerla desaparecer
+ * dejaría el saldo cuadrando por casualidad y sin nadie a quien preguntarle.
+ * Se exige **motivo**: una corrección de dinero entre dos negocios sin explicar
+ * es indistinguible de un error.
+ */
+export async function postAnulacionDeLiquidacion(c: Context) {
+  try {
+    const cuerpo = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    const actor = await actorDe(auth(c));
+    const nowUtc = trustedClock.nowUtc();
+
+    const resultado = await prisma.$transaction(async (tx) =>
+      anularLiquidacion({
+        tx,
+        nowUtc,
+        actor,
+        liquidacionId: c.req.param("liquidacionId"),
+        motivo: String(cuerpo.motivo ?? ""),
+        sourceDevice: DISPOSITIVO,
+        emitirAsiento: (fila) =>
+          registrarEvento(tx, "saldo_enlace_asiento", fila.asiento_id, fila, String(fila.gym_id)),
+        emitirLiquidacion: (fila) =>
+          registrarEvento(
+            tx,
+            "saldo_liquidacion",
+            fila.liquidacion_id,
+            fila,
+            String(fila.gym_id),
+            "UPDATE",
+          ),
+      }),
+    );
+
+    return c.json({
+      liquidacion_id: resultado.liquidacion.liquidacion_id,
+      estado: resultado.liquidacion.estado,
+      asiento_anulacion_id: resultado.liquidacion.asiento_anulacion_id,
+      saldo_restituido: resultado.saldoRestituido,
+      anulada_motivo: resultado.liquidacion.anulada_motivo,
+      anulada_por: resultado.liquidacion.anulada_por_nombre_snapshot,
+      ya_estaba: resultado.yaEstaba,
+    });
+  } catch (error) {
+    return respuestaDeError(c, error);
+  }
 }

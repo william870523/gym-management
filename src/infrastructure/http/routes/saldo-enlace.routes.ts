@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   getLiquidaciones,
   getSaldoPendiente,
+  postAnulacionDeLiquidacion,
   postLiquidacion,
 } from "../controllers/saldo-enlace.controller";
 import { requirePlatformAuthority } from "./global-catalog-authority";
@@ -18,3 +19,10 @@ saldoEnlaceRoutes.get("/liquidaciones", requirePlatformAuthority, getLiquidacion
 // día sin que la acreedora se enterara, y solo se descubriría cuando alguien
 // echara de menos el dinero. Quien arbitra entre las dos es el concentrador.
 saldoEnlaceRoutes.post("/liquidaciones", requirePlatformAuthority, postLiquidacion);
+// Anular es corregir dinero ya movido entre dos negocios: misma autoridad que
+// registrarlo, y por el mismo motivo.
+saldoEnlaceRoutes.post(
+  "/liquidaciones/:liquidacionId/anulacion",
+  requirePlatformAuthority,
+  postAnulacionDeLiquidacion,
+);

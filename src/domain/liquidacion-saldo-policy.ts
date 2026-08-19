@@ -187,3 +187,73 @@ export function pendientesDeLiquidar(
 ): LineaDeSaldoPendiente[] {
   return saldos.filter((linea) => aMinimas(linea.saldo) > 0n);
 }
+
+export const ESTADO_LIQUIDACION_VIGENTE = "VIGENTE";
+export const ESTADO_LIQUIDACION_ANULADA = "ANULADA";
+
+/** Una liquidación tal y como está guardada, para decidir si se puede anular. */
+export interface LiquidacionGuardada {
+  readonly liquidacionId: string;
+  readonly estado: string;
+  readonly deudorGymId: string;
+  readonly acreedor: AcreedorDelSaldo;
+  readonly monedaId: string;
+  readonly monto: string;
+}
+
+export interface AnulacionResuelta {
+  readonly liquidacionId: string;
+  readonly deudorGymId: string;
+  readonly acreedor: AcreedorDelSaldo;
+  readonly monedaId: string;
+  /** Lo que hay que devolver a la deuda. Igual al importe liquidado. */
+  readonly monto: string;
+  readonly motivo: string;
+}
+
+/**
+ * Anular una liquidación es **contraasentarla**, no borrarla.
+ *
+ * Se transfirió de más, o a quien no era, y hay que poder corregirlo. Borrar la
+ * fila haría desaparecer una transferencia que ocurrió de verdad y dejaría el
+ * saldo cuadrando por casualidad; lo que corresponde es un asiento `GENERA` que
+ * devuelve a la deuda exactamente lo que aquel `DESHACE` le quitó, con la fila
+ * original intacta y marcada.
+ *
+ * Se exige **motivo**. Una corrección de dinero entre dos negocios sin explicar
+ * es indistinguible de un error, y quien la audite dentro de seis meses no
+ * tendrá a nadie a quien preguntarle.
+ */
+export function resolverAnulacion(input: {
+  readonly liquidacion: LiquidacionGuardada;
+  readonly motivo: string;
+}): AnulacionResuelta {
+  const { liquidacion } = input;
+  const motivo = String(input.motivo ?? "").trim();
+  if (!motivo) {
+    throw new LiquidacionSaldoError("Anular una liquidación exige un motivo.");
+  }
+  if (liquidacion.estado === ESTADO_LIQUIDACION_ANULADA) {
+    // No es un fallo del que haya que asustarse, pero tampoco se repite: el
+    // segundo contraasiento devolvería a la deuda un dinero que ya volvió.
+    throw new LiquidacionSaldoError("Esa liquidación ya está anulada.", 409);
+  }
+  if (liquidacion.estado !== ESTADO_LIQUIDACION_VIGENTE) {
+    throw new LiquidacionSaldoError(
+      `No se puede anular una liquidación en estado «${liquidacion.estado}».`,
+      409,
+    );
+  }
+  const monto = aMinimas(liquidacion.monto);
+  if (monto <= 0n) {
+    throw new LiquidacionSaldoError("La liquidación guardada no tiene importe válido.");
+  }
+  return {
+    liquidacionId: liquidacion.liquidacionId,
+    deudorGymId: liquidacion.deudorGymId,
+    acreedor: liquidacion.acreedor,
+    monedaId: liquidacion.monedaId,
+    monto: aTexto(monto),
+    motivo: motivo.slice(0, 500),
+  };
+}

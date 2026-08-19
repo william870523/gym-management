@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { decidirCobro } from "../../domain/cobro-por-cuenta-ajena-policy";
 import { anotarAsiento, saldoDeLaSede } from "./saldo-enlace.service";
-import { registrarLiquidacion, liquidacionesDeLaSede } from "./liquidacion-saldo.service";
+import {
+  anularLiquidacion,
+  liquidacionesDeLaSede,
+  registrarLiquidacion,
+} from "./liquidacion-saldo.service";
 
 /**
  * M8 — liquidar el saldo. Se prueba por donde duele: que el pago baje el saldo
@@ -54,6 +58,15 @@ function baseVacia() {
         },
         findMany: async ({ where }: any) =>
           liquidaciones.filter((f) => f.gym_id === where.gym_id && f.is_deleted === false),
+        update: async ({ where, data }: any) => {
+          const fila = liquidaciones.find(
+            (f) => f.liquidacion_id === where.liquidacion_id,
+          );
+          for (const [k, v] of Object.entries(data)) {
+            fila[k] = (v as any)?.increment ? (fila[k] ?? 0) + (v as any).increment : v;
+          }
+          return fila;
+        },
       },
     },
   };
@@ -332,5 +345,182 @@ describe("M8 · registrar la liquidación del saldo", () => {
     const porMoneda = Object.fromEntries(lineas.map((l) => [l.monedaId, l.saldo]));
     expect(porMoneda[CUP]).toBe("0.00");
     expect(porMoneda[USD]).toBe("50.00");
+  });
+
+  // -------------------------------------------------------- la anulación
+
+  it("anular devuelve la deuda sin borrar la transferencia", async () => {
+    const base = baseVacia();
+    await conDeuda(base);
+    await registrarLiquidacion({
+      tx: base.tx,
+      pedida: pedida(),
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    expect((await saldoDeLaSede({ tx: base.tx, gymId: OESTE }))[0].saldo).toBe("180.00");
+
+    const r = await anularLiquidacion({
+      tx: base.tx,
+      liquidacionId: "liq-1",
+      motivo: "Se transfirió a la sede equivocada",
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+
+    expect(r.saldoRestituido).toBe("120.00");
+    // La deuda vuelve a estar donde estaba.
+    expect((await saldoDeLaSede({ tx: base.tx, gymId: OESTE }))[0].saldo).toBe("300.00");
+    // Y la transferencia sigue ahí, marcada: ocurrió de verdad.
+    expect(base.liquidaciones).toHaveLength(1);
+    expect(base.liquidaciones[0].estado).toBe("ANULADA");
+    expect(base.liquidaciones[0].anulada_motivo).toBe("Se transfirió a la sede equivocada");
+    expect(base.liquidaciones[0].anulada_por_nombre_snapshot).toBe("Dueña de la cadena");
+    // Tres asientos: la deuda, el pago y el contraasiento. Ninguno reescrito.
+    expect(base.asientos).toHaveLength(3);
+    expect(base.asientos.map((a: any) => a.sentido)).toEqual([
+      "GENERA",
+      "DESHACE",
+      "GENERA",
+    ]);
+  });
+
+  it("anular exige motivo", async () => {
+    // Una corrección de dinero entre dos negocios sin explicar es
+    // indistinguible de un error.
+    const base = baseVacia();
+    await conDeuda(base);
+    await registrarLiquidacion({
+      tx: base.tx,
+      pedida: pedida(),
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    await expect(
+      anularLiquidacion({
+        tx: base.tx,
+        liquidacionId: "liq-1",
+        motivo: "   ",
+        actor: ACTOR,
+        nowUtc: AHORA,
+        emitirAsiento: base.emitirAsiento,
+        emitirLiquidacion: base.emitirLiquidacion,
+      }),
+    ).rejects.toThrow(/motivo/);
+    expect(base.asientos).toHaveLength(2);
+  });
+
+  it("anular dos veces no devuelve la deuda dos veces", async () => {
+    const base = baseVacia();
+    await conDeuda(base);
+    await registrarLiquidacion({
+      tx: base.tx,
+      pedida: pedida(),
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    const anular = () =>
+      anularLiquidacion({
+        tx: base.tx,
+        liquidacionId: "liq-1",
+        motivo: "Error de destino",
+        actor: ACTOR,
+        nowUtc: AHORA,
+        emitirAsiento: base.emitirAsiento,
+        emitirLiquidacion: base.emitirLiquidacion,
+      });
+    const uno = await anular();
+    const dos = await anular();
+    expect(uno.yaEstaba).toBeFalse();
+    expect(dos.yaEstaba).toBeTrue();
+    expect(base.asientos).toHaveLength(3);
+    expect((await saldoDeLaSede({ tx: base.tx, gymId: OESTE }))[0].saldo).toBe("300.00");
+  });
+
+  it("una liquidación que no existe no se anula en silencio", async () => {
+    const base = baseVacia();
+    await expect(
+      anularLiquidacion({
+        tx: base.tx,
+        liquidacionId: "liq-fantasma",
+        motivo: "Da igual",
+        actor: ACTOR,
+        nowUtc: AHORA,
+        emitirAsiento: base.emitirAsiento,
+        emitirLiquidacion: base.emitirLiquidacion,
+      }),
+    ).rejects.toThrow(/no existe/);
+  });
+
+  it("anular deja liquidar otra vez la misma deuda", async () => {
+    // Es el caso que motiva todo esto: se transfirió a quien no era, se anula, y
+    // hay que poder pagarle al acreedor correcto.
+    const base = baseVacia();
+    await conDeuda(base);
+    await registrarLiquidacion({
+      tx: base.tx,
+      pedida: pedida(),
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    await anularLiquidacion({
+      tx: base.tx,
+      liquidacionId: "liq-1",
+      motivo: "Destino equivocado",
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    const otra = await registrarLiquidacion({
+      tx: base.tx,
+      pedida: pedida({ liquidacionId: "liq-2", monto: "300.00" }),
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    expect(otra.resuelta.saldoAntes).toBe("300.00");
+    expect(otra.resuelta.saldoDespues).toBe("0.00");
+  });
+
+  it("el historial marca la anulada y dice quién y por qué", async () => {
+    const base = baseVacia();
+    await conDeuda(base);
+    await registrarLiquidacion({
+      tx: base.tx,
+      pedida: pedida(),
+      actor: ACTOR,
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    await anularLiquidacion({
+      tx: base.tx,
+      liquidacionId: "liq-1",
+      motivo: "Destino equivocado",
+      actor: { userId: "u-dos", nombre: "Contabilidad central", rol: "admin" },
+      nowUtc: AHORA,
+      emitirAsiento: base.emitirAsiento,
+      emitirLiquidacion: base.emitirLiquidacion,
+    });
+    const [fila] = await liquidacionesDeLaSede({ tx: base.tx, gymId: OESTE });
+    expect(fila.anulada).toBeTrue();
+    expect(fila.estado).toBe("ANULADA");
+    expect(fila.anulada_motivo).toBe("Destino equivocado");
+    // Quien la registró y quien la anuló son personas distintas, y las dos
+    // quedan: es lo que permite auditar una corrección.
+    expect(fila.registrado_por.nombre).toBe("Dueña de la cadena");
+    expect(fila.anulada_por?.nombre).toBe("Contabilidad central");
   });
 });

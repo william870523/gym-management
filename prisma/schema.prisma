@@ -2086,8 +2086,14 @@ model SaldoLiquidacion {
   saldo_despues   Decimal
   /// Pagó más de lo que debía, y lo declaró. Sin declararlo se rechaza.
   dejo_saldo_a_favor Boolean @default(false)
+  /// VIGENTE | ANULADA. Anular es contraasentar: la fila se marca, no se borra,
+  /// porque la transferencia ocurrió de verdad y hacerla desaparecer dejaría el
+  /// saldo cuadrando por casualidad.
+  estado          String  @default("VIGENTE")
   /// El asiento DESHACE que produjo. Uno por liquidación.
   asiento_id      String
+  /// El asiento GENERA que devuelve a la deuda lo que aquel le quitó.
+  asiento_anulacion_id String?
   /// Número de operación, comprobante, lo que haya.
   referencia      String?
   nota            String?
@@ -2095,6 +2101,14 @@ model SaldoLiquidacion {
   registrado_por_user_id         String
   registrado_por_nombre_snapshot String
   registrado_por_rol_snapshot    String
+
+  /// Una corrección de dinero entre dos negocios sin explicar es
+  /// indistinguible de un error. El motivo es obligatorio al anular.
+  anulada_motivo              String?
+  anulada_at                  DateTime?
+  anulada_por_user_id         String?
+  anulada_por_nombre_snapshot String?
+  anulada_por_rol_snapshot    String?
 
   ocurrido_at   DateTime
   /// Fecha de negocio de la sede que paga, no la del servidor.

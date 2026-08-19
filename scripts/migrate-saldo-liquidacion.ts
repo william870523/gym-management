@@ -52,6 +52,10 @@ const COLUMNAS = new Set([
   "registrado_por_nombre_snapshot", "registrado_por_rol_snapshot",
   "ocurrido_at", "fecha_negocio", "source_device", "version", "is_deleted",
   "created_at", "updated_at", "deleted_at",
+  // Anular es contraasentar: la fila se marca, no se borra.
+  "estado", "asiento_anulacion_id", "anulada_motivo", "anulada_at",
+  "anulada_por_user_id", "anulada_por_nombre_snapshot",
+  "anulada_por_rol_snapshot",
 ]);
 
 async function backupMariadb() {
@@ -85,12 +89,19 @@ try {
         saldo_antes DECIMAL(18, 2) NOT NULL,
         saldo_despues DECIMAL(18, 2) NOT NULL,
         dejo_saldo_a_favor TINYINT(1) NOT NULL DEFAULT 0,
+        estado VARCHAR(191) NOT NULL DEFAULT 'VIGENTE',
         asiento_id VARCHAR(191) NOT NULL,
+        asiento_anulacion_id VARCHAR(191) NULL,
         referencia VARCHAR(191) NULL,
         nota TEXT NULL,
         registrado_por_user_id VARCHAR(191) NOT NULL,
         registrado_por_nombre_snapshot VARCHAR(191) NOT NULL,
         registrado_por_rol_snapshot VARCHAR(191) NOT NULL,
+        anulada_motivo TEXT NULL,
+        anulada_at DATETIME(3) NULL,
+        anulada_por_user_id VARCHAR(191) NULL,
+        anulada_por_nombre_snapshot VARCHAR(191) NULL,
+        anulada_por_rol_snapshot VARCHAR(191) NULL,
         ocurrido_at DATETIME(3) NOT NULL,
         fecha_negocio DATETIME(3) NOT NULL,
         source_device VARCHAR(191) NULL,
@@ -117,6 +128,28 @@ try {
     console.log("Tabla `saldo_liquidacion` creada.");
   } else {
     console.log("La tabla ya existía; no se recrea.");
+  }
+
+  // Aditiva: la tabla pudo crearse antes de que existiera la anulación, así que
+  // las columnas que falten se añaden en vez de exigir recrearla. Recrearla
+  // perdería las liquidaciones ya registradas, que son dinero movido de verdad.
+  const TIPOS: Record<string, string> = {
+    estado: "VARCHAR(191) NOT NULL DEFAULT 'VIGENTE'",
+    asiento_anulacion_id: "VARCHAR(191) NULL",
+    anulada_motivo: "TEXT NULL",
+    anulada_at: "DATETIME(3) NULL",
+    anulada_por_user_id: "VARCHAR(191) NULL",
+    anulada_por_nombre_snapshot: "VARCHAR(191) NULL",
+    anulada_por_rol_snapshot: "VARCHAR(191) NULL",
+  };
+  for (const [columna, tipo] of Object.entries(TIPOS)) {
+    const hay = new Set((await columnas()).map((c) => c.COLUMN_NAME));
+    if (!hay.has(columna)) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE saldo_liquidacion ADD COLUMN ${columna} ${tipo}`,
+      );
+      console.log(`Columna \`${columna}\` añadida.`);
+    }
   }
 
   const presentes = new Set((await columnas()).map((c) => c.COLUMN_NAME));

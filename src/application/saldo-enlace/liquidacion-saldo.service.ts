@@ -39,7 +39,10 @@ import type { SaldoDeEnlace } from "../../domain/cobro-por-cuenta-ajena-policy";
 import {
   aMinimas,
   aTexto,
+  ESTADO_LIQUIDACION_ANULADA,
+  ESTADO_LIQUIDACION_VIGENTE,
   LiquidacionSaldoError,
+  resolverAnulacion,
   resolverLiquidacion,
   type AcreedorDelSaldo,
   type LiquidacionPedida,
@@ -50,6 +53,7 @@ import { anotarAsiento, saldoDeLaSede } from "./saldo-enlace.service";
 /** Por qué nace un asiento, no qué se cobró. Ver la nota de la migración. */
 export const CLASE_LIQUIDACION = "LIQUIDACION";
 export const ORIGEN_LIQUIDACION = "LIQUIDACION_SALDO";
+export const ORIGEN_ANULACION = "ANULACION_LIQUIDACION";
 
 /** Quien registra la liquidación, congelado en la fila. */
 export interface ActorDeLaLiquidacion {
@@ -177,6 +181,7 @@ export async function registrarLiquidacion(input: {
       acreedor_gym_id:
         resuelta.acreedor.tipo === "SEDE" ? resuelta.acreedor.gymId : null,
       moneda_id: resuelta.monedaId,
+      estado: ESTADO_LIQUIDACION_VIGENTE,
       monto: resuelta.monto,
       saldo_antes: resuelta.saldoAntes,
       saldo_despues: resuelta.saldoDespues,
@@ -228,6 +233,17 @@ export async function liquidacionesDeLaSede(input: {
     gym_id: String(fila.gym_id),
     acreedor: acreedorDeLaFila(fila),
     moneda_id: String(fila.moneda_id),
+    estado: String(fila.estado ?? ESTADO_LIQUIDACION_VIGENTE),
+    anulada: String(fila.estado ?? ESTADO_LIQUIDACION_VIGENTE) === ESTADO_LIQUIDACION_ANULADA,
+    anulada_motivo: fila.anulada_motivo ?? null,
+    anulada_at: fila.anulada_at ?? null,
+    anulada_por: fila.anulada_por_user_id
+      ? {
+          user_id: String(fila.anulada_por_user_id),
+          nombre: String(fila.anulada_por_nombre_snapshot ?? fila.anulada_por_user_id),
+          rol: String(fila.anulada_por_rol_snapshot ?? ""),
+        }
+      : null,
     // Mismo motivo que arriba: el `Decimal` de la base llega sin decimales.
     monto: aTexto(aMinimas(String(fila.monto))),
     saldo_antes: aTexto(aMinimas(String(fila.saldo_antes))),
@@ -244,4 +260,115 @@ export async function liquidacionesDeLaSede(input: {
     ocurrido_at: fila.ocurrido_at,
     fecha_negocio: fila.fecha_negocio,
   }));
+}
+
+/**
+ * Anula una liquidación **contraasentándola**.
+ *
+ * Se transfirió de más, o a quien no era. Borrar la fila haría desaparecer una
+ * transferencia que ocurrió de verdad y dejaría el saldo cuadrando por
+ * casualidad; lo que se hace es un asiento `GENERA` que devuelve a la deuda
+ * exactamente lo que aquel `DESHACE` le quitó. La fila original **no se toca**
+ * más que para marcarla, con su motivo y con quién la anuló.
+ *
+ * Devolver la que ya estaba anulada en vez de fallar permite reintentar sin
+ * miedo; repetir el contraasiento devolvería a la deuda un dinero que ya volvió.
+ */
+export async function anularLiquidacion(input: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly tx: any;
+  readonly liquidacionId: string;
+  readonly motivo: string;
+  readonly actor: ActorDeLaLiquidacion;
+  readonly nowUtc: Date;
+  readonly fechaNegocio?: Date;
+  readonly sourceDevice?: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly emitirAsiento: (fila: any) => Promise<unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly emitirLiquidacion: (fila: any) => Promise<unknown>;
+}): Promise<{
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly liquidacion: any;
+  readonly saldoRestituido: string;
+  readonly yaEstaba: boolean;
+}> {
+  const { tx, nowUtc, actor } = input;
+  const liquidacionId = String(input.liquidacionId ?? "").trim();
+  if (!liquidacionId) {
+    throw new LiquidacionSaldoError("Falta el identificador de la liquidación.");
+  }
+  if (!String(actor.userId ?? "").trim()) {
+    throw new LiquidacionSaldoError("No se pudo identificar quién anula la liquidación.", 401);
+  }
+
+  const fila = await tx.saldoLiquidacion.findFirst({
+    where: { liquidacion_id: liquidacionId },
+  });
+  if (!fila) {
+    throw new LiquidacionSaldoError("Esa liquidación no existe.", 404);
+  }
+  if (String(fila.estado ?? ESTADO_LIQUIDACION_VIGENTE) === ESTADO_LIQUIDACION_ANULADA) {
+    return {
+      liquidacion: fila,
+      saldoRestituido: aTexto(aMinimas(String(fila.monto))),
+      yaEstaba: true,
+    };
+  }
+
+  const resuelta = resolverAnulacion({
+    liquidacion: {
+      liquidacionId,
+      estado: String(fila.estado ?? ESTADO_LIQUIDACION_VIGENTE),
+      deudorGymId: String(fila.gym_id),
+      acreedor: acreedorDeLaFila(fila),
+      monedaId: String(fila.moneda_id),
+      monto: String(fila.monto),
+    },
+    motivo: input.motivo,
+  });
+
+  const asiento = await anotarAsiento({
+    tx,
+    nowUtc,
+    asiento: {
+      asientoId: `sae-anu-${liquidacionId}`,
+      // `GENERA`: devuelve a la deuda lo que la liquidación le quitó.
+      saldo: {
+        deudorGymId: resuelta.deudorGymId,
+        acreedor: resuelta.acreedor,
+        sentido: "GENERA",
+      },
+      monedaId: resuelta.monedaId,
+      monto: resuelta.monto,
+      origenTipo: ORIGEN_ANULACION,
+      origenId: liquidacionId,
+      claveOrigen: `ANULACION:${liquidacionId}`,
+      claseCobro: CLASE_LIQUIDACION,
+      ci: null,
+      ocurridoAt: nowUtc,
+      fechaNegocio: input.fechaNegocio ?? fila.fecha_negocio ?? nowUtc,
+      sourceDevice: input.sourceDevice ?? null,
+    },
+    emitirEvento: input.emitirAsiento,
+  });
+
+  const anulada = await tx.saldoLiquidacion.update({
+    where: { liquidacion_id: liquidacionId },
+    data: {
+      estado: ESTADO_LIQUIDACION_ANULADA,
+      anulada_motivo: resuelta.motivo,
+      anulada_at: nowUtc,
+      anulada_por_user_id: actor.userId,
+      anulada_por_nombre_snapshot: actor.nombre,
+      anulada_por_rol_snapshot: actor.rol,
+      asiento_anulacion_id: String(asiento.asiento_id),
+      source_device: input.sourceDevice ?? fila.source_device ?? null,
+      version: { increment: 1 },
+      updated_at: nowUtc,
+    },
+  });
+  await input.emitirLiquidacion(anulada);
+
+  return { liquidacion: anulada, saldoRestituido: resuelta.monto, yaEstaba: false };
 }

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  getConsolidadoDeCierre,
   getSemaforoDeCierre,
   listarSolicitudesDeCierre,
   postRetiroDeSolicitud,
@@ -16,6 +17,12 @@ cierreCadenaRoutes.get("/solicitudes", listarSolicitudesDeCierre);
 // El semáforo enseña a TODAS las sedes a la vez, así que mirarlo es de la
 // cadena: una sede no tiene por qué saber si la vecina cerró.
 cierreCadenaRoutes.get("/semaforo", requirePlatformAuthority, getSemaforoDeCierre);
+// El informe agregado suma el dinero de todas las sedes: misma autoridad.
+cierreCadenaRoutes.get(
+  "/consolidado",
+  requirePlatformAuthority,
+  getConsolidadoDeCierre,
+);
 cierreCadenaRoutes.post("/solicitudes", requirePlatformAuthority, postSolicitudDeCierre);
 cierreCadenaRoutes.post(
   "/solicitudes/:solicitudId/retiro",

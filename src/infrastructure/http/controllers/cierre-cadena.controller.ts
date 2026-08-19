@@ -18,6 +18,7 @@ import {
   solicitarCierreDeCadena,
 } from "../../../application/accounting/cierre-cadena-solicitud.service";
 import { semaforoDeLaCadena } from "../../../application/accounting/semaforo-cierre.service";
+import { consolidadoDeLaCadena } from "../../../application/accounting/consolidado-cadena.service";
 
 const DISPOSITIVO = "WEB_ADMIN";
 
@@ -157,4 +158,44 @@ async function periodoPedido(c: Context) {
     throw new CierreCadenaError("El período termina antes de empezar.");
   }
   return { fechaInicio: inicio, fechaFinExclusiva: fin };
+}
+
+/**
+ * El informe agregado del período (§6.3 y §6.4).
+ *
+ * Es un **informe**, no un certificado: se puede mirar cuando se quiera y cambia
+ * si llegan datos nuevos. El certificado —la foto congelada que ya no cambia— es
+ * otra cosa y todavía no existe.
+ *
+ * Autoridad de cadena, igual que el semáforo: aquí sale el dinero de todas las
+ * sedes juntas.
+ */
+export async function getConsolidadoDeCierre(c: Context) {
+  try {
+    const periodo = await periodoPedido(c);
+    const horas = c.req.query("horas_silencio");
+    const consolidado = await consolidadoDeLaCadena({
+      periodo,
+      ahora: trustedClock.nowUtc(),
+      horasDeSilencioTolerables: horas ? Number(horas) : undefined,
+    });
+    return c.json({
+      periodo: {
+        fecha_inicio: consolidado.periodo.fechaInicio,
+        fecha_fin_exclusiva: consolidado.periodo.fechaFinExclusiva,
+      },
+      clase: consolidado.clase,
+      monedas: consolidado.monedas,
+      ausentes: consolidado.ausentes,
+      sedes_incluidas: consolidado.sedes_incluidas,
+      avisos: consolidado.avisos,
+      motivo_para_no_firmar: consolidado.motivo_para_no_firmar,
+      nota: consolidado.nota,
+    });
+  } catch (error) {
+    if (error instanceof CierreCadenaError) {
+      return c.json({ error: error.message }, error.status as 400);
+    }
+    throw error;
+  }
 }

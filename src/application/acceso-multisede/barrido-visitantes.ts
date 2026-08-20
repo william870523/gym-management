@@ -28,6 +28,8 @@ const SIMULACION = Symbol("simulación de barrido");
 export type ResultadoBarrido = {
   revisadas: number;
   retiradas: string[];
+  /** Copias que se conservan y cuya membresía de origen se puso al día. */
+  refrescadas: string[];
   aplicado: boolean;
 };
 
@@ -57,6 +59,10 @@ export async function barrerVisitantesCaducados(
         fechaNegocioDeSede,
         sourceDevice: DISPOSITIVO,
         nowUtc,
+        // Aquí sí: el concentrador tiene las membresías de todas las sedes. En
+        // una instalación esto vaciaría la copia del visitante, porque las
+        // membresías ajenas no se replican.
+        refrescarMembresia: true,
       });
 
       // Un evento por copia retirada, global para que llegue a todas las
@@ -74,9 +80,27 @@ export async function barrerVisitantesCaducados(
         });
       }
 
+      // Y uno por copia puesta al día. Sin esto el concentrador quedaría con la
+      // cobertura correcta y las sedes con la vieja, que es la divergencia que
+      // se estaba arreglando, solo que ahora silenciosa: las dos bases tendrían
+      // la fila y diría cosas distintas.
+      for (const fila of resultado.refrescadas) {
+        await tx.syncLog.create({
+          data: {
+            event_id: randomUUID(),
+            entidad: "cliente_visitante",
+            operacion: "UPDATE",
+            entidad_id: fila.ci,
+            gym_id: null,
+            payload_json: JSON.stringify(fila),
+          },
+        });
+      }
+
       const salida: ResultadoBarrido = {
         revisadas: resultado.revisadas,
         retiradas: resultado.retiradas.map((f: any) => String(f.ci)),
+        refrescadas: resultado.refrescadas.map((f: any) => String(f.ci)),
         aplicado: aplicar,
       };
       if (!aplicar) throw Object.assign(new Error("simulación"), { [SIMULACION]: salida });

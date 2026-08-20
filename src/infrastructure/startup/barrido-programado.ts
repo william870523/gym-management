@@ -26,8 +26,9 @@
  *
  * ## Qué deja
  *
- * Lo que retira ya queda en `sync_log` —un `DELETE` por copia, global—, así que
- * el rastro de *qué* se fue es durable y consultable. Lo que faltaba era saber
+ * Lo que retira ya queda en `sync_log` —un `DELETE` por copia, global— y lo que
+ * **pone al día** deja un `UPDATE` por copia, así que el rastro de qué se fue y
+ * de qué cambió es durable y consultable. Lo que faltaba era saber
  * si el barrido **llegó a correr**, que es distinto de que no encontrara nada.
  * Eso se publica en `/health`.
  */
@@ -43,6 +44,8 @@ export interface EstadoDelBarrido {
     readonly at: string;
     readonly revisadas: number;
     readonly retiradas: number;
+    /** Copias conservadas cuya membresía de origen se puso al día. */
+    readonly refrescadas: number;
     readonly ok: boolean;
     readonly error?: string;
   };
@@ -66,6 +69,7 @@ export async function ejecutarBarridoUnaVez(): Promise<void> {
         at: new Date().toISOString(),
         revisadas: r.revisadas,
         retiradas: r.retiradas.length,
+        refrescadas: r.refrescadas.length,
         ok: true,
       },
     };
@@ -73,7 +77,9 @@ export async function ejecutarBarridoUnaVez(): Promise<void> {
     logger.info("Barrido de copias de visitante ejecutado", {
       revisadas: r.revisadas,
       retiradas: r.retiradas.length,
+      refrescadas: r.refrescadas.length,
       ci: r.retiradas,
+      alDia: r.refrescadas,
     });
   } catch (error) {
     const mensaje = error instanceof Error ? error.message : String(error);
@@ -83,6 +89,7 @@ export async function ejecutarBarridoUnaVez(): Promise<void> {
         at: new Date().toISOString(),
         revisadas: 0,
         retiradas: 0,
+        refrescadas: 0,
         ok: false,
         error: mensaje,
       },

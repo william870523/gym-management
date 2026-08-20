@@ -525,14 +525,32 @@ export async function barrerReplicasCaducadas(input: {
   fechaNegocioDeSede: (timezone: string | null | undefined) => Date;
   sourceDevice: string;
   nowUtc: Date;
+  /**
+   * Además de retirar las caducadas, **poner al día la membresía** de las que
+   * se conservan.
+   *
+   * Apagado por defecto, y el motivo no es prudencia: **solo el concentrador
+   * tiene las membresías de todas las sedes**. Una instalación que lo
+   * encendiera buscaría en su base la membresía de un socio ajeno, no la
+   * encontraría —no se replican— y escribiría «sin membresía» en la copia, que
+   * es exactamente la avería que este refresco viene a evitar.
+   */
+  refrescarMembresia?: boolean;
 }) {
   const { tx, sourceDevice, nowUtc } = input;
 
   const copias = await tx.clienteVisitante.findMany({
     where: { is_deleted: false },
-    select: { ci: true, gym_id_origen: true },
+    select: {
+      ci: true,
+      gym_id_origen: true,
+      membresia_estado: true,
+      membresia_fecha_fin: true,
+    },
   });
-  if (copias.length === 0) return { revisadas: 0, retiradas: [] as any[] };
+  if (copias.length === 0) {
+    return { revisadas: 0, retiradas: [] as any[], refrescadas: [] as any[] };
+  }
 
   const accesos = await tx.clienteAccesoMultisede.findMany({
     where: { ci: { in: copias.map((c: any) => c.ci) } },
@@ -549,17 +567,56 @@ export async function barrerReplicasCaducadas(input: {
   );
 
   const retiradas: any[] = [];
+  const refrescadas: any[] = [];
   for (const copia of copias) {
     const fechaNegocio = input.fechaNegocioDeSede(
       zonaPorSede.get(copia.gym_id_origen),
     );
-    if (debeReplicarse(accesoPorCi.get(copia.ci) as any, fechaNegocio)) continue;
-    retiradas.push(
+    if (!debeReplicarse(accesoPorCi.get(copia.ci) as any, fechaNegocio)) {
+      retiradas.push(
+        await tx.clienteVisitante.update({
+          where: { ci: copia.ci },
+          data: {
+            is_deleted: true,
+            deleted_at: nowUtc,
+            source_device: sourceDevice,
+            updated_at: nowUtc,
+            version: { increment: 1 },
+          },
+        }),
+      );
+      continue;
+    }
+
+    // La copia se proyectaba al marcar el plus y al cobrarlo, y **no volvía a
+    // tocarse nunca**. Una baja o una renovación en la sede del socio no la
+    // alcanzaba, así que envejecía sin límite: medido el 20-08-2026, una copia
+    // decía que la cobertura acababa en septiembre cuando el socio había
+    // renovado hasta junio del año siguiente. El barrido ya visita todas, así
+    // que las pone al día de paso.
+    if (!input.refrescarMembresia) continue;
+    const membresia = await tx.membresiaCliente.findFirst({
+      where: { ci: copia.ci, gym_id: copia.gym_id_origen, is_deleted: false },
+      orderBy: { fecha_fin: "desc" },
+      select: { estado: true, fecha_fin: true },
+    });
+    const estado = membresia?.estado ?? null;
+    const fechaFin = membresia?.fecha_fin ?? null;
+    // Solo se escribe lo que cambia: una fila tocada es un evento en la cola de
+    // TODAS las sedes, y reescribir lo idéntico ahogaría la bajada de todas
+    // cada doce horas.
+    if (
+      estado === (copia.membresia_estado ?? null) &&
+      mismoInstante(fechaFin, copia.membresia_fecha_fin ?? null)
+    ) {
+      continue;
+    }
+    refrescadas.push(
       await tx.clienteVisitante.update({
         where: { ci: copia.ci },
         data: {
-          is_deleted: true,
-          deleted_at: nowUtc,
+          membresia_estado: estado,
+          membresia_fecha_fin: fechaFin,
           source_device: sourceDevice,
           updated_at: nowUtc,
           version: { increment: 1 },
@@ -567,7 +624,13 @@ export async function barrerReplicasCaducadas(input: {
       }),
     );
   }
-  return { revisadas: copias.length, retiradas };
+  return { revisadas: copias.length, retiradas, refrescadas };
+}
+
+/** ¿Dos fechas nulas o iguales al milisegundo? */
+function mismoInstante(a: Date | null, b: Date | null): boolean {
+  if (a === null || b === null) return a === b;
+  return new Date(a).getTime() === new Date(b).getTime();
 }
 
 /**

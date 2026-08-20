@@ -31,7 +31,17 @@ try {
       `${verbo} ${resultado.retiradas.length}`,
   );
   for (const ci of resultado.retiradas) console.log(`   ${ci}`);
-  if (!resultado.aplicado && resultado.retiradas.length > 0) {
+
+  // Se dice siempre, también cuando es cero: «no había nada que poner al día»
+  // y «no miré» se leen igual en una salida que omite la línea.
+  const verboRefresco = resultado.aplicado ? "puestas al día" : "se pondrían al día";
+  console.log(`   membresía ${verboRefresco}: ${resultado.refrescadas.length}`);
+  for (const ci of resultado.refrescadas) console.log(`      ${ci}`);
+
+  if (
+    !resultado.aplicado &&
+    resultado.retiradas.length + resultado.refrescadas.length > 0
+  ) {
     console.log("\nNada se ha escrito. Repite con --aplicar para hacerlo.");
   }
 } finally {

@@ -15,6 +15,15 @@
  * otro sitio. La instalación pregunta aquí justo antes de dejar entrar y decide
  * con la respuesta; si no llega a tiempo, decide con su copia y lo declara.
  *
+ * ## De dónde sale la respuesta
+ *
+ * La identidad y la sede dueña salen de `cliente_visitante`; **el estado de la
+ * membresía, no**. Esa copia es una proyección para que las sedes decidan sin
+ * conexión, y se escribe solo al marcar el plus y al cobrarlo. Contestar desde
+ * ella dejaba esta consulta sin sentido: preguntaba «¿cómo está ahora?» y
+ * respondía con la foto de cuando alguien pagó. Aquí se lee la membresía de
+ * verdad, que el concentrador tiene porque todas las sedes suben la suya.
+ *
  * ## Por qué vive en `/sync` y no en `/acceso-multisede`
  *
  * Quien pregunta es la **instalación**, no una persona: se autentica con las
@@ -57,12 +66,29 @@ export async function getVisitanteEnVivo(c: Context) {
     return c.json({ error: "Ese socio es de esta sede." }, 409);
   }
 
+  // **La copia dice quién es; la membresía dice cómo está.** Responder el
+  // estado desde `cliente_visitante` era responder con la misma proyección cuya
+  // vejez esta consulta viene a corregir: se escribe al marcar el plus y al
+  // cobrarlo, y **nada la vuelve a tocar** cuando en la sede del socio se
+  // cancela o se renueva. Medido el 20-08-2026: la copia daba la cobertura por
+  // terminada el 23/09/2026 y el socio había renovado hasta el 20/06/2027.
+  //
+  // El concentrador sí tiene la membresía de verdad —todas las sedes suben la
+  // suya—, así que la lee. Se acota a la sede de origen: la ficha del socio vive
+  // allí y una fila con su CI en otra sede sería un error que no conviene
+  // heredar aquí.
+  const membresia = await prisma.membresiaCliente.findFirst({
+    where: { ci, gym_id: copia.gym_id_origen, is_deleted: false },
+    orderBy: { fecha_fin: "desc" },
+    select: { estado: true, fecha_fin: true },
+  });
+
   return c.json({
     ci,
     existe: true,
     gym_id_origen: copia.gym_id_origen,
-    membresia_estado: copia.membresia_estado,
-    membresia_fecha_fin: copia.membresia_fecha_fin,
+    membresia_estado: membresia?.estado ?? null,
+    membresia_fecha_fin: membresia?.fecha_fin ?? null,
     // El plus se responde con su fecha, no con un «vigente»: quien decide es la
     // instalación, contra SU día de negocio, que puede no ser el de aquí.
     acceso_vigente_hasta: acceso?.vigente_hasta ?? null,

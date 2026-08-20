@@ -135,6 +135,12 @@ export const MOTIVO_VISITANTE_SIN_COPIA =
  *   su sede y no viajan; la copia no las trae. Es un límite consciente de la
  *   etapa 1: quien controla la mora del plan es la sede que lo vendió.
  */
+/** Estados en los que una membresía todavía significa algo en su sede. */
+const ESTADOS_VIVOS = ["ACTIVA", "PAUSADA", "PENDIENTE_PAGO"];
+
+const MOTIVO_VISITANTE_SIN_MEMBRESIA_VIVA =
+  "La membresía de este socio ya no está vigente en su sede.";
+
 export function decidirEntradaVisitante(input: {
   tieneEntradaAbierta: boolean;
   /** Resultado de `decidirVisita`: si el plus multi-sede autoriza la visita. */
@@ -176,6 +182,20 @@ export function decidirEntradaVisitante(input: {
       resultado: "BLOQUEADA",
       status: 409,
       motivo: MOTIVO_VISITANTE_SIN_COPIA,
+    };
+  }
+
+  // El mismo argumento vale para un estado que no está vivo. `decidirEntrada`
+  // deja pasar cuando ninguna membresía es ACTIVA —compatibilidad con los
+  // socios antiguos de la casa, que entran aunque su contrato histórico no
+  // conste—, y a un visitante eso le abría la puerta con la membresía
+  // CANCELADA. Medido el 20-08-2026: el concentrador contestó `CANCELADA` y la
+  // entrada se registró igual.
+  if (!ESTADOS_VIVOS.includes(estado.toUpperCase())) {
+    return {
+      resultado: "BLOQUEADA",
+      status: 409,
+      motivo: MOTIVO_VISITANTE_SIN_MEMBRESIA_VIVA,
     };
   }
 

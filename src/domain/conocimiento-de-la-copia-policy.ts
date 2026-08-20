@@ -113,3 +113,65 @@ export function conocimientoDeLaSede(input: {
       "entonces seguiría apareciendo vigente.",
   };
 }
+
+/** De dónde salió el dato con el que se decidió una entrada. */
+export type FuenteDeLaDecision = "CONCENTRADOR" | "COPIA_LOCAL";
+
+/** Lo mínimo que hace falta de un visitante para decidir su entrada. */
+export interface EstadoDelVisitante {
+  readonly membresiaEstado: string | null;
+  readonly membresiaFechaFin: Date | null;
+}
+
+export interface DecisionConFuente {
+  readonly estado: EstadoDelVisitante;
+  readonly fuente: FuenteDeLaDecision;
+  /**
+   * Lo que la respuesta puede afirmar. Nulo cuando decidió el concentrador: ahí
+   * no hay nada que matizar, el dato es el de origen en este instante.
+   */
+  readonly advertencia: string | null;
+}
+
+/**
+ * Con qué dato se resuelve la entrada de un visitante (§5.2).
+ *
+ * **El concentrador manda cuando contesta.** Es la única forma de cerrar la
+ * ventana de la cancelación anticipada: entre que la sede del socio da la baja
+ * y la siguiente bajada, la copia local sigue diciendo `ACTIVA`.
+ *
+ * **Y la copia manda cuando no contesta**, sin negar la entrada. Bloquear
+ * porque el concentrador no responde convertiría cada corte de red en un cierre
+ * del gimnasio, que es lo contrario de para lo que existe la lectura local.
+ * Entonces se decide con lo que hay y **se dice con qué se decidió**.
+ *
+ * Un caso merece atención: si el concentrador contesta que la copia **ya no
+ * existe**, eso no es «no sé», es «se retiró». Se responde con la membresía
+ * vacía, que las políticas de entrada ya saben leer como «no hay derecho que
+ * reconocer».
+ */
+export function decidirConQueSeResuelve(input: {
+  readonly copia: EstadoDelVisitante;
+  readonly enVivo: (EstadoDelVisitante & { readonly existe: boolean }) | null;
+  readonly conocimiento: ConocimientoDeLaSede;
+}): DecisionConFuente {
+  const vivo = input.enVivo;
+  if (vivo) {
+    return {
+      estado: vivo.existe
+        ? { membresiaEstado: vivo.membresiaEstado, membresiaFechaFin: vivo.membresiaFechaFin }
+        : { membresiaEstado: null, membresiaFechaFin: null },
+      fuente: "CONCENTRADOR",
+      advertencia: null,
+    };
+  }
+  return {
+    estado: input.copia,
+    fuente: "COPIA_LOCAL",
+    // Se reutiliza la advertencia de la frescura en vez de escribir otra: dos
+    // textos para el mismo riesgo acaban diciendo cosas distintas.
+    advertencia:
+      input.conocimiento.advertencia ??
+      "El concentrador no contestó: se decidió con lo que esta sede tenía guardado.",
+  };
+}

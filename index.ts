@@ -7,6 +7,7 @@ import {
 } from "./src/infrastructure/time/time.service";
 import { waitForDatabase } from "./src/infrastructure/startup/wait-for-database";
 import { registrarInstancia } from "./src/infrastructure/startup/instance-registry";
+import { programarBarridoDeVisitantes } from "./src/infrastructure/startup/barrido-programado";
 import { resolve } from "path";
 
 try {
@@ -43,10 +44,19 @@ const port = server.port || 3000;
 // pueda verla y cerrarla. La remota no tiene worker de sincronización, así que
 // una segunda instancia no corrompe nada: solo no consigue el puerto. Por eso
 // aquí se registra pero no se exige exclusividad.
-registrarInstancia({
+const otrasInstancias = registrarInstancia({
     servicio: "gym-remote-api",
     puerto: port,
     directorioRegistro: resolve(import.meta.dir, "../.runtime"),
+});
+
+// M4a §9-bis. El barrido estaba escrito y no lo ejecutaba nadie: había que
+// acordarse de lanzarlo a mano. Solo lo programa la primera instancia viva;
+// dos concentradores barriendo emitirían la misma baja dos veces.
+programarBarridoDeVisitantes({
+    otrasInstancias: otrasInstancias.length,
+    intervaloHoras: env.barridoVisitantesHoras,
+    habilitado: env.barridoVisitantesHabilitado,
 });
 
 console.log(`Starting server on port ${port}...`);

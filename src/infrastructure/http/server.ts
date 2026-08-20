@@ -57,6 +57,7 @@ import { planCuotaRoutes } from "./routes/plan_cuota.routes";
 import membershipRequestRoutes from "./routes/membership-request.routes";
 import retentionRoutes from "./routes/retention.routes";
 import estadisticasRoutes from "./routes/estadisticas.routes";
+import { estadoDelBarrido } from "../startup/barrido-programado";
 import { getRemoteTimeStatus } from "../time/time.service";
 
 export const app = new Hono();
@@ -109,6 +110,9 @@ app.get("/health", async (c) =>
   c.json({
     status: "ok-remote",
     time: await getRemoteTimeStatus(c.req.query("gym_id")),
+    // Sin esto, «el barrido no encontró nada» y «el barrido no corrió» se leen
+    // igual desde fuera, que es como se pasaron meses sin que corriera.
+    barrido_visitantes: estadoDelBarrido(),
   }),
 );
 

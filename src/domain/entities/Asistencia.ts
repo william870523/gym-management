@@ -13,4 +13,14 @@ export interface Asistencia {
     pausa_inicio?: Date | null;
     /** Milisegundos acumulados de pausas ya cerradas. */
     pausa_ms?: number;
+    /**
+     * §5.2 — con qué se decidió la entrada de un **visitante**, congelado.
+     * `null` en la de un socio de la casa: allí se decide con sus propias
+     * membresías y no hay conocimiento ajeno que declarar.
+     */
+    decidido_con?: string | null;
+    /** AL_DIA | CON_RETRASO | A_CIEGAS de quien decidió, no de la sede del socio. */
+    conocimiento_al_decidir?: string | null;
+    /** El hecho del que sale ese juicio. `null` si nunca se sincronizó. */
+    dias_sin_noticias?: number | null;
 }

@@ -54,7 +54,23 @@ export class ApplyAsistenciaEventUseCase {
             pausa_inicio: payload.pausa_inicio
                 ? new Date(String(payload.pausa_inicio))
                 : null,
-            pausa_ms: typeof payload.pausa_ms === "number" ? payload.pausa_ms : 0
+            pausa_ms: typeof payload.pausa_ms === "number" ? payload.pausa_ms : 0,
+            // §5.2 — el rastro de con qué decidió la sede viaja con la entrada.
+            // Este mapa es una lista blanca: lo que no se nombre aquí se pierde
+            // en la subida, y la fila del concentrador quedaría distinta de la
+            // de la sede que la creó.
+            decidido_con: textoONulo(payload.decidido_con),
+            conocimiento_al_decidir: textoONulo(payload.conocimiento_al_decidir),
+            dias_sin_noticias:
+                typeof payload.dias_sin_noticias === "number"
+                    ? payload.dias_sin_noticias
+                    : null
         };
     }
+}
+
+/** Texto no vacío del payload, o `null`. Un `""` que llegara sería «no consta». */
+function textoONulo(valor: unknown): string | null {
+    const texto = String(valor ?? "").trim();
+    return texto ? texto : null;
 }

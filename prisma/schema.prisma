@@ -1648,6 +1648,22 @@ model Asistencia {
   pausa_inicio  DateTime?
   pausa_ms      Int       @default(0)
 
+  /// §5.2 — con qué se decidió esta entrada, congelado en el momento (M4a).
+  ///
+  /// Solo se llenan en la entrada de un **visitante**: en la de un socio de la
+  /// casa se decide con sus propias membresías, que están aquí, y no hay nada
+  /// que declarar. `null` significa eso, no «se perdió el dato».
+  ///
+  /// `decidido_con` = CONCENTRADOR | COPIA_LOCAL. `conocimiento_al_decidir` =
+  /// AL_DIA | CON_RETRASO | A_CIEGAS, y mide la distancia entre **quien decidió**
+  /// y el concentrador; no dice si la sede del socio estaba al día, que es otro
+  /// eje (el semáforo de M5). `dias_sin_noticias` es el hecho del que sale ese
+  /// juicio, guardado aparte para que cambiar los umbrales no relabele entradas
+  /// viejas. Migración: `migrate:asistencia-rastro-decision`.
+  decidido_con            String?  @db.VarChar(20)
+  conocimiento_al_decidir String?  @db.VarChar(20)
+  dias_sin_noticias       Int?
+
   /// M4a — la relación se conserva porque las lecturas de asistencia hacen
   /// `include: { cliente }` para pintar nombre y foto, pero **la clave foránea
   /// ya no existe en ninguna de las dos bases**: un socio con acceso multi-sede

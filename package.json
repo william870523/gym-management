@@ -22,6 +22,7 @@
     "clean:r54-h4-sync-residue": "bun --preload ./src/config/tz-preload.ts scripts/clean-r54-h4-sync-residue.ts",
     "typecheck": "tsc --noEmit",
     "migrate:asistencia-pausa": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-pausa.ts",
+    "migrate:asistencia-rastro-decision": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-rastro-decision.ts",
     "migrate:multi-sede": "bun --preload ./src/config/tz-preload.ts scripts/migrate-multi-sede.ts",
     "grant:dueno": "bun --preload ./src/config/tz-preload.ts scripts/grant-platform-owner.ts",
     "migrate:memberships-phase1": "bun --preload ./src/config/tz-preload.ts scripts/migrate-memberships-phase1.ts",

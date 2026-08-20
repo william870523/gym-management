@@ -106,7 +106,14 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
                 deleted_at: null,
                 is_deleted: false,
                 pausa_inicio: data.pausa_inicio ?? null,
-                pausa_ms: data.pausa_ms ?? 0
+                pausa_ms: data.pausa_ms ?? 0,
+                // §5.2 — el rastro de con qué se decidió sube tal cual y no se
+                // recalcula aquí: en el concentrador la respuesta sería otra —él
+                // siempre está al día— y quedaría escrito que la sede sabía lo
+                // que no sabía.
+                decidido_con: data.decidido_con ?? null,
+                conocimiento_al_decidir: data.conocimiento_al_decidir ?? null,
+                dias_sin_noticias: data.dias_sin_noticias ?? null
             },
             update: {
                 ci: data.ci,
@@ -118,7 +125,14 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
                 deleted_at: null,
                 is_deleted: false,
                 pausa_inicio: data.pausa_inicio ?? null,
-                pausa_ms: data.pausa_ms ?? 0
+                pausa_ms: data.pausa_ms ?? 0,
+                // §5.2 — el rastro de con qué se decidió sube tal cual y no se
+                // recalcula aquí: en el concentrador la respuesta sería otra —él
+                // siempre está al día— y quedaría escrito que la sede sabía lo
+                // que no sabía.
+                decidido_con: data.decidido_con ?? null,
+                conocimiento_al_decidir: data.conocimiento_al_decidir ?? null,
+                dias_sin_noticias: data.dias_sin_noticias ?? null
             }
             });
         });
@@ -274,7 +288,12 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
                 created_at: data.created_at ?? now,
                 updated_at: now,
                 deleted_at: null,
-                is_deleted: false
+                is_deleted: false,
+                // §5.2 — lo decide el caso de uso, que es quien sabe si el socio
+                // era visitante; el repositorio solo lo escribe.
+                decidido_con: data.decidido_con ?? null,
+                conocimiento_al_decidir: data.conocimiento_al_decidir ?? null,
+                dias_sin_noticias: data.dias_sin_noticias ?? null
             }
         });
     }

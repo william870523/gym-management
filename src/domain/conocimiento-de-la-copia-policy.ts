@@ -175,3 +175,60 @@ export function decidirConQueSeResuelve(input: {
       "El concentrador no contestó: se decidió con lo que esta sede tenía guardado.",
   };
 }
+
+/**
+ * Lo que queda **escrito en la entrada** sobre con qué se decidió (§5.2).
+ *
+ * ## Por qué se guarda, si ya se dice
+ *
+ * La advertencia dura lo que dura el aviso en pantalla. Después, la fila de
+ * asistencia de una entrada autorizada a ciegas es **idéntica** a la de una
+ * decidida contra el dato vivo. El día que vuelve la sincronización y aparece
+ * que aquel socio estaba dado de baja desde el martes, no hay forma de saber
+ * cuáles se autorizaron sin poder comprobarlo: o se revisan todas o ninguna.
+ *
+ * ## Por qué se congela el juicio y no solo el número
+ *
+ * `conocimiento` es la clasificación de `diasSinNoticias` con los umbrales de
+ * hoy. Guardar solo los días y volver a clasificarlos al leerlos **relabelaría
+ * entradas viejas** el día que los umbrales cambien: una entrada decidida «con
+ * retraso» pasaría a leerse «a ciegas» sin que nadie tocara esa fila, y el
+ * rastro dejaría de decir lo que se supo entonces. Se guardan los dos, el hecho
+ * y el juicio que se hizo con él, por el mismo motivo por el que un certificado
+ * guarda el texto que se selló y no una reconstrucción.
+ */
+export interface RastroDeLaDecision {
+  readonly decididoCon: FuenteDeLaDecision;
+  readonly conocimiento: FrescuraDelConocimiento;
+  /** `null` cuando la sede no había sincronizado nunca. */
+  readonly diasSinNoticias: number | null;
+}
+
+export function rastroDeLaDecision(input: {
+  readonly fuente: FuenteDeLaDecision;
+  readonly conocimiento: ConocimientoDeLaSede;
+}): RastroDeLaDecision {
+  return {
+    decididoCon: input.fuente,
+    conocimiento: input.conocimiento.frescura,
+    diasSinNoticias: input.conocimiento.diasSinNoticias,
+  };
+}
+
+/**
+ * El rastro de una entrada decidida **en el propio concentrador** (la web).
+ *
+ * Ahí la pregunta que mide `conocimientoDeLaSede` —«¿cuánto hace que bajé
+ * datos?»— no tiene sentido: el concentrador no baja nada, es el origen. Cero
+ * días, y la fuente es él mismo.
+ *
+ * **Lo que este rastro no afirma:** que la sede del socio esté al día. Una sede
+ * muda deja su copia parada también aquí, y eso se mide en otro eje —el
+ * semáforo de M5— que no se mezcla en esta columna: una sola casilla que
+ * quisiera decir las dos cosas no diría bien ninguna.
+ */
+export const RASTRO_DEL_CONCENTRADOR: RastroDeLaDecision = {
+  decididoCon: "CONCENTRADOR",
+  conocimiento: "AL_DIA",
+  diasSinNoticias: 0,
+};

@@ -12,6 +12,7 @@ import {
     esVisitanteDeOtraSede,
 } from "../../../domain/acceso-multisede-policy";
 import { AsistenciaElegibilidadService } from "../../asistencia/asistencia-elegibilidad.service";
+import { RASTRO_DEL_CONCENTRADOR } from "../../../domain/conocimiento-de-la-copia-policy";
 
 /** Rechazo de negocio, no fallo del sistema: se traduce a 409. */
 export class AsistenciaElegibilidadError extends Error {
@@ -80,7 +81,18 @@ export class CreateAsistenciaUseCase {
             created_at: occurredAt,
             updated_at: occurredAt,
             deleted_at: null,
-            is_deleted: false
+            is_deleted: false,
+            // §5.2 — con qué se decidió, congelado en la fila. En la web decide
+            // el propio concentrador, así que no hay retraso que declarar: la
+            // pregunta «¿cuánto hace que bajé datos?» no se le hace al origen.
+            // En la entrada de un socio de la casa no hay nada que declarar.
+            decidido_con: esPropio ? null : RASTRO_DEL_CONCENTRADOR.decididoCon,
+            conocimiento_al_decidir: esPropio
+                ? null
+                : RASTRO_DEL_CONCENTRADOR.conocimiento,
+            dias_sin_noticias: esPropio
+                ? null
+                : RASTRO_DEL_CONCENTRADOR.diasSinNoticias
         };
 
         await this.asistenciaRepository.create(newAsistencia);

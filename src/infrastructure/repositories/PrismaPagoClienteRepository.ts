@@ -34,6 +34,7 @@ import {
     upsertGymScopedSyncRecord,
 } from "./gym-scoped-sync-write";
 import { assertGymScopedReference } from "./gym-scoped-reference";
+import { puedeAnularElCobro } from "../../domain/cobro-por-cuenta-ajena-policy";
 import { PaymentRuleError } from "../../domain/payment-rule-error";
 import { quoteMethodSurcharge } from "../../application/payment/method-surcharge.service";
 import { resolveClientDiscountQuote } from "../../application/payment/client-discount-quote.service";
@@ -272,12 +273,46 @@ export class PrismaPagoClienteRepository implements PagoClienteRepository {
 
     async softDelete(id: string, gymId: string): Promise<void> {
         const now = trustedClock.nowUtc();
+
+        // §7.8 — un cobro **cruzado** lo anula la sede donde entró el efectivo, y
+        // esa NO es la dueña del ingreso. La fila lleva el `gym_id` de la dueña,
+        // así que el guardián de escritura por sede rechazaba la baja que subía
+        // la sede que había devuelto el dinero: «la PK ya pertenece a otro
+        // gimnasio».
+        //
+        // Medido el 20-08-2026 anulando desde la **instalación**: el cobro
+        // quedaba anulado en la sede y vivo en el concentrador —el reverso a
+        // medias que §7.8 prohíbe— y el evento, tras agotar sus intentos,
+        // atascaba la cola detrás de él. No se había visto porque el recorrido
+        // de §7.8 anuló desde el concentrador, donde la fila y quien escribe
+        // están en la misma base.
+        //
+        // Quién puede anular lo decide la **política gemela**, la misma que
+        // ejecuta la anulación; aquí solo se traduce esa autoridad a la sede con
+        // la que hay que escribir. El guardián no se debilita: una sede sin
+        // autoridad sigue chocando con él.
+        const existente = await this.client.pagoCliente.findUnique({
+            where: { pago_cliente_id: id },
+            select: { gym_id: true, cobrado_en_gym_id: true },
+        });
+        const autoridad = existente
+            ? puedeAnularElCobro({
+                cobro: {
+                    gymId: String(existente.gym_id ?? ""),
+                    cobradoEnGymId: existente.cobrado_en_gym_id,
+                },
+                gymIdQueAnula: gymId,
+            })
+            : null;
+
         await softDeleteGymScopedSyncRecord({
             delegate: this.client.pagoCliente,
             entity: "pago_cliente",
             pk: "pago_cliente_id",
             id,
-            gymId,
+            gymId: autoridad?.permitido
+                ? String(existente!.gym_id ?? gymId)
+                : gymId,
             now,
         });
     }

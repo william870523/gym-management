@@ -58,6 +58,7 @@ import membershipRequestRoutes from "./routes/membership-request.routes";
 import retentionRoutes from "./routes/retention.routes";
 import estadisticasRoutes from "./routes/estadisticas.routes";
 import { estadoDelBarrido } from "../startup/barrido-programado";
+import { estadoDeLaAuditoriaDeSellos } from "../startup/auditoria-sellos-programada";
 import { getRemoteTimeStatus } from "../time/time.service";
 
 export const app = new Hono();
@@ -113,6 +114,7 @@ app.get("/health", async (c) =>
     // Sin esto, «el barrido no encontró nada» y «el barrido no corrió» se leen
     // igual desde fuera, que es como se pasaron meses sin que corriera.
     barrido_visitantes: estadoDelBarrido(),
+    auditoria_sellos: estadoDeLaAuditoriaDeSellos(),
   }),
 );
 

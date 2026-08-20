@@ -32,4 +32,10 @@ export const env = {
   barridoVisitantesHoras: parseInt(getEnv("BARRIDO_VISITANTES_HORAS", "12"), 10),
   barridoVisitantesHabilitado:
     getEnv("BARRIDO_VISITANTES", "on").trim().toLowerCase() !== "off",
+  // §6.4: cada cuánto se repasan los sellos de los certificados. Veinticuatro
+  // horas y no doce como el barrido porque aquí no caduca nada: lo que se busca
+  // es enterarse de una corrupción en reposo, no llegar a tiempo a una fecha.
+  auditoriaSellosHoras: parseInt(getEnv("AUDITORIA_SELLOS_HORAS", "24"), 10),
+  auditoriaSellosHabilitada:
+    getEnv("AUDITORIA_SELLOS", "on").trim().toLowerCase() !== "off",
 };

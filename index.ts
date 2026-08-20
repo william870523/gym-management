@@ -8,6 +8,7 @@ import {
 import { waitForDatabase } from "./src/infrastructure/startup/wait-for-database";
 import { registrarInstancia } from "./src/infrastructure/startup/instance-registry";
 import { programarBarridoDeVisitantes } from "./src/infrastructure/startup/barrido-programado";
+import { programarAuditoriaDeSellos } from "./src/infrastructure/startup/auditoria-sellos-programada";
 import { resolve } from "path";
 
 try {
@@ -57,6 +58,16 @@ programarBarridoDeVisitantes({
     otrasInstancias: otrasInstancias.length,
     intervaloHoras: env.barridoVisitantesHoras,
     habilitado: env.barridoVisitantesHabilitado,
+});
+
+// §6.4. La puerta de la bajada comprueba lo que ENTRA; esto comprueba lo que
+// ESTÁ. Un disco que se degrada o una restauración a medias no pasan por
+// ninguna puerta, y hasta hoy solo se habrían notado el día que alguien
+// abriera el certificado.
+programarAuditoriaDeSellos({
+    otrasInstancias: otrasInstancias.length,
+    intervaloHoras: env.auditoriaSellosHoras,
+    habilitada: env.auditoriaSellosHabilitada,
 });
 
 console.log(`Starting server on port ${port}...`);

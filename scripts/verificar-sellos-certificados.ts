@@ -28,45 +28,40 @@
  * Devuelve 1 si algún sello no cuadra, para que pueda encadenarse.
  */
 import { prisma } from "../src/infrastructure/db/prismaClient";
-import { certificadoIntacto } from "../src/domain/certificado-cadena-policy";
+import { auditarSellosDeCertificados } from "../src/application/accounting/auditoria-de-sellos";
 
 const dia = (fecha: Date) => fecha.toISOString().slice(0, 10);
 
 try {
-  const certificados = await prisma.cierreCadenaCertificado.findMany({
-    orderBy: [{ fecha_inicio: "asc" }, { ciclo_numero: "asc" }],
-  });
+  // El repaso lo hace la misma función que usa la pasada programada: escribir
+  // aquí una comprobación parecida acabaría con dos que se parecen, y el día que
+  // importe dirían cosas distintas.
+  const r = await auditarSellosDeCertificados(prisma as never);
 
-  if (certificados.length === 0) {
+  if (r.revisados === 0) {
     console.log("No hay certificados guardados: nada que comprobar.");
     process.exit(0);
   }
 
-  const rotos: string[] = [];
-  for (const fila of certificados) {
-    const intacto = certificadoIntacto({
-      textoFirmado: fila.foto_json,
-      sha256: fila.foto_sha256,
-    });
+  for (const sello of r.detalle) {
     // Se listan **todos**, también los que están bien: un informe que solo
     // habla cuando hay problema no distingue «todo correcto» de «no se ejecutó».
     console.log(
       [
-        intacto ? "OK  " : "ROTO",
-        fila.certificado_id.slice(0, 8),
-        `${dia(fila.fecha_inicio)}→${dia(fila.fecha_fin_exclusiva)}`,
-        `ciclo ${fila.ciclo_numero}`,
-        fila.estado.padEnd(8),
-        fila.is_deleted ? "retirado" : "",
+        sello.intacto ? "OK  " : "ROTO",
+        sello.certificadoId.slice(0, 8),
+        `${dia(sello.desde)}→${dia(sello.hastaExclusivo)}`,
+        `ciclo ${sello.cicloNumero}`,
+        sello.estado.padEnd(8),
+        sello.retirado ? "retirado" : "",
       ].join("  "),
     );
-    if (!intacto) rotos.push(fila.certificado_id);
   }
 
+  const rotos = r.rotos;
   console.log(
-    `\n${certificados.length} certificado(s) · ${
-      certificados.length - rotos.length
-    } con el sello intacto · ${rotos.length} roto(s).`,
+    `\n${r.revisados} certificado(s) · ${r.intactos} con el sello intacto ` +
+      `· ${rotos.length} roto(s).`,
   );
   if (rotos.length > 0) {
     // Un certificado roto no se borra ni se repara aquí: es una foto sellada, y

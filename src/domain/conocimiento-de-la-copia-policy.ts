@@ -114,6 +114,86 @@ export function conocimientoDeLaSede(input: {
   };
 }
 
+/**
+ * Cuánto hace que se supo de **la sede del socio** (§5.2, segundo eje).
+ *
+ * ## Por qué no basta con el primero
+ *
+ * `conocimientoDeLaSede` mide la distancia entre **quien decide** y el
+ * concentrador. Contesta «¿he hablado con la red hoy?», y con eso una sede al
+ * día se cree autorizada a afirmar. Pero el concentrador no inventa el estado
+ * del visitante: lo sabe porque **la sede del socio lo subió**. Si esa lleva
+ * tres días muda, el dato que baja es de hace tres días por más al día que esté
+ * quien pregunta.
+ *
+ * Son dos ejes independientes y fallan por separado:
+ *
+ * | esta sede | la del socio | qué vale la respuesta |
+ * |---|---|---|
+ * | al día | al día | lo que dice, dice |
+ * | al día | muda | **fresca de mentira**: viene del concentrador, pero es vieja |
+ * | muda | al día | se decide con la copia, y eso ya se declaraba |
+ * | muda | muda | ni se sabe: sin línea no llega esta medida |
+ *
+ * La segunda fila es la que este eje destapa, y era la que nadie decía.
+ *
+ * ## Solo se sabe con línea
+ *
+ * La mide el concentrador y viaja en la respuesta viva. Sin conexión no llega
+ * —la copia no la trae— y entonces se responde `NO_CONSTA`, que **no** es «está
+ * al día»: es «no lo sé», y confundirlos sería inventarse una tranquilidad.
+ */
+export type NoticiaDeOrigen =
+  | "AL_DIA"
+  | "CON_RETRASO"
+  | "A_CIEGAS"
+  | "NO_CONSTA";
+
+export interface ConocimientoDeLaSedeDeOrigen {
+  readonly noticia: NoticiaDeOrigen;
+  /** Días de negocio desde la última noticia. `null` si no consta. */
+  readonly diasSinNoticias: number | null;
+  readonly advertencia: string | null;
+}
+
+/**
+ * Clasifica cuánto hace que se supo de la sede del socio.
+ *
+ * Se mide contra el día de negocio de **quien pregunta**, igual que el otro eje
+ * y por el mismo motivo: la pregunta del mostrador es «¿esto que tengo delante
+ * es de hoy?», y hoy es el suyo.
+ */
+export function conocimientoDeLaSedeDeOrigen(input: {
+  readonly ultimaNoticia: Date | null | undefined;
+  readonly fechaNegocio: Date;
+}): ConocimientoDeLaSedeDeOrigen {
+  const ultima = input.ultimaNoticia ?? null;
+  if (!ultima || Number.isNaN(ultima.getTime())) {
+    return { noticia: "NO_CONSTA", diasSinNoticias: null, advertencia: null };
+  }
+
+  const dias = Math.max(0, Math.round((dia(input.fechaNegocio) - dia(ultima)) / DIA_MS));
+  if (dias === 0) {
+    return { noticia: "AL_DIA", diasSinNoticias: 0, advertencia: null };
+  }
+  if (dias === 1) {
+    return {
+      noticia: "CON_RETRASO",
+      diasSinNoticias: 1,
+      advertencia:
+        "La sede de este socio no da noticias desde ayer: una baja de hoy " +
+        "allí no ha llegado todavía ni al concentrador.",
+    };
+  }
+  return {
+    noticia: "A_CIEGAS",
+    diasSinNoticias: dias,
+    advertencia:
+      `La sede de este socio lleva ${dias} días sin dar noticias: lo que se ` +
+      "sabe de él es de entonces, aunque esta sede esté al día.",
+  };
+}
+
 /** De dónde salió el dato con el que se decidió una entrada. */
 export type FuenteDeLaDecision = "CONCENTRADOR" | "COPIA_LOCAL";
 
@@ -127,10 +207,16 @@ export interface DecisionConFuente {
   readonly estado: EstadoDelVisitante;
   readonly fuente: FuenteDeLaDecision;
   /**
-   * Lo que la respuesta puede afirmar. Nulo cuando decidió el concentrador: ahí
-   * no hay nada que matizar, el dato es el de origen en este instante.
+   * Lo que la respuesta puede afirmar.
+   *
+   * Nulo solo cuando de verdad no hay nada que matizar: decidió el concentrador
+   * **y** la sede del socio está al día. Que contestara el concentrador ya no
+   * basta para callar —su dato es tan reciente como la última subida de esa
+   * sede— y callar sobre una foto de hace tres días suena a comprobado.
    */
   readonly advertencia: string | null;
+  /** Segundo eje: cuánto hace que se supo de la sede del socio. */
+  readonly origen: ConocimientoDeLaSedeDeOrigen;
 }
 
 /**
@@ -150,19 +236,34 @@ export interface DecisionConFuente {
  * vacía, que las políticas de entrada ya saben leer como «no hay derecho que
  * reconocer».
  */
+const SIN_NOTICIA_DE_ORIGEN: ConocimientoDeLaSedeDeOrigen = {
+  noticia: "NO_CONSTA",
+  diasSinNoticias: null,
+  advertencia: null,
+};
+
 export function decidirConQueSeResuelve(input: {
   readonly copia: EstadoDelVisitante;
   readonly enVivo: (EstadoDelVisitante & { readonly existe: boolean }) | null;
   readonly conocimiento: ConocimientoDeLaSede;
+  /**
+   * Cuánto hace que se supo de la sede del socio, cuando se sabe. Solo llega
+   * con la respuesta del concentrador: sin línea no hay quien lo mida.
+   */
+  readonly origen?: ConocimientoDeLaSedeDeOrigen;
 }): DecisionConFuente {
   const vivo = input.enVivo;
   if (vivo) {
+    const origen = input.origen ?? SIN_NOTICIA_DE_ORIGEN;
     return {
       estado: vivo.existe
         ? { membresiaEstado: vivo.membresiaEstado, membresiaFechaFin: vivo.membresiaFechaFin }
         : { membresiaEstado: null, membresiaFechaFin: null },
       fuente: "CONCENTRADOR",
-      advertencia: null,
+      // El dato es el de origen en este instante… si esa sede ha hablado. Si
+      // lleva días muda, lo que llega es su última foto y hay que decirlo.
+      advertencia: origen.advertencia,
+      origen,
     };
   }
   return {
@@ -173,6 +274,9 @@ export function decidirConQueSeResuelve(input: {
     advertencia:
       input.conocimiento.advertencia ??
       "El concentrador no contestó: se decidió con lo que esta sede tenía guardado.",
+    // Sin respuesta no se sabe nada de la sede del socio, y `NO_CONSTA` lo dice
+    // sin fingir que se comprobó.
+    origen: SIN_NOTICIA_DE_ORIGEN,
   };
 }
 
@@ -202,16 +306,26 @@ export interface RastroDeLaDecision {
   readonly conocimiento: FrescuraDelConocimiento;
   /** `null` cuando la sede no había sincronizado nunca. */
   readonly diasSinNoticias: number | null;
+  /**
+   * El segundo eje, congelado igual que el primero: cuánto hacía que se sabía
+   * de la sede del socio. `NO_CONSTA` cuando no se pudo medir —sin línea no
+   * llega—, que no es lo mismo que estar al día.
+   */
+  readonly conocimientoOrigen: NoticiaDeOrigen;
+  readonly diasSinNoticiasOrigen: number | null;
 }
 
 export function rastroDeLaDecision(input: {
   readonly fuente: FuenteDeLaDecision;
   readonly conocimiento: ConocimientoDeLaSede;
+  readonly origen?: ConocimientoDeLaSedeDeOrigen;
 }): RastroDeLaDecision {
   return {
     decididoCon: input.fuente,
     conocimiento: input.conocimiento.frescura,
     diasSinNoticias: input.conocimiento.diasSinNoticias,
+    conocimientoOrigen: input.origen?.noticia ?? "NO_CONSTA",
+    diasSinNoticiasOrigen: input.origen?.diasSinNoticias ?? null,
   };
 }
 
@@ -222,13 +336,22 @@ export function rastroDeLaDecision(input: {
  * datos?»— no tiene sentido: el concentrador no baja nada, es el origen. Cero
  * días, y la fuente es él mismo.
  *
- * **Lo que este rastro no afirma:** que la sede del socio esté al día. Una sede
- * muda deja su copia parada también aquí, y eso se mide en otro eje —el
- * semáforo de M5— que no se mezcla en esta columna: una sola casilla que
- * quisiera decir las dos cosas no diría bien ninguna.
+ * **Lo que la primera columna no afirma:** que la sede del socio esté al día.
+ * Eso es el segundo eje, y desde el 20-08-2026 viaja aparte en vez de darse por
+ * supuesto: una sola casilla que quisiera decir las dos cosas no diría bien
+ * ninguna.
  */
-export const RASTRO_DEL_CONCENTRADOR: RastroDeLaDecision = {
-  decididoCon: "CONCENTRADOR",
-  conocimiento: "AL_DIA",
-  diasSinNoticias: 0,
-};
+export function rastroDelConcentrador(
+  origen?: ConocimientoDeLaSedeDeOrigen,
+): RastroDeLaDecision {
+  return {
+    decididoCon: "CONCENTRADOR",
+    conocimiento: "AL_DIA",
+    diasSinNoticias: 0,
+    // El segundo eje **sí** aplica en la web: el concentrador está al día
+    // consigo mismo, no con la sede del socio. Era justo lo que la constante
+    // que había aquí antes no podía decir.
+    conocimientoOrigen: origen?.noticia ?? "NO_CONSTA",
+    diasSinNoticiasOrigen: origen?.diasSinNoticias ?? null,
+  };
+}

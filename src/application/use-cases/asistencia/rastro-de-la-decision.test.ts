@@ -66,6 +66,11 @@ describe("§5.2 · el rastro de la decisión en la web", () => {
     // hace que bajó datos, porque no baja.
     expect(escritas[0].conocimiento_al_decidir).toBe("AL_DIA");
     expect(escritas[0].dias_sin_noticias).toBe(0);
+    // Del segundo eje —cuánto hace que se supo de la sede del socio— no se
+    // afirma nada si no se pudo medir. `NO_CONSTA` no es `AL_DIA`: el
+    // concentrador está al día consigo mismo, no con esa sede.
+    expect(escritas[0].conocimiento_origen_al_decidir).toBe("NO_CONSTA");
+    expect(escritas[0].dias_sin_noticias_origen).toBeNull();
   });
 
   test("un socio de la casa no inventa rastro", async () => {
@@ -77,5 +82,7 @@ describe("§5.2 · el rastro de la decisión en la web", () => {
     expect(escritas[0].decidido_con).toBeNull();
     expect(escritas[0].conocimiento_al_decidir).toBeNull();
     expect(escritas[0].dias_sin_noticias).toBeNull();
+    expect(escritas[0].conocimiento_origen_al_decidir).toBeNull();
+    expect(escritas[0].dias_sin_noticias_origen).toBeNull();
   });
 });

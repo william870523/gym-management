@@ -53,6 +53,35 @@ describe("sync de asistencia · el rastro de con qué se decidió", () => {
     expect(guardada.dias_sin_noticias).toBeNull();
   });
 
+  it("el segundo eje sube con el primero", async () => {
+    // Se añadió un día después que el primero, y este mapa es justo el sitio
+    // donde una columna nueva se pierde sin que nada dé error.
+    const guardada = await aplicar({
+      decidido_con: "CONCENTRADOR",
+      conocimiento_al_decidir: "AL_DIA",
+      dias_sin_noticias: 0,
+      conocimiento_origen_al_decidir: "A_CIEGAS",
+      dias_sin_noticias_origen: 3,
+    });
+
+    expect(guardada.conocimiento_origen_al_decidir).toBe("A_CIEGAS");
+    expect(guardada.dias_sin_noticias_origen).toBe(3);
+  });
+
+  it("«no consta» viaja como valor, no como hueco", async () => {
+    // NO_CONSTA lo escribió alguien que midió y no encontró; `null` es que
+    // nadie midió. Colapsarlos aquí borraría esa diferencia al subir.
+    const guardada = await aplicar({
+      decidido_con: "COPIA_LOCAL",
+      conocimiento_al_decidir: "AL_DIA",
+      dias_sin_noticias: 0,
+      conocimiento_origen_al_decidir: "NO_CONSTA",
+    });
+
+    expect(guardada.conocimiento_origen_al_decidir).toBe("NO_CONSTA");
+    expect(guardada.dias_sin_noticias_origen).toBeNull();
+  });
+
   it("cero días es un dato, no un hueco", async () => {
     // `dias_sin_noticias: 0` es «hablé hoy». Un mapeo con `|| null` lo
     // convertiría en «no consta» por ser un cero.

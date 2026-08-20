@@ -12,7 +12,12 @@ import {
     esVisitanteDeOtraSede,
 } from "../../../domain/acceso-multisede-policy";
 import { AsistenciaElegibilidadService } from "../../asistencia/asistencia-elegibilidad.service";
-import { RASTRO_DEL_CONCENTRADOR } from "../../../domain/conocimiento-de-la-copia-policy";
+import {
+    conocimientoDeLaSedeDeOrigen,
+    rastroDelConcentrador,
+} from "../../../domain/conocimiento-de-la-copia-policy";
+import { ultimaNoticiaDeLaSede } from "../../../infrastructure/sync/noticia-de-la-sede";
+import { prisma } from "../../../infrastructure/db/prismaClient";
 
 /** Rechazo de negocio, no fallo del sistema: se traduce a 409. */
 export class AsistenciaElegibilidadError extends Error {
@@ -50,6 +55,19 @@ export class CreateAsistenciaUseCase {
 
         // M4a — el socio de otra sede se decide con lo único que hay de él
         // aquí: su copia de solo lectura y su acceso multi-sede.
+        // §5.2, segundo eje — de cuándo es lo que se sabe del visitante. En la
+        // web decide el concentrador, que está al día consigo mismo; lo que no
+        // está garantizado es que la sede del socio haya hablado hoy, y sin
+        // medirlo el rastro afirmaría más de lo que consta.
+        const rastro = esPropio
+            ? null
+            : rastroDelConcentrador(
+                conocimientoDeLaSedeDeOrigen({
+                    ultimaNoticia: await this.ultimaNoticiaDelSocio(dto.ci, gymId),
+                    fechaNegocio,
+                }),
+            );
+
         const decision = esPropio
             ? decidirEntrada({
                 tieneEntradaAbierta: Boolean(entradaAbierta),
@@ -86,17 +104,35 @@ export class CreateAsistenciaUseCase {
             // el propio concentrador, así que no hay retraso que declarar: la
             // pregunta «¿cuánto hace que bajé datos?» no se le hace al origen.
             // En la entrada de un socio de la casa no hay nada que declarar.
-            decidido_con: esPropio ? null : RASTRO_DEL_CONCENTRADOR.decididoCon,
-            conocimiento_al_decidir: esPropio
-                ? null
-                : RASTRO_DEL_CONCENTRADOR.conocimiento,
-            dias_sin_noticias: esPropio
-                ? null
-                : RASTRO_DEL_CONCENTRADOR.diasSinNoticias
+            decidido_con: rastro?.decididoCon ?? null,
+            conocimiento_al_decidir: rastro?.conocimiento ?? null,
+            dias_sin_noticias: rastro?.diasSinNoticias ?? null,
+            conocimiento_origen_al_decidir: rastro?.conocimientoOrigen ?? null,
+            dias_sin_noticias_origen: rastro?.diasSinNoticiasOrigen ?? null
         };
 
         await this.asistenciaRepository.create(newAsistencia);
         return { asistencia: newAsistencia, creada: true };
+    }
+
+    /**
+     * Cuándo se supo por última vez de la sede del socio.
+     *
+     * Se pregunta por la sede **dueña**, no por la visitada: la que puede estar
+     * muda es la que tiene su ficha. Si el socio es de aquí no hay nada que
+     * medir, y se responde `null`, que se lee «no consta».
+     */
+    private async ultimaNoticiaDelSocio(
+        ci: string,
+        gymId: string,
+    ): Promise<Date | null> {
+        const copia = await prisma.clienteVisitante.findFirst({
+            where: { ci, is_deleted: false },
+            select: { gym_id_origen: true },
+        });
+        const origen = String(copia?.gym_id_origen ?? "").trim();
+        if (!origen || origen === gymId) return null;
+        return ultimaNoticiaDeLaSede(prisma as never, origen);
     }
 
     /**

@@ -113,7 +113,10 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
                 // que no sabía.
                 decidido_con: data.decidido_con ?? null,
                 conocimiento_al_decidir: data.conocimiento_al_decidir ?? null,
-                dias_sin_noticias: data.dias_sin_noticias ?? null
+                dias_sin_noticias: data.dias_sin_noticias ?? null,
+                conocimiento_origen_al_decidir:
+                    data.conocimiento_origen_al_decidir ?? null,
+                dias_sin_noticias_origen: data.dias_sin_noticias_origen ?? null
             },
             update: {
                 ci: data.ci,
@@ -132,7 +135,10 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
                 // que no sabía.
                 decidido_con: data.decidido_con ?? null,
                 conocimiento_al_decidir: data.conocimiento_al_decidir ?? null,
-                dias_sin_noticias: data.dias_sin_noticias ?? null
+                dias_sin_noticias: data.dias_sin_noticias ?? null,
+                conocimiento_origen_al_decidir:
+                    data.conocimiento_origen_al_decidir ?? null,
+                dias_sin_noticias_origen: data.dias_sin_noticias_origen ?? null
             }
             });
         });
@@ -293,7 +299,10 @@ export class PrismaAsistenciaRepository implements AsistenciaRepository {
                 // era visitante; el repositorio solo lo escribe.
                 decidido_con: data.decidido_con ?? null,
                 conocimiento_al_decidir: data.conocimiento_al_decidir ?? null,
-                dias_sin_noticias: data.dias_sin_noticias ?? null
+                dias_sin_noticias: data.dias_sin_noticias ?? null,
+                conocimiento_origen_al_decidir:
+                    data.conocimiento_origen_al_decidir ?? null,
+                dias_sin_noticias_origen: data.dias_sin_noticias_origen ?? null
             }
         });
     }

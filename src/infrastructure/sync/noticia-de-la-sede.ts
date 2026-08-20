@@ -81,3 +81,79 @@ export async function registrarNoticiaDeLaSede(
     return false;
   }
 }
+
+/** Lo mínimo que hace falta para leer cuándo se supo de una sede. */
+export interface LectorDeNoticias {
+  readonly device: {
+    findMany(args: {
+      where: { gym_id: string };
+      select: { last_login_at: true; last_seen_at: true; device_id: true };
+    }): Promise<
+      Array<{
+        device_id: string;
+        last_login_at: Date | null;
+        last_seen_at: Date | null;
+      }>
+    >;
+  };
+  readonly syncClientState: {
+    findMany(args: {
+      where: { device_id: { in: string[] } };
+    }): Promise<
+      Array<{
+        device_id: string;
+        last_upload_at: Date | null;
+        last_server_sync_at: Date | null;
+        last_seen_at: Date | null;
+      }>
+    >;
+  };
+}
+
+/**
+ * La última vez que se supo de una sede, por cualquiera de sus dispositivos.
+ *
+ * Mira las mismas cinco marcas que el semáforo de M5 —`device.last_login_at`,
+ * `device.last_seen_at` y las tres de `sync_client_state`— y se queda con la
+ * más reciente. Usar solo una daría falsos silencios: la subida no se llama
+ * cuando no hay nada que subir, y una sede tranquila parecería incomunicada.
+ *
+ * `null` significa **no consta**, no «lleva mucho»: una sede recién dada de
+ * alta, o cuyo escritorio nunca arrancó, no ha dado noticias nunca y eso no se
+ * puede convertir en un número de días.
+ */
+export async function ultimaNoticiaDeLaSede(
+  db: LectorDeNoticias,
+  gymId: string,
+): Promise<Date | null> {
+  const sede = String(gymId ?? "").trim();
+  if (!sede) return null;
+
+  const dispositivos = await db.device.findMany({
+    where: { gym_id: sede },
+    select: { device_id: true, last_login_at: true, last_seen_at: true },
+  });
+  if (dispositivos.length === 0) return null;
+
+  const estados = await db.syncClientState.findMany({
+    where: { device_id: { in: dispositivos.map((d) => d.device_id) } },
+  });
+  const porDispositivo = new Map(estados.map((e) => [e.device_id, e]));
+
+  const marcas = dispositivos.flatMap((dispositivo) => {
+    const estado = porDispositivo.get(dispositivo.device_id);
+    return [
+      dispositivo.last_login_at,
+      dispositivo.last_seen_at,
+      estado?.last_upload_at ?? null,
+      estado?.last_server_sync_at ?? null,
+      estado?.last_seen_at ?? null,
+    ];
+  });
+
+  const vivas = marcas.filter(
+    (f): f is Date => f instanceof Date && !Number.isNaN(f.getTime()),
+  );
+  if (vivas.length === 0) return null;
+  return vivas.reduce((mayor, fecha) => (fecha > mayor ? fecha : mayor));
+}

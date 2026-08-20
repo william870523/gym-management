@@ -163,6 +163,20 @@ describe("consulta viva del visitante · responde la membresía, no la copia", (
     expect(salida.body.membresia_estado).toBe("ACTIVA");
   });
 
+  test("dice de cuándo es: la última noticia de la sede del socio", async () => {
+    // Sin esto, quien pregunta da por comprobado lo que le contestan. El
+    // concentrador no inventa el estado del visitante: lo sabe porque su sede
+    // lo subió, y si esa lleva días muda la respuesta es una foto vieja.
+    const { c, salida } = contexto(VISITADA);
+    await getVisitanteEnVivo(c);
+
+    expect(salida.body).toHaveProperty("sede_origen_ultima_noticia");
+    // Se responde el instante, no una clasificación en días: el mostrador la
+    // hace contra SU día de negocio, que puede no ser el del concentrador.
+    const noticia = salida.body.sede_origen_ultima_noticia;
+    expect(noticia === null || !Number.isNaN(Date.parse(noticia))).toBeTrue();
+  });
+
   test("una sede no pregunta por sus propios socios", async () => {
     // Para esos tiene la ficha; contestar aquí sería un camino paralelo al de
     // la puerta de casa, y dos caminos acaban diciendo cosas distintas.

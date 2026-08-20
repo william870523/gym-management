@@ -64,6 +64,13 @@ export class ApplyAsistenciaEventUseCase {
             dias_sin_noticias:
                 typeof payload.dias_sin_noticias === "number"
                     ? payload.dias_sin_noticias
+                    : null,
+            conocimiento_origen_al_decidir: textoONulo(
+                payload.conocimiento_origen_al_decidir,
+            ),
+            dias_sin_noticias_origen:
+                typeof payload.dias_sin_noticias_origen === "number"
+                    ? payload.dias_sin_noticias_origen
                     : null
         };
     }

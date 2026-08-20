@@ -15,6 +15,14 @@
  * otro sitio. La instalación pregunta aquí justo antes de dejar entrar y decide
  * con la respuesta; si no llega a tiempo, decide con su copia y lo declara.
  *
+ * ## Y de cuándo es
+ *
+ * La respuesta lleva **cuándo se supo por última vez de la sede del socio**.
+ * Sin eso, una sede al día se cree autorizada a afirmar: pregunta al
+ * concentrador, le contestan, y da por comprobado un dato que la sede dueña
+ * subió hace tres días. Es un eje distinto del «¿he hablado con la red hoy?» de
+ * quien pregunta, y falla por su cuenta.
+ *
  * ## De dónde sale la respuesta
  *
  * La identidad y la sede dueña salen de `cliente_visitante`; **el estado de la
@@ -35,6 +43,7 @@
 import type { Context } from "hono";
 import { trustedClock } from "../../../config/trusted-clock";
 import { prisma } from "../../db/prismaClient";
+import { ultimaNoticiaDeLaSede } from "../../sync/noticia-de-la-sede";
 
 export async function getVisitanteEnVivo(c: Context) {
   const sesion = c.get("auth") as { gymId?: string } | undefined;
@@ -83,6 +92,17 @@ export async function getVisitanteEnVivo(c: Context) {
     select: { estado: true, fecha_fin: true },
   });
 
+  // **Y de cuándo es esa verdad.** El concentrador no inventa el estado del
+  // socio: lo sabe porque su sede lo subió. Si esa sede lleva días muda, esto
+  // sigue siendo lo más reciente que existe y aun así puede estar viejo, y quien
+  // pregunta —una sede que quizá está perfectamente al día— no tiene forma de
+  // saberlo. Se responde el instante, no una clasificación: quien decide la
+  // convierte en días contra **su** día de negocio, que puede no ser este.
+  const ultimaNoticiaOrigen = await ultimaNoticiaDeLaSede(
+    prisma as never,
+    copia.gym_id_origen,
+  );
+
   return c.json({
     ci,
     existe: true,
@@ -92,6 +112,11 @@ export async function getVisitanteEnVivo(c: Context) {
     // El plus se responde con su fecha, no con un «vigente»: quien decide es la
     // instalación, contra SU día de negocio, que puede no ser el de aquí.
     acceso_vigente_hasta: acceso?.vigente_hasta ?? null,
+    // `null` es «no consta», no «hace mucho»: una sede cuyo escritorio nunca
+    // arrancó no ha dado noticias nunca, y eso no se puede contar en días.
+    sede_origen_ultima_noticia: ultimaNoticiaOrigen
+      ? ultimaNoticiaOrigen.toISOString()
+      : null,
     consultado_at: trustedClock.nowUtc().toISOString(),
   });
 }

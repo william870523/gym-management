@@ -1664,6 +1664,20 @@ model Asistencia {
   conocimiento_al_decidir String?  @db.VarChar(20)
   dias_sin_noticias       Int?
 
+  /// §5.2, segundo eje — cuánto hacía que se sabía de **la sede del socio**.
+  ///
+  /// `conocimiento_al_decidir` mide la distancia entre quien decide y el
+  /// concentrador; esta mide la que hay entre el concentrador y la sede dueña
+  /// del visitante. Una sede perfectamente al día puede estar decidiendo con
+  /// una foto de hace tres días si la del socio lleva ese tiempo muda, y esa
+  /// fila se leía como comprobada.
+  ///
+  /// `NO_CONSTA` no es `AL_DIA`: solo se mide cuando el concentrador contesta,
+  /// porque la copia no trae esta información. Migración:
+  /// `migrate:asistencia-noticia-origen`.
+  conocimiento_origen_al_decidir String?  @db.VarChar(20)
+  dias_sin_noticias_origen       Int?
+
   /// M4a — la relación se conserva porque las lecturas de asistencia hacen
   /// `include: { cliente }` para pintar nombre y foto, pero **la clave foránea
   /// ya no existe en ninguna de las dos bases**: un socio con acceso multi-sede

@@ -23,4 +23,10 @@ export interface Asistencia {
     conocimiento_al_decidir?: string | null;
     /** El hecho del que sale ese juicio. `null` si nunca se sincronizó. */
     dias_sin_noticias?: number | null;
+    /**
+     * Segundo eje: cuánto hacía que se sabía de la **sede del socio**.
+     * `NO_CONSTA` cuando no se pudo medir, que no es estar al día.
+     */
+    conocimiento_origen_al_decidir?: string | null;
+    dias_sin_noticias_origen?: number | null;
 }

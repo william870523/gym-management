@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit",
     "migrate:asistencia-pausa": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-pausa.ts",
     "migrate:asistencia-rastro-decision": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-rastro-decision.ts",
+    "migrate:asistencia-noticia-origen": "bun --preload ./src/config/tz-preload.ts scripts/migrate-asistencia-noticia-origen.ts",
     "migrate:multi-sede": "bun --preload ./src/config/tz-preload.ts scripts/migrate-multi-sede.ts",
     "grant:dueno": "bun --preload ./src/config/tz-preload.ts scripts/grant-platform-owner.ts",
     "migrate:memberships-phase1": "bun --preload ./src/config/tz-preload.ts scripts/migrate-memberships-phase1.ts",

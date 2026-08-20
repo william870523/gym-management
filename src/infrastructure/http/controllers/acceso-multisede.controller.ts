@@ -15,6 +15,10 @@
 import type { Context } from "hono";
 import { randomUUID } from "crypto";
 
+import {
+  conocimientoDeLaSede,
+  type ConocimientoDeLaSede,
+} from "../../../domain/conocimiento-de-la-copia-policy";
 import { prisma } from "../../db/prismaClient";
 import { audienciasDelCobroPorCuentaAjena } from "../../../application/use-cases/sync/sync-event-contract";
 import { trustedClock } from "../../../config/trusted-clock";
@@ -175,15 +179,42 @@ export async function getAccesoMultisedeCliente(c: Context) {
  * Devuelve también a quien tiene el plus vencido, marcado, para que el
  * mostrador pueda decir por qué en vez de no encontrar a nadie.
  */
+/**
+ * La frescura, en `snake_case` como el resto de la API.
+ *
+ * La política la devuelve en camelCase porque es un objeto de dominio, y
+ * pasarla tal cual a `c.json` publicaba `diasSinNoticias` mientras el cliente
+ * leía `dias_sin_noticias`: la pantalla habría enseñado el aviso sin los días.
+ * Es el mismo tropiezo del detalle por sede en M6, y se corrige donde toca —el
+ * borde—, no cambiando el dominio.
+ */
+function conocimientoPublico(c: ConocimientoDeLaSede) {
+  return {
+    frescura: c.frescura,
+    dias_sin_noticias: c.diasSinNoticias,
+    ultima_sincronizacion: c.ultimaSincronizacion,
+    advertencia: c.advertencia,
+  };
+}
+
 export async function listarVisitantes(c: Context) {
   const sesion = auth(c);
   if (!sesion?.gymId) return c.json({ error: "La sesión no identifica gimnasio." }, 403);
   const hoy = await fechaNegocio(prisma, sesion.gymId);
+  // §5.2: aquí el dato es de primera mano. El concentrador no descarga la copia
+  // de nadie: la tiene porque la escribió la sede de origen contra él. Se
+  // publica igual que en la instalación —misma clave, misma forma— para que la
+  // pantalla no tenga que saber contra cuál de las dos APIs está hablando.
+  const conocimiento = conocimientoDeLaSede({
+    ultimaSincronizacion: trustedClock.nowUtc(),
+    fechaNegocio: hoy,
+  });
+
   const copias = await prisma.clienteVisitante.findMany({
     where: { is_deleted: false, gym_id_origen: { not: sesion.gymId } },
     orderBy: [{ apellidos: "asc" }, { nombres: "asc" }],
   });
-  if (copias.length === 0) return c.json({ visitantes: [] });
+  if (copias.length === 0) return c.json({ visitantes: [], conocimiento: conocimientoPublico(conocimiento) });
 
   const accesos = await prisma.clienteAccesoMultisede.findMany({
     where: { ci: { in: copias.map((copia) => copia.ci) }, is_deleted: false },
@@ -191,6 +222,7 @@ export async function listarVisitantes(c: Context) {
   const accesoPorCi = new Map(accesos.map((acceso) => [acceso.ci, acceso]));
 
   return c.json({
+    conocimiento: conocimientoPublico(conocimiento),
     visitantes: copias.map((copia) => ({
       ci: copia.ci,
       nombres: copia.nombres,
